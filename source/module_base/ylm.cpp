@@ -63,7 +63,7 @@ void Ylm::get_ylm_real( const int &Lmax, const ModuleBase::Vector3<double> &vec,
 	//===============================
 	// NAME : p(Legendre Polynomials)
 	//===============================
-	double p[20][20];
+	static double p[20][20];
 	assert(Lmax <= 20);
 
 	int m=0;
@@ -182,8 +182,8 @@ void Ylm::get_ylm_real( const int &Lmax, const ModuleBase::Vector3<double> &vec,
 	//===============================
 	// NAME : p(Legendre Polynomials)
 	//===============================
-	double p[20][20];
-	double dp[20][20];
+	static double p[20][20];
+	static double dp[20][20];
 	assert(Lmax <= 20);
 
 	int m = 0;
@@ -1327,7 +1327,7 @@ void Ylm::set_coefficients(void)
 	return;
 }
 
-
+/*
 void Ylm::test1 (void)
 {
 	ModuleBase::Vector3<double> R (20.0, 0.0, 0.0);
@@ -1364,8 +1364,8 @@ void Ylm::test1 (void)
 	}
 	return;
 }
-
-
+*/
+/*
 void Ylm::test2 (void)
 {
 	ModuleBase::Vector3<double> R (0.1,-0.2,0.5);
@@ -1394,7 +1394,7 @@ void Ylm::test2 (void)
 	}
 	return;
 }
-	
+*/	
 	
 void Ylm::rlylm
 (
@@ -1746,7 +1746,7 @@ void Ylm::rlylm
 	return;
 }
 
-
+/*
 void Ylm::test(void)
 {
 	ModuleBase::Vector3<double> R(0.0, 0.0, 1.0);
@@ -1833,7 +1833,7 @@ void Ylm::test(void)
 
 	return;
 }
-
+*/
 
 void Ylm::ZEROS(double u[], const int& n)
 {
