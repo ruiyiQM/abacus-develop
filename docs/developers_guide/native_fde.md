@@ -36,6 +36,22 @@ Exc_nad = Exc[rho_A + rho_B + rho_core,A + rho_core,B]
         - Exc[rho_B + rho_core,B].
 ```
 
+`KineticFunctional::Lc94Pw91k` is the Lembarki-Chermette 1994
+reparameterization of the PW91 enhancement factor, commonly called PW91k in
+FDE work. The implementation uses the published/Libxc LC94 parameters and the
+spin-scaling identity
+
+```text
+Ts[rho_alpha, rho_beta]
+  = 1/2 Ts[2 rho_alpha] + 1/2 Ts[2 rho_beta].
+```
+
+RP2 also provides Thomas-Fermi and a Dirac-exchange nonadditive evaluator for
+unit and variational-derivative tests. Dirac exchange is not the production XC
+target. The production PBE nonadditive-XC adapter is introduced with the
+ABACUS potential integration, where it can share ABACUS grid conventions
+without changing the process-wide XC functional.
+
 ## Pseudopotential and AO-subspace boundary
 
 An environment atom contributes both a local pseudopotential and, in general,
