@@ -70,6 +70,14 @@ but environment nuclear operators are not removed. The active AO list must be
 strictly increasing, unique, nonempty, and expressed in the authoritative
 supersystem AO order. `ActiveAoProjection` encodes and tests this boundary.
 
+`SubspaceSolver` implements the first executable form of this contract for a
+replicated real Gamma-point matrix. It solves the projected generalized
+eigenproblem with LAPACK, constructs the spin-channel density as `C f C^T`,
+and expands that density into the supersystem AO order with exactly zero rows
+and columns on environment AOs. Electron counts are checked with `Tr(P S)`.
+Distributed ScaLAPACK/ELPA projection is deliberately deferred until the
+serial scientific path is validated.
+
 ## Canonical total energy
 
 The total energy is assembled once from named terms, rather than by adding an

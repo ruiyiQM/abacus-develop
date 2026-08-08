@@ -17,3 +17,8 @@ AddTest(
   TARGET MODULE_FDE_semilocal_functional
   SOURCES fde_semilocal_functional_test.cpp ../fde_semilocal_functional.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_subspace_solver
+  SOURCES fde_subspace_solver_test.cpp ../fde_subspace_solver.cpp ../fde_ao_projection.cpp
+)
