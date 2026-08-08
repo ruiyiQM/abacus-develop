@@ -4,8 +4,10 @@ add_subdirectory(module_dftu)
 add_subdirectory(module_deltaspin)
 
 if(ENABLE_LCAO)
+    add_subdirectory(module_fde)
     add_subdirectory(module_operator_lcao)
     list(APPEND objects
+        ${FDE_LCAO_SOURCES}
         hamilt_lcao.cpp
         module_operator_lcao/operator_lcao.cpp
         module_operator_lcao/veff_lcao.cpp
@@ -79,5 +81,4 @@ if(ENABLE_LCAO)
     endif()
 
 endif()
-
 
