@@ -1,9 +1,12 @@
 set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_ao_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_density_artifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_energy_ledger.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_semilocal_functional.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_subspace_solver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pot_fde.cpp
     PARENT_SCOPE
 )
 

@@ -94,6 +94,13 @@ The ledger must retain every term in Rydberg and must be independently
 recomputable from persisted subsystem artifacts. No SCF iteration may mutate
 `PARAM`, `GlobalV`, or `GlobalC` to select a fragment or state.
 
+`PotFde` is a dynamic LCAO potential component. It accepts the frozen Hartree
+potential as explicit data, evaluates LC94/TF nonadditive kinetic terms, and
+obtains nonadditive XC from an injected provider. It never adds a nuclear
+potential. Its component energy is the cross Hartree plus nonadditive kinetic
+and XC correction used during the active SCF; this is diagnostic and is not a
+replacement for `CanonicalEnergy`, which sums the complete named ledger once.
+
 ## Execution and provenance
 
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,

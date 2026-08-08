@@ -22,3 +22,13 @@ AddTest(
   TARGET MODULE_FDE_subspace_solver
   SOURCES fde_subspace_solver_test.cpp ../fde_subspace_solver.cpp ../fde_ao_projection.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_energy_ledger
+  SOURCES fde_energy_ledger_test.cpp ../fde_energy_ledger.cpp
+)
+
+AddTest(
+  TARGET MODULE_FDE_potential
+  SOURCES fde_potential_test.cpp ../fde_potential_evaluator.cpp ../fde_semilocal_functional.cpp
+)
