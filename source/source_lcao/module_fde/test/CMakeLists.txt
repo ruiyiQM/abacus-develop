@@ -33,6 +33,14 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_electronic_coupling
+  SOURCES fde_electronic_coupling_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+    ../fde_electronic_coupling.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_semilocal_functional
   SOURCES fde_semilocal_functional_test.cpp ../fde_semilocal_functional.cpp
 )

@@ -185,6 +185,20 @@ to different fragments are intentionally allowed to overlap because that
 overlap is part of the antisymmetrized-product determinant used by FDE-diab.
 The separate density artifact remains sufficient for freeze-thaw restarts.
 
+`ElectronicCoupling` implements the RP12 determinant algebra. For each spin it
+forms `M_ij = C_i^T S_AO C_j`, evaluates the determinant overlap, and constructs
+the normalized transition density `P_ij = C_j M_ij^-1 C_i^T`. The state overlap
+is normalized by the two determinant self norms. The injected transition-energy
+provider evaluates `E[rho_ij]`; both directions are evaluated and averaged so
+the returned real Γ-point Hamiltonian element is explicitly symmetric:
+
+```text
+H_ij = 1/2 S_ij (E[rho_ij] + E[rho_ji]).
+```
+
+Singular occupied-overlap matrices are rejected rather than regularized because
+they make the transition density undefined.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -199,6 +213,7 @@ The separate density artifact remains sufficient for freeze-thaw restarts.
 - RP9: explicit ABACUS Potential/Gint bridge and Libxc-PBE provider.
 - RP10: arbitrary-fragment freeze-thaw, checkpoint, and canonical energy data.
 - RP11: occupied-orbital and diabatic-determinant artifacts.
+- RP12: determinant overlap, transition density, and electronic coupling.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state
