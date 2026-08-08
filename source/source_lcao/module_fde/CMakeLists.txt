@@ -1,6 +1,7 @@
 set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gamma_backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gint_integrator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_analytic_force.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_ao_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_density_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_determinant_artifact.cpp

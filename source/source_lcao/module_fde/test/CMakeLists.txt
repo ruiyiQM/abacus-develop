@@ -16,6 +16,14 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_analytic_force
+  SOURCES fde_analytic_force_test.cpp
+    ../fde_analytic_force.cpp
+    ../fde_potential_evaluator.cpp
+    ../fde_semilocal_functional.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_state
   SOURCES fde_state_test.cpp ../fde_state.cpp
 )

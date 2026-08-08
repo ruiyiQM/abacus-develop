@@ -1,6 +1,7 @@
 #ifndef FDE_ABACUS_GAMMA_BACKEND_H
 #define FDE_ABACUS_GAMMA_BACKEND_H
 
+#include "fde_analytic_force.h"
 #include "fde_one_way_scf.h"
 
 #include <cstddef>
@@ -32,6 +33,12 @@ class GammaGridIntegrator
     virtual void density_to_grid(const std::vector<hamilt::HContainer<double>*>& density_matrices,
                                  const int spin_channels,
                                  double** density_bohr3) const = 0;
+
+    virtual std::vector<double> local_potential_force(
+        const std::vector<const double*>& potential_ry,
+        const std::vector<hamilt::HContainer<double>*>& density_matrices,
+        int spin_channels,
+        std::size_t atom_count) const = 0;
 };
 
 /** Real ABACUS Gint implementation of GammaGridIntegrator. */
@@ -44,6 +51,12 @@ class AbacusGintGammaIntegrator : public GammaGridIntegrator
     void density_to_grid(const std::vector<hamilt::HContainer<double>*>& density_matrices,
                          const int spin_channels,
                          double** density_bohr3) const override;
+
+    std::vector<double> local_potential_force(
+        const std::vector<const double*>& potential_ry,
+        const std::vector<hamilt::HContainer<double>*>& density_matrices,
+        int spin_channels,
+        std::size_t atom_count) const override;
 };
 
 /**
@@ -53,7 +66,8 @@ class AbacusGintGammaIntegrator : public GammaGridIntegrator
  * deliberately rejects a distributed 2D-block AO container. A later distributed
  * driver can replace the dense contract without changing the FDE equations.
  */
-class AbacusGammaBackend : public OneWayScfBackend
+class AbacusGammaBackend : public OneWayScfBackend,
+                           public LocalPotentialForceBackend
 {
   public:
     AbacusGammaBackend(const hamilt::HContainer<double>& gamma_structure,
@@ -68,6 +82,12 @@ class AbacusGammaBackend : public OneWayScfBackend
         const SpinAoMatrix& density_matrices,
         const std::size_t full_ao_dimension,
         const UniformGrid& grid) const override;
+
+    std::vector<double> force_from_local_potential(
+        const SpinPotential& potential,
+        const SpinAoMatrix& density_matrix,
+        std::size_t full_ao_dimension,
+        std::size_t atom_count) const override;
 
   private:
     void validate_ao_contract(const std::size_t full_ao_dimension) const;

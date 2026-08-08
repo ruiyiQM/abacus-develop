@@ -41,6 +41,29 @@ class RecordingGridIntegrator : public fde::GammaGridIntegrator
                 = density_matrices[spin]->get_atom_pair(1, 1).get_HR_values(0).get_value(0, 0);
         }
     }
+
+    std::vector<double> local_potential_force(
+        const std::vector<const double*>& potential_ry,
+        const std::vector<hamilt::HContainer<double>*>& density_matrices,
+        const int spin_channels,
+        const std::size_t atom_count) const override
+    {
+        EXPECT_EQ(spin_channels, 2);
+        EXPECT_EQ(atom_count, 2);
+        std::vector<double> force(3 * atom_count, 0.0);
+        for (int spin = 0; spin < spin_channels; ++spin)
+        {
+            force[0]
+                += potential_ry[spin][0]
+                   * density_matrices[spin]->get_atom_pair(0, 0)
+                         .get_HR_values(0).get_value(0, 0);
+            force[3]
+                += potential_ry[spin][1]
+                   * density_matrices[spin]->get_atom_pair(1, 1)
+                         .get_HR_values(0).get_value(0, 0);
+        }
+        return force;
+    }
 };
 
 hamilt::HContainer<double> gamma_structure()
@@ -92,4 +115,27 @@ TEST(FdeAbacusGammaBackend, RejectsMismatchedDenseAoContract)
 
     EXPECT_THROW(backend.embedding_potential_matrix({{1.0, 2.0}, {3.0, 4.0}}, 3),
                  std::invalid_argument);
+}
+
+TEST(FdeAbacusGammaBackend, ContractsLocalPotentialForceThroughGammaHContainer)
+{
+    hamilt::HContainer<double> structure = gamma_structure();
+    const std::shared_ptr<const fde::GammaGridIntegrator> integrator(
+        new RecordingGridIntegrator);
+    const fde::AbacusGammaBackend backend(structure, 2, integrator);
+
+    const std::vector<double> force
+        = backend.force_from_local_potential(
+            {{2.0, 3.0}, {5.0, 7.0}},
+            {{0.8, 0.1, 0.1, 0.2}, {0.6, 0.0, 0.0, 0.4}},
+            2,
+            2);
+
+    ASSERT_EQ(force.size(), 6);
+    EXPECT_NEAR(force[0], 4.6, 1.0e-14);
+    EXPECT_DOUBLE_EQ(force[1], 0.0);
+    EXPECT_DOUBLE_EQ(force[2], 0.0);
+    EXPECT_NEAR(force[3], 3.4, 1.0e-14);
+    EXPECT_DOUBLE_EQ(force[4], 0.0);
+    EXPECT_DOUBLE_EQ(force[5], 0.0);
 }

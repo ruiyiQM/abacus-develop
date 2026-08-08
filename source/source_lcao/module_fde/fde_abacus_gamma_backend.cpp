@@ -144,4 +144,41 @@ SpinDensity AbacusGammaBackend::density_from_ao_matrices(
     return result;
 }
 
+std::vector<double> AbacusGammaBackend::force_from_local_potential(
+    const SpinPotential& potential,
+    const SpinAoMatrix& density_matrix,
+    const std::size_t full_ao_dimension,
+    const std::size_t atom_count) const
+{
+    this->validate_ao_contract(full_ao_dimension);
+    const std::size_t matrix_size = full_ao_dimension * full_ao_dimension;
+    if (atom_count == 0 || potential.alpha_ry.size() != local_grid_size_
+        || potential.beta_ry.size() != local_grid_size_
+        || density_matrix.alpha.size() != matrix_size
+        || density_matrix.beta.size() != matrix_size)
+    {
+        throw std::invalid_argument(
+            "FDE local-potential force inputs do not match the ABACUS backend");
+    }
+
+    hamilt::HContainer<double> alpha(*gamma_structure_);
+    hamilt::HContainer<double> beta(*gamma_structure_);
+    dense_to_container(density_matrix.alpha, full_ao_dimension, alpha);
+    dense_to_container(density_matrix.beta, full_ao_dimension, beta);
+    std::vector<hamilt::HContainer<double>*> matrices;
+    matrices.push_back(&alpha);
+    matrices.push_back(&beta);
+    std::vector<const double*> potentials;
+    potentials.push_back(potential.alpha_ry.data());
+    potentials.push_back(potential.beta_ry.data());
+    const std::vector<double> force
+        = integrator_->local_potential_force(potentials, matrices, 2, atom_count);
+    if (force.size() != 3 * atom_count)
+    {
+        throw std::runtime_error(
+            "FDE Gint local-potential force returned an invalid Cartesian array");
+    }
+    return force;
+}
+
 } // namespace fde

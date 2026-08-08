@@ -3,6 +3,7 @@
 
 #include "fde_density_artifact.h"
 #include "fde_potential_evaluator.h"
+#include "fde_spin_ao_matrix.h"
 #include "fde_subspace_solver.h"
 
 #include <cstddef>
@@ -10,12 +11,6 @@
 
 namespace fde
 {
-
-struct SpinAoMatrix
-{
-    std::vector<double> alpha;
-    std::vector<double> beta;
-};
 
 class OneWayScfBackend
 {

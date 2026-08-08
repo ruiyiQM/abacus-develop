@@ -222,6 +222,35 @@ inter-fragment block pair. Diagonal energies remain the canonical full FDE
 energies; an injected transition-energy provider must carry any frozen
 environment contribution omitted from the `M` determinant.
 
+`DiagonalFdeAnalyticForce` implements the RP15 force correction for a
+converged diagonal quasi-diabatic state. The driver supplies an ordinary
+ABACUS base force containing the kinetic, external local/nonlocal, overlap
+Pulay, ion-ion, and other non-embedding terms exactly once. RP15 adds three
+separately reported density-dependent contributions: cross Hartree,
+nonadditive semilocal kinetic, and nonadditive semilocal XC. For each term the
+functional potential is contracted with every fragment density matrix through
+the ABACUS-sign `LocalPotentialForceBackend`; `AbacusGammaBackend` implements
+that contraction with `ModuleGint::cal_gint_fvl`.
+
+For more than two fragments the implementation uses a deterministic
+telescoping construction,
+
+```text
+F[rho_1 + ... + rho_N] - sum_I F[rho_I]
+  = sum_(J=2)^N (F[rho_1 + ... + rho_J]
+                 - F[rho_1 + ... + rho_(J-1)] - F[rho_J]).
+```
+
+The corresponding aggregate and new-fragment potentials are both contracted
+at every step. This gives the derivative of the N-fragment nonadditive energy,
+not the derivative of a two-fragment model in which all environment fragments
+were merged. Pairwise Hartree reciprocity is checked before forces are
+accepted. The formula assumes a fully converged variational freeze-thaw state
+and a fixed molecular Gamma grid; RP8 remains the mandatory independent
+finite-difference validation path. RP15 does not implement derivatives of
+off-diagonal electronic couplings or state overlaps, hybrid-exchange response,
+spinor forces, stress, or periodic k-point forces.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -238,6 +267,8 @@ environment contribution omitted from the `M` determinant.
 - RP11: occupied-orbital and diabatic-determinant artifacts.
 - RP12: determinant overlap, transition density, and electronic coupling.
 - RP13: nonorthogonal multi-state diagonalization and root tracking.
+- RP14: explicit `FDE-diab(K,L,M)` multi-state/multi-fragment assembly.
+- RP15: semilocal diagonal-state analytic FDE force correction and Gint bridge.
 - RP14: auditable multi-fragment `FDE-diab(K,L,M)` matrix assembly.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
