@@ -129,6 +129,16 @@ checkpoint contains both density artifacts, the full energy ledger, cycle
 metadata, and residuals; restart is therefore defined only at complete-cycle
 boundaries, where the two artifact cycle numbers are equal.
 
+`TwoStatePesScan` owns the RP7 geometry axis and executes exactly two explicit
+state definitions at each point. A state definition fixes each fragment's
+alpha and beta populations. Warm starts are held in two separate slots, so a
+state can inherit only from itself at the preceding geometry. Every returned
+point must contain a converged RP6 checkpoint, matching geometry and state
+identities, unchanged populations, and a localization score above the chosen
+threshold. The deterministic PES table preserves both state labels even when
+their energies cross and reports the minimum gap, crossing brackets, adjacent
+energy changes, and changes in finite-difference slope as diagnostics.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
