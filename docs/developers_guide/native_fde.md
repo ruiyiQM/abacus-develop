@@ -199,6 +199,16 @@ H_ij = 1/2 S_ij (E[rho_ij] + E[rho_ji]).
 Singular occupied-overlap matrices are rejected rather than regularized because
 they make the transition density undefined.
 
+`NonorthogonalMultistateSolver` implements RP13. It solves `H B = S B E` by
+canonical orthogonalization: eigenvectors of `S` below an explicit cutoff are
+discarded, the Hamiltonian is diagonalized in the retained orthonormal space,
+and coefficients are transformed back to the diabatic basis. The reported
+residual is evaluated in that retained space. Between geometry points, root
+tracking constructs adiabatic cross overlaps from a caller-supplied diabatic
+cross-overlap matrix, solves the global maximum-overlap assignment, reorders
+energies, and phase-aligns coefficient columns. A minimum matched-overlap gate
+turns loss of a branch into an explicit failure.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -214,6 +224,7 @@ they make the transition density undefined.
 - RP10: arbitrary-fragment freeze-thaw, checkpoint, and canonical energy data.
 - RP11: occupied-orbital and diabatic-determinant artifacts.
 - RP12: determinant overlap, transition density, and electronic coupling.
+- RP13: nonorthogonal multi-state diagonalization and root tracking.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state

@@ -11,6 +11,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_energy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_freeze_thaw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_multistate_solver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_one_way_scf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_pes_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp

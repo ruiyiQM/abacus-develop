@@ -91,6 +91,11 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_multistate_solver
+  SOURCES fde_multistate_solver_test.cpp ../fde_multistate_solver.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_pes_scan
   SOURCES fde_pes_scan_test.cpp
     ../fde_pes_scan.cpp
