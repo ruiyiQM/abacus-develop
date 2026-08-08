@@ -166,6 +166,15 @@ provider as unavailable and fails explicitly if it is selected. General-cell,
 distributed-grid PBE must use the later native PW-gradient driver rather than
 this replicated-grid adapter.
 
+`MultiFragmentFreezeThawWorkflow` is the RP10 N-fragment outer loop. It stores
+fragments in a deterministic vector, requires the caller to provide a complete
+permutation of fragment indices for every sweep, and passes all other fragment
+artifacts to the active update. Convergence is tested only after the complete
+permutation has run. Its variable-length checkpoint and
+`MultiFragmentEnergyLedger` retain one orbital-kinetic and one nonlocal-external
+term per fragment while shared density terms are recorded exactly once. The
+RP6 two-fragment API remains available for the already validated RP7/RP8 path.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -178,6 +187,7 @@ this replicated-grid adapter.
 - RP7: two-state geometry scan and PES diagnostics.
 - RP8: finite-difference derivative of the fully converged workflow energy.
 - RP9: explicit ABACUS Potential/Gint bridge and Libxc-PBE provider.
+- RP10: arbitrary-fragment freeze-thaw, checkpoint, and canonical energy data.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state

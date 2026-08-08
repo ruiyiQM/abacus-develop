@@ -68,6 +68,14 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_multi_fragment_freeze_thaw
+  SOURCES fde_multi_fragment_freeze_thaw_test.cpp
+    ../fde_density_artifact.cpp
+    ../fde_multi_fragment_energy.cpp
+    ../fde_multi_fragment_freeze_thaw.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_pes_scan
   SOURCES fde_pes_scan_test.cpp
     ../fde_pes_scan.cpp

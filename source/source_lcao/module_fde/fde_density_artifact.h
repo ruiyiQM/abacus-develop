@@ -45,6 +45,9 @@ class DensityArtifactIO
                                          const FrozenDensityArtifact& second,
                                          const double electron_tolerance);
 
+    static void validate_compatible_set(const std::vector<FrozenDensityArtifact>& artifacts,
+                                        const double electron_tolerance);
+
     static void write(std::ostream& output, const FrozenDensityArtifact& artifact);
 
     static FrozenDensityArtifact read(std::istream& input,

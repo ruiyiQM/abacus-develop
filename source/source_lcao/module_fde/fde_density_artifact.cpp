@@ -5,6 +5,7 @@
 #include <istream>
 #include <limits>
 #include <ostream>
+#include <set>
 #include <stdexcept>
 
 namespace fde
@@ -145,6 +146,29 @@ void DensityArtifactIO::validate_compatible_pair(const FrozenDensityArtifact& fi
         || first.grid_z != second.grid_z || first.cell_volume_bohr3 != second.cell_volume_bohr3)
     {
         throw std::invalid_argument("FDE density artifacts have incompatible real-space grids");
+    }
+}
+
+void DensityArtifactIO::validate_compatible_set(
+    const std::vector<FrozenDensityArtifact>& artifacts,
+    const double electron_tolerance)
+{
+    if (artifacts.size() < 2)
+    {
+        throw std::invalid_argument("FDE compatible artifact set requires at least two fragments");
+    }
+    std::set<std::string> labels;
+    DensityArtifactIO::validate(artifacts[0], electron_tolerance);
+    labels.insert(artifacts[0].fragment_label);
+    for (std::size_t index = 1; index < artifacts.size(); ++index)
+    {
+        DensityArtifactIO::validate_compatible_pair(artifacts[0],
+                                                    artifacts[index],
+                                                    electron_tolerance);
+        if (!labels.insert(artifacts[index].fragment_label).second)
+        {
+            throw std::invalid_argument("FDE artifact set contains a duplicate fragment label");
+        }
     }
 }
 
