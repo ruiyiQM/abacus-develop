@@ -1,9 +1,12 @@
 set(FDE_LCAO_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gamma_backend.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gint_integrator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_ao_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_density_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_energy_ledger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_finite_difference.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_freeze_thaw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_one_way_scf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_pes_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp

@@ -72,6 +72,14 @@ class Potential : public PotBase
     void init_pot(const Charge* const chg);
     // initialize potential components before SCF
     void pot_register(const std::vector<std::string>& components_list);
+    /**
+     * @brief Append an explicitly constructed potential component.
+     *
+     * This is intended for components whose configuration cannot be represented
+     * by the legacy string registry. Call it after pot_register(); ownership is
+     * transferred to Potential.
+     */
+    void append_component(std::unique_ptr<PotBase> component);
     // update potential from current charge
     void update_from_charge(const Charge* const chg, const UnitCell* const ucell);
     // interface for SCF-converged, etxc vtxc for Energy, vnew for force_scc

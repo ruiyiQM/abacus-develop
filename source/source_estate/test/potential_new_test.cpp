@@ -309,6 +309,31 @@ TEST_F(PotentialNewTest, PotRegisterReplacesAndDestroysComponents)
     EXPECT_EQ(elecstate::MockPotComponent::destroyed, 3);
 }
 
+TEST_F(PotentialNewTest, AppendComponentTransfersOwnershipAndRunsInLifecycle)
+{
+    smooth_basis->nrxx = 8;
+    create_potential(smooth_basis.get(), smooth_basis.get());
+    potential->pot_register({"fixed"});
+    potential->append_component(
+        std::unique_ptr<elecstate::PotBase>(new elecstate::MockPotComponent("dynamic", 8)));
+
+    Charge charge;
+    potential->update_from_charge(&charge, ucell.get());
+    EXPECT_EQ(elecstate::MockPotComponent::fixed_calls, 1);
+    EXPECT_EQ(elecstate::MockPotComponent::dynamic_calls, 1);
+    EXPECT_EQ(elecstate::MockPotComponent::destroyed, 0);
+
+    potential.reset();
+    EXPECT_EQ(elecstate::MockPotComponent::destroyed, 2);
+}
+
+TEST_F(PotentialNewTest, AppendComponentRejectsNullOwnership)
+{
+    potential.reset(new elecstate::Potential);
+    EXPECT_THROW(potential->append_component(std::unique_ptr<elecstate::PotBase>()),
+                 std::invalid_argument);
+}
+
 TEST_F(PotentialNewTest, PublicUpdateFlowsScheduleComponents)
 {
     smooth_basis->nrxx = 8;

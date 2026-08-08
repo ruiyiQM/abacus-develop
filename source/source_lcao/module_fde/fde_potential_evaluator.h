@@ -27,6 +27,18 @@ class DiracExchangeProvider : public NonadditiveXcProvider
                                          const double density_floor_bohr3) const override;
 };
 
+/** Spin-polarized PBE exchange-correlation evaluated by Libxc. */
+class LibxcPbeProvider : public NonadditiveXcProvider
+{
+  public:
+    static bool available();
+
+    NonadditiveFunctionalResult evaluate(const SpinDensity& active,
+                                         const SpinDensity& frozen,
+                                         const UniformGrid& grid,
+                                         const double density_floor_bohr3) const override;
+};
+
 struct PotFdeConfig
 {
     UniformGrid grid;

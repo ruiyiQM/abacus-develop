@@ -4,6 +4,18 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_abacus_gamma_backend
+  LIBS parameter ${math_libs} psi base device
+  SOURCES fde_abacus_gamma_backend_test.cpp
+    ../fde_abacus_gamma_backend.cpp
+    ../../../source_hamilt/module_hcontainer/base_matrix.cpp
+    ../../../source_hamilt/module_hcontainer/hcontainer.cpp
+    ../../../source_hamilt/module_hcontainer/atom_pair.cpp
+    ../../../source_hamilt/module_hcontainer/test/tmp_mocks.cpp
+    ../../../source_basis/module_ao/parallel_orbitals.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_state
   SOURCES fde_state_test.cpp ../fde_state.cpp
 )
@@ -30,7 +42,10 @@ AddTest(
 
 AddTest(
   TARGET MODULE_FDE_potential
-  SOURCES fde_potential_test.cpp ../fde_potential_evaluator.cpp ../fde_semilocal_functional.cpp
+  SOURCES fde_potential_test.cpp
+    ../fde_libxc_pbe_provider.cpp
+    ../fde_potential_evaluator.cpp
+    ../fde_semilocal_functional.cpp
 )
 
 AddTest(

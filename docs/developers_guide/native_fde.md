@@ -148,6 +148,24 @@ the two central differences in Ry/Bohr. Their difference supplies an error
 estimate and must remain below an explicit step-halving threshold. This path
 validates PES derivatives but does not implement analytic FDE forces.
 
+`AbacusGammaBackend` is the RP9 native runtime bridge. It converts each spin
+channel between the dense Γ-point AO contract and ABACUS `HContainer` data,
+then delegates the real-space transforms to the production Gint calls. The
+current dense AO contract is serial by construction, so the adapter rejects a
+distributed 2D-block AO container instead of silently assembling an incomplete
+matrix. `Potential::append_component` transfers explicit ownership of a
+configured `PotFde` after the legacy potential registry has run. This avoids a
+new global FDE selector and keeps the frozen density and functional provider in
+the driver-owned object graph.
+
+`LibxcPbeProvider` evaluates spin-polarized PBE exchange and correlation with
+explicit Libxc functional identifiers. It forms the GGA functional derivative
+on the same orthorhombic replicated grid used by the RP0-RP8 prototype and does
+not change ABACUS's process-wide XC selection. A build without Libxc reports the
+provider as unavailable and fails explicitly if it is selected. General-cell,
+distributed-grid PBE must use the later native PW-gradient driver rather than
+this replicated-grid adapter.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -159,10 +177,14 @@ validates PES derivatives but does not implement analytic FDE forces.
 - RP6: restartable freeze-thaw workflow.
 - RP7: two-state geometry scan and PES diagnostics.
 - RP8: finite-difference derivative of the fully converged workflow energy.
+- RP9: explicit ABACUS Potential/Gint bridge and Libxc-PBE provider.
 
-Electronic coupling, nonorthogonal multi-state diagonalization, analytic FDE
-forces, hybrid functionals, periodic k-point sampling, spinors, and more than
-two fragments are outside RP0-RP8.
+RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
+determinant artifacts, electronic coupling, nonorthogonal multi-state
+diagonalization, controlled multi-fragment FDE-diab approximations, and the
+semilocal analytic diagonal-state force ledger. Periodic k-point sampling,
+hybrid functionals, spinors, and analytic off-diagonal coupling/overlap
+derivatives remain separate follow-up work.
 
 ## Acceptance gates
 

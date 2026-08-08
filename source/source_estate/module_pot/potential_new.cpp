@@ -11,6 +11,7 @@
 #include "source_io/module_parameter/parameter.h"
 
 #include <map>
+#include <stdexcept>
 
 namespace elecstate
 {
@@ -88,6 +89,16 @@ void Potential::pot_register(const std::vector<std::string>& components_list)
     this->fixed_done = false;
 
     return;
+}
+
+void Potential::append_component(std::unique_ptr<PotBase> component)
+{
+    if (!component)
+    {
+        throw std::invalid_argument("Potential cannot append a null component");
+    }
+    this->components.push_back(component.release());
+    this->fixed_done = false;
 }
 
 void Potential::allocate()
