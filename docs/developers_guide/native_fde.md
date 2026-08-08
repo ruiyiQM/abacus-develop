@@ -120,6 +120,15 @@ spin populations, and emits the next active artifact. Two narrow backend calls
 perform real-space-potential-to-AO and AO-density-to-real-space transforms;
 they are the only hooks that the production LCAO/Gint adapter must implement.
 
+`FreezeThawWorkflow` owns the RP6 outer loop without owning an ABACUS solver.
+An injected step runner performs one converged RP5 update and recomputes the
+canonical ledger. The workflow alternates the two fragments, requires every
+inner update to converge, and applies both a pair-density norm and a total
+energy-change threshold only after a complete A/B cycle. Its deterministic
+checkpoint contains both density artifacts, the full energy ledger, cycle
+metadata, and residuals; restart is therefore defined only at complete-cycle
+boundaries, where the two artifact cycle numbers are equal.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.

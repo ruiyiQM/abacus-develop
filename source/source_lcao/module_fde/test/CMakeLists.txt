@@ -43,3 +43,11 @@ AddTest(
     ../fde_subspace_solver.cpp
     ../fde_ao_projection.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_freeze_thaw
+  SOURCES fde_freeze_thaw_test.cpp
+    ../fde_freeze_thaw.cpp
+    ../fde_density_artifact.cpp
+    ../fde_energy_ledger.cpp
+)
