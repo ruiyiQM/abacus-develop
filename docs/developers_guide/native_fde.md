@@ -209,6 +209,19 @@ cross-overlap matrix, solves the global maximum-overlap assignment, reorders
 energies, and phase-aligns coefficient columns. A minimum matched-overlap gate
 turns loss of a branch into an explicit failure.
 
+`FdeDiabaticAssembler` implements the RP14 `FDE-diab(K,L,M)` approximation.
+`K` is an explicit ordered subset of quasi-diabatic states, `M` is the subset
+of fragment orbital determinants retained in the coupling calculation, and
+`L` is the subset whose inter-fragment occupied-orbital overlap blocks remain
+active. An inter-fragment block is discarded only when neither endpoint is in
+`L`; intra-fragment blocks are always retained. The assembler filters the
+determinant artifacts, verifies that the `M` selection preserves alpha and beta
+electron counts between selected states, builds symmetric `H` and `S` matrices,
+and reports every omitted state, omitted fragment, and retained/discarded
+inter-fragment block pair. Diagonal energies remain the canonical full FDE
+energies; an injected transition-energy provider must carry any frozen
+environment contribution omitted from the `M` determinant.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -225,6 +238,7 @@ turns loss of a branch into an explicit failure.
 - RP11: occupied-orbital and diabatic-determinant artifacts.
 - RP12: determinant overlap, transition density, and electronic coupling.
 - RP13: nonorthogonal multi-state diagonalization and root tracking.
+- RP14: auditable multi-fragment `FDE-diab(K,L,M)` matrix assembly.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state

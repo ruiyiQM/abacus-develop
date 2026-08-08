@@ -43,6 +43,9 @@ TEST(FdeState, ValidatesChargeLocalizedReactionStates)
 TEST(FdeState, RejectsInvalidPartitionsAndElectronicAssignments)
 {
     EXPECT_THROW(fde::StateDefinition::validate_partition(
+                     {{"A", {0}, 1}}, 1),
+                 std::invalid_argument);
+    EXPECT_THROW(fde::StateDefinition::validate_partition(
                      {{"A", {0, 1}, 2}, {"B", {1}, 1}}, 2),
                  std::invalid_argument);
     EXPECT_THROW(fde::StateDefinition::validate_partition(
@@ -62,4 +65,17 @@ TEST(FdeState, RejectsInvalidPartitionsAndElectronicAssignments)
                      -1,
                      0),
                  std::invalid_argument);
+}
+
+TEST(FdeState, ValidatesMoreThanTwoFragments)
+{
+    const std::vector<fde::FragmentDefinition> fragments{
+        {"A", {0}, 1},
+        {"B", {1}, 1},
+        {"C", {2}, 2}};
+    const fde::DiabaticStateSpec state{
+        "three_fragments", {{"A", 0, 1}, {"B", 0, -1}, {"C", 0, 0}}};
+
+    EXPECT_NO_THROW(fde::StateDefinition::validate_partition(fragments, 3));
+    EXPECT_NO_THROW(fde::StateDefinition::validate_state(fragments, state, 0, 0));
 }

@@ -33,6 +33,15 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_diabatic_assembler
+  SOURCES fde_diabatic_assembler_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+    ../fde_diabatic_assembler.cpp
+    ../fde_electronic_coupling.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
     ../fde_ao_projection.cpp

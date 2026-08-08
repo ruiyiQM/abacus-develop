@@ -21,7 +21,8 @@ struct InverseDeterminant
 std::vector<double> occupied_overlap(const OccupiedSpinOrbitals& bra,
                                      const OccupiedSpinOrbitals& ket,
                                      const std::vector<double>& ao_overlap,
-                                     const std::size_t ao_dimension)
+                                     const std::size_t ao_dimension,
+                                     const OccupiedOverlapPolicy& overlap_policy)
 {
     const std::size_t bra_count
         = DeterminantArtifactIO::occupied_count(bra, ao_dimension);
@@ -37,6 +38,11 @@ std::vector<double> occupied_overlap(const OccupiedSpinOrbitals& bra,
     {
         for (std::size_t bra_orbital = 0; bra_orbital < bra_count; ++bra_orbital)
         {
+            if (!overlap_policy.retain(bra.source_fragment_labels[bra_orbital],
+                                       ket.source_fragment_labels[ket_orbital]))
+            {
+                continue;
+            }
             double value = 0.0;
             for (std::size_t column = 0; column < ao_dimension; ++column)
             {
@@ -171,6 +177,7 @@ std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
 
 double raw_self_overlap(const DiabaticDeterminantArtifact& artifact,
                         const std::vector<double>& ao_overlap,
+                        const OccupiedOverlapPolicy& overlap_policy,
                         const double tolerance)
 {
     const std::size_t dimension = artifact.ao_dimension;
@@ -182,7 +189,8 @@ double raw_self_overlap(const DiabaticDeterminantArtifact& artifact,
                              occupied_overlap(artifact.alpha,
                                               artifact.alpha,
                                               ao_overlap,
-                                              dimension),
+                                              dimension,
+                                              overlap_policy),
                              alpha_count,
                              tolerance)
                              .determinant;
@@ -190,7 +198,8 @@ double raw_self_overlap(const DiabaticDeterminantArtifact& artifact,
                             occupied_overlap(artifact.beta,
                                              artifact.beta,
                                              ao_overlap,
-                                             dimension),
+                                             dimension,
+                                             overlap_policy),
                             beta_count,
                             tolerance)
                             .determinant;
@@ -216,10 +225,33 @@ void validate_pair_metadata(const DiabaticDeterminantArtifact& bra,
 
 } // namespace
 
+bool FullOccupiedOverlapPolicy::retain(const std::string& bra_fragment,
+                                       const std::string& ket_fragment) const
+{
+    (void)bra_fragment;
+    (void)ket_fragment;
+    return true;
+}
+
 DeterminantTransition ElectronicCoupling::transition(
     const DiabaticDeterminantArtifact& bra,
     const DiabaticDeterminantArtifact& ket,
     const std::vector<double>& ao_overlap,
+    const double singular_value_tolerance)
+{
+    const FullOccupiedOverlapPolicy full_overlap;
+    return ElectronicCoupling::transition_with_policy(bra,
+                                                      ket,
+                                                      ao_overlap,
+                                                      full_overlap,
+                                                      singular_value_tolerance);
+}
+
+DeterminantTransition ElectronicCoupling::transition_with_policy(
+    const DiabaticDeterminantArtifact& bra,
+    const DiabaticDeterminantArtifact& ket,
+    const std::vector<double>& ao_overlap,
+    const OccupiedOverlapPolicy& overlap_policy,
     const double singular_value_tolerance)
 {
     if (!std::isfinite(singular_value_tolerance) || singular_value_tolerance <= 0.0)
@@ -236,18 +268,32 @@ DeterminantTransition ElectronicCoupling::transition(
     const std::size_t beta_count
         = DeterminantArtifactIO::occupied_count(bra.beta, dimension);
     const InverseDeterminant alpha = invert_and_determinant(
-        occupied_overlap(bra.alpha, ket.alpha, ao_overlap, dimension),
+        occupied_overlap(bra.alpha,
+                         ket.alpha,
+                         ao_overlap,
+                         dimension,
+                         overlap_policy),
         alpha_count,
         singular_value_tolerance);
     const InverseDeterminant beta = invert_and_determinant(
-        occupied_overlap(bra.beta, ket.beta, ao_overlap, dimension),
+        occupied_overlap(bra.beta,
+                         ket.beta,
+                         ao_overlap,
+                         dimension,
+                         overlap_policy),
         beta_count,
         singular_value_tolerance);
 
     DeterminantTransition result;
     result.raw_overlap = alpha.determinant * beta.determinant;
-    const double bra_norm = raw_self_overlap(bra, ao_overlap, singular_value_tolerance);
-    const double ket_norm = raw_self_overlap(ket, ao_overlap, singular_value_tolerance);
+    const double bra_norm = raw_self_overlap(bra,
+                                             ao_overlap,
+                                             overlap_policy,
+                                             singular_value_tolerance);
+    const double ket_norm = raw_self_overlap(ket,
+                                             ao_overlap,
+                                             overlap_policy,
+                                             singular_value_tolerance);
     result.normalized_overlap = result.raw_overlap / std::sqrt(bra_norm * ket_norm);
     if (!std::isfinite(result.normalized_overlap)
         || std::fabs(result.normalized_overlap) > 1.0 + 1.0e-8)
@@ -268,16 +314,35 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric(
     const TransitionEnergyProvider& energy_provider,
     const double singular_value_tolerance)
 {
+    const FullOccupiedOverlapPolicy full_overlap;
+    return ElectronicCoupling::evaluate_symmetric_with_policy(first,
+                                                              second,
+                                                              ao_overlap,
+                                                              full_overlap,
+                                                              energy_provider,
+                                                              singular_value_tolerance);
+}
+
+ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
+    const DiabaticDeterminantArtifact& first,
+    const DiabaticDeterminantArtifact& second,
+    const std::vector<double>& ao_overlap,
+    const OccupiedOverlapPolicy& overlap_policy,
+    const TransitionEnergyProvider& energy_provider,
+    const double singular_value_tolerance)
+{
     const DeterminantTransition forward
-        = ElectronicCoupling::transition(first,
-                                         second,
-                                         ao_overlap,
-                                         singular_value_tolerance);
+        = ElectronicCoupling::transition_with_policy(first,
+                                                     second,
+                                                     ao_overlap,
+                                                     overlap_policy,
+                                                     singular_value_tolerance);
     const DeterminantTransition reverse
-        = ElectronicCoupling::transition(second,
-                                         first,
-                                         ao_overlap,
-                                         singular_value_tolerance);
+        = ElectronicCoupling::transition_with_policy(second,
+                                                     first,
+                                                     ao_overlap,
+                                                     overlap_policy,
+                                                     singular_value_tolerance);
     if (std::fabs(forward.normalized_overlap - reverse.normalized_overlap) > 1.0e-10)
     {
         throw std::runtime_error("FDE forward and reverse determinant overlaps disagree");

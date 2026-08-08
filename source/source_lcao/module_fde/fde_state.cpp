@@ -36,9 +36,9 @@ const FragmentDefinition& find_fragment(const std::vector<FragmentDefinition>& f
 void StateDefinition::validate_partition(const std::vector<FragmentDefinition>& fragments,
                                          const std::size_t atom_count)
 {
-    if (fragments.size() != 2)
+    if (fragments.size() < 2)
     {
-        throw std::invalid_argument("FDE RP1 requires exactly two fragments");
+        throw std::invalid_argument("FDE requires at least two fragments");
     }
     if (atom_count == 0)
     {
