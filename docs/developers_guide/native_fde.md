@@ -175,6 +175,16 @@ permutation has run. Its variable-length checkpoint and
 term per fragment while shared density terms are recorded exactly once. The
 RP6 two-fragment API remains available for the already validated RP7/RP8 path.
 
+`DiabaticDeterminantArtifact` is the RP11 coupling input. It stores occupied
+real Γ-point AO coefficient columns, orbital energies, and the source fragment
+of every alpha and beta orbital in the authoritative supersystem AO order. The
+builder consumes the converged fragment subspace solutions, accepts only
+integer occupations, and rejects overlapping fragment AO partitions. Orbitals
+from the same fragment must be orthonormal in the AO metric; orbitals belonging
+to different fragments are intentionally allowed to overlap because that
+overlap is part of the antisymmetrized-product determinant used by FDE-diab.
+The separate density artifact remains sufficient for freeze-thaw restarts.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -188,6 +198,7 @@ RP6 two-fragment API remains available for the already validated RP7/RP8 path.
 - RP8: finite-difference derivative of the fully converged workflow energy.
 - RP9: explicit ABACUS Potential/Gint bridge and Libxc-PBE provider.
 - RP10: arbitrary-fragment freeze-thaw, checkpoint, and canonical energy data.
+- RP11: occupied-orbital and diabatic-determinant artifacts.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state

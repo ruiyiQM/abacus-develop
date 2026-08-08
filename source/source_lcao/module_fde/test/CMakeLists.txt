@@ -26,6 +26,13 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_determinant_artifact
+  SOURCES fde_determinant_artifact_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_semilocal_functional
   SOURCES fde_semilocal_functional_test.cpp ../fde_semilocal_functional.cpp
 )
