@@ -32,3 +32,14 @@ AddTest(
   TARGET MODULE_FDE_potential
   SOURCES fde_potential_test.cpp ../fde_potential_evaluator.cpp ../fde_semilocal_functional.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_one_way_scf
+  SOURCES fde_one_way_scf_test.cpp
+    ../fde_one_way_scf.cpp
+    ../fde_density_artifact.cpp
+    ../fde_potential_evaluator.cpp
+    ../fde_semilocal_functional.cpp
+    ../fde_subspace_solver.cpp
+    ../fde_ao_projection.cpp
+)

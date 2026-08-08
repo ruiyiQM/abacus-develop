@@ -113,6 +113,13 @@ and convergence metadata.
 Warm starts are allowed only between neighboring geometries on the same state
 branch. The two quasi-diabatic states must never initialize one another.
 
+`OneWayScf` owns the RP5 embedded-SCF loop. It reads a compatible active/frozen
+artifact pair, evaluates the embedding potential, solves alpha and beta active
+AO subspace problems, mixes the returned real-space density, enforces fixed
+spin populations, and emits the next active artifact. Two narrow backend calls
+perform real-space-potential-to-AO and AO-density-to-real-space transforms;
+they are the only hooks that the production LCAO/Gint adapter must implement.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
