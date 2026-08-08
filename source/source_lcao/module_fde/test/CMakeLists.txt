@@ -59,3 +59,11 @@ AddTest(
     ../fde_density_artifact.cpp
     ../fde_energy_ledger.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_finite_difference
+  SOURCES fde_finite_difference_test.cpp
+    ../fde_finite_difference.cpp
+    ../fde_density_artifact.cpp
+    ../fde_energy_ledger.cpp
+)

@@ -139,6 +139,15 @@ threshold. The deterministic PES table preserves both state labels even when
 their energies cross and reports the minimum gap, crossing brackets, adjacent
 energy changes, and changes in finite-difference slope as diagnostics.
 
+`FiniteDifferenceForce` is the RP8 validation path for one state and one
+coordinate. It runs four independent displaced geometries at `+/-h` and
+`+/-h/2`; all four receive the same central-geometry checkpoint and must
+reconverge the complete RP6 workflow without changing state populations or
+losing localization. The reported force is the Richardson extrapolation of
+the two central differences in Ry/Bohr. Their difference supplies an error
+estimate and must remain below an explicit step-halving threshold. This path
+validates PES derivatives but does not implement analytic FDE forces.
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
