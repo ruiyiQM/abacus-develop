@@ -11,6 +11,7 @@
 #include "source_basis/module_ao/parallel_orbitals.h"
 #include "source_basis/module_pw/pw_basis.h"
 #include "source_base/module_external/scalapack_connector.h"
+#include "source_base/timer.h"
 #include "source_cell/unitcell.h"
 #include "source_cell/klist.h"
 #include "source_estate/elecstate.h"
@@ -38,9 +39,30 @@ namespace fde
 namespace
 {
 
+class ScopedFdeTimer
+{
+  public:
+    explicit ScopedFdeTimer(const char* name) : name_(name)
+    {
+        ModuleBase::timer::start("FdeLcaoDriver", name_);
+    }
+
+    ~ScopedFdeTimer()
+    {
+        ModuleBase::timer::end("FdeLcaoDriver", name_);
+    }
+
+  private:
+    const char* name_;
+
+    ScopedFdeTimer(const ScopedFdeTimer&);
+    ScopedFdeTimer& operator=(const ScopedFdeTimer&);
+};
+
 FdeRuntimeConfig read_config_file(const std::string& path)
 {
-    std::ifstream input(path.c_str(), std::ios::binary);
+    const ScopedFdeTimer timer("read_config");
+    std::ifstream input(path.c_str());
     if (!input)
     {
         throw std::runtime_error("Cannot open FDE_CONFIG file: " + path);
@@ -51,7 +73,8 @@ FdeRuntimeConfig read_config_file(const std::string& path)
 FrozenDensityArtifact read_density_file_serial(const std::string& path,
                                                const double electron_tolerance)
 {
-    std::ifstream input(path.c_str());
+    const ScopedFdeTimer timer("read_density_root");
+    std::ifstream input(path.c_str(), std::ios::binary);
     if (!input)
     {
         throw std::runtime_error("Cannot open FDE density artifact: " + path);
@@ -251,6 +274,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
             error = exception.what();
         }
     }
+    const ScopedFdeTimer timer("broadcast_density_meta");
     require_mpi_success(MPI_Bcast(&success, 1, MPI_INT, root, communicator),
                         "broadcasting artifact-input status");
     broadcast_string(error, rank, root, communicator);
@@ -271,6 +295,7 @@ void validate_artifact_set(const FrozenDensityArtifact& active,
                            const double electron_tolerance,
                            const Parallel_Orbitals& orbitals)
 {
+    const ScopedFdeTimer timer("validate_density_set");
 #ifdef __MPI
     MPI_Comm communicator = orbitals.comm();
     if (communicator == MPI_COMM_NULL)
@@ -665,62 +690,73 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
     const DensityGridPartition partition
         = DensityGridPartition::from_pw_basis(reference, density_basis);
     (void)DensityGridPartition::from_pw_basis(active_initial_, density_basis);
-    active_alpha_local_
-        = DensityGridPartition::scatter_from_root(active_initial_.rho_alpha_bohr3,
-                                                  density_basis);
-    active_beta_local_
-        = DensityGridPartition::scatter_from_root(active_initial_.rho_beta_bohr3,
-                                                  density_basis);
-    release_density_arrays(active_initial_);
-    SpinDensity frozen;
-    frozen.alpha_bohr3.assign(partition.local_size(), 0.0);
-    frozen.beta_bohr3.assign(partition.local_size(), 0.0);
-    for (std::size_t fragment = 0; fragment < frozen_environment_.size(); ++fragment)
     {
-        const DensityGridPartition fragment_partition
-            = DensityGridPartition::from_pw_basis(frozen_environment_[fragment], density_basis);
-        const std::vector<double> alpha
-            = DensityGridPartition::scatter_from_root(
-                frozen_environment_[fragment].rho_alpha_bohr3,
-                density_basis);
-        const std::vector<double> beta
-            = DensityGridPartition::scatter_from_root(
-                frozen_environment_[fragment].rho_beta_bohr3,
-                density_basis);
-        release_density_arrays(frozen_environment_[fragment]);
-        for (std::size_t point = 0; point < frozen.alpha_bohr3.size(); ++point)
+        const ScopedFdeTimer timer("scatter_active_density");
+        active_alpha_local_
+            = DensityGridPartition::scatter_from_root(active_initial_.rho_alpha_bohr3,
+                                                      density_basis);
+        active_beta_local_
+            = DensityGridPartition::scatter_from_root(active_initial_.rho_beta_bohr3,
+                                                      density_basis);
+        release_density_arrays(active_initial_);
+    }
+    SpinDensity frozen;
+    {
+        const ScopedFdeTimer timer("scatter_frozen_density");
+        frozen.alpha_bohr3.assign(partition.local_size(), 0.0);
+        frozen.beta_bohr3.assign(partition.local_size(), 0.0);
+        for (std::size_t fragment = 0; fragment < frozen_environment_.size(); ++fragment)
         {
-            frozen.alpha_bohr3[point] += alpha[point];
-            frozen.beta_bohr3[point] += beta[point];
+            const DensityGridPartition fragment_partition
+                = DensityGridPartition::from_pw_basis(frozen_environment_[fragment],
+                                                      density_basis);
+            const std::vector<double> alpha
+                = DensityGridPartition::scatter_from_root(
+                    frozen_environment_[fragment].rho_alpha_bohr3,
+                    density_basis);
+            const std::vector<double> beta
+                = DensityGridPartition::scatter_from_root(
+                    frozen_environment_[fragment].rho_beta_bohr3,
+                    density_basis);
+            release_density_arrays(frozen_environment_[fragment]);
+            for (std::size_t point = 0; point < frozen.alpha_bohr3.size(); ++point)
+            {
+                frozen.alpha_bohr3[point] += alpha[point];
+                frozen.beta_bohr3[point] += beta[point];
+            }
         }
     }
-    frozen_alpha_local_ = frozen.alpha_bohr3;
-    frozen_beta_local_ = frozen.beta_bohr3;
-    const UniformGrid grid = make_grid(reference, density_basis, unit_cell);
-    double* density[2] = {frozen.alpha_bohr3.data(), frozen.beta_bohr3.data()};
-    const double* const_density[2] = {density[0], density[1]};
-    const ModuleBase::matrix frozen_hartree
-        = elecstate::H_Hartree_pw::v_hartree(unit_cell,
-                                             &density_basis,
-                                             2,
-                                             const_density);
-    std::vector<double> hartree(static_cast<std::size_t>(density_basis.nrxx), 0.0);
-    for (int point = 0; point < density_basis.nrxx; ++point)
     {
-        hartree[point] = frozen_hartree(0, point);
+        const ScopedFdeTimer timer("build_embedding_potential");
+        frozen_alpha_local_ = frozen.alpha_bohr3;
+        frozen_beta_local_ = frozen.beta_bohr3;
+        const UniformGrid grid = make_grid(reference, density_basis, unit_cell);
+        double* density[2] = {frozen.alpha_bohr3.data(), frozen.beta_bohr3.data()};
+        const double* const_density[2] = {density[0], density[1]};
+        const ModuleBase::matrix frozen_hartree
+            = elecstate::H_Hartree_pw::v_hartree(unit_cell,
+                                                 &density_basis,
+                                                 2,
+                                                 const_density);
+        std::vector<double> hartree(static_cast<std::size_t>(density_basis.nrxx), 0.0);
+        for (int point = 0; point < density_basis.nrxx; ++point)
+        {
+            hartree[point] = frozen_hartree(0, point);
+        }
+        PotFdeConfig potential_config;
+        potential_config.grid = grid;
+        potential_config.kinetic_functional = config_.kinetic_functional;
+        potential_config.density_floor_bohr3 = config_.density_floor_bohr3;
+        std::shared_ptr<const NonadditiveXcProvider> xc_provider(new LibxcPbeProvider());
+        std::unique_ptr<PotFde> component(new PotFde(&density_basis,
+                                                    frozen,
+                                                    hartree,
+                                                    potential_config,
+                                                    xc_provider));
+        embedding_potential_ = component.get();
+        potential.append_component(
+            std::unique_ptr<elecstate::PotBase>(component.release()));
     }
-    PotFdeConfig potential_config;
-    potential_config.grid = grid;
-    potential_config.kinetic_functional = config_.kinetic_functional;
-    potential_config.density_floor_bohr3 = config_.density_floor_bohr3;
-    std::shared_ptr<const NonadditiveXcProvider> xc_provider(new LibxcPbeProvider());
-    std::unique_ptr<PotFde> component(new PotFde(&density_basis,
-                                                frozen,
-                                                hartree,
-                                                potential_config,
-                                                xc_provider));
-    embedding_potential_ = component.get();
-    potential.append_component(std::unique_ptr<elecstate::PotBase>(component.release()));
 }
 
 std::unique_ptr<FdeProjectedHamiltonian> FdeLcaoDriver::projected_hamiltonian(
@@ -1015,73 +1051,88 @@ void FdeLcaoDriver::write_scf_artifacts(
         = status.converged ? charge.rho_save[0] : charge.rho[0];
     const double* const beta_checkpoint
         = status.converged ? charge.rho_save[1] : charge.rho[1];
-    std::vector<double> local_alpha(alpha_checkpoint,
-                                    alpha_checkpoint + local_grid_size);
-    std::vector<double> local_beta(beta_checkpoint,
-                                   beta_checkpoint + local_grid_size);
-    normalize_nonnegative_spin_density(local_alpha.data(),
-                                       local_beta.data(),
-                                       local_grid_size,
-                                       active_alpha_electrons_,
-                                       active_beta_electrons_,
-                                       active_initial_.cell_volume_bohr3,
-                                       *density_basis_);
-    SpinDensity active_density;
-    active_density.alpha_bohr3 = local_alpha;
-    active_density.beta_bohr3 = local_beta;
-    const EmbeddingPotentialResult embedding
-        = embedding_potential_->evaluate(active_density);
-    std::vector<double> global_alpha
-        = DensityGridPartition::gather_to_root(local_alpha.data(), *density_basis_);
-    std::vector<double> global_beta
-        = DensityGridPartition::gather_to_root(local_beta.data(), *density_basis_);
+    std::vector<double> local_alpha;
+    std::vector<double> local_beta;
+    EmbeddingPotentialResult embedding;
+    {
+        const ScopedFdeTimer timer("evaluate_checkpoint");
+        local_alpha.assign(alpha_checkpoint,
+                           alpha_checkpoint + local_grid_size);
+        local_beta.assign(beta_checkpoint,
+                          beta_checkpoint + local_grid_size);
+        normalize_nonnegative_spin_density(local_alpha.data(),
+                                           local_beta.data(),
+                                           local_grid_size,
+                                           active_alpha_electrons_,
+                                           active_beta_electrons_,
+                                           active_initial_.cell_volume_bohr3,
+                                           *density_basis_);
+        SpinDensity active_density;
+        active_density.alpha_bohr3 = local_alpha;
+        active_density.beta_bohr3 = local_beta;
+        embedding = embedding_potential_->evaluate(active_density);
+    }
+    std::vector<double> global_alpha;
+    std::vector<double> global_beta;
+    {
+        const ScopedFdeTimer timer("gather_checkpoint_density");
+        global_alpha
+            = DensityGridPartition::gather_to_root(local_alpha.data(),
+                                                   *density_basis_);
+        global_beta
+            = DensityGridPartition::gather_to_root(local_beta.data(),
+                                                   *density_basis_);
+    }
 
     int spin_kpoint[2] = {-1, -1};
-    for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
-    {
-        const int spin = kpoints.isk[kpoint];
-        if (spin < 0 || spin > 1 || spin_kpoint[spin] != -1)
-        {
-            throw std::runtime_error("FDE output requires exactly one Gamma point per spin");
-        }
-        spin_kpoint[spin] = kpoint;
-    }
-    if (spin_kpoint[0] < 0 || spin_kpoint[1] < 0)
-    {
-        throw std::runtime_error("FDE output is missing a collinear spin channel");
-    }
     std::vector<double> global_wavefunctions[2];
-    for (int spin = 0; spin < 2; ++spin)
-    {
-        global_wavefunctions[spin]
-            = gather_wavefunctions_to_root(wavefunctions,
-                                           spin_kpoint[spin],
-                                           full_ao_dimension_,
-                                           global_band_count,
-                                           orbitals,
-                                           rank);
-    }
-
     std::vector<double> gathered_overlap;
     std::vector<double> gathered_hamiltonian[2];
-    for (int spin = 0; spin < 2; ++spin)
     {
-        full_hamiltonian.updateHk(spin_kpoint[spin]);
-        hamilt::MatrixBlock<double> local_hamiltonian;
-        hamilt::MatrixBlock<double> local_overlap;
-        full_hamiltonian.matrix(local_hamiltonian, local_overlap);
-        if (spin == 0)
+        const ScopedFdeTimer timer("gather_ao_artifacts");
+        for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
         {
-            gathered_overlap = gather_matrix_to_root(local_overlap,
-                                                     full_ao_dimension_,
-                                                     orbitals,
-                                                     rank);
+            const int spin = kpoints.isk[kpoint];
+            if (spin < 0 || spin > 1 || spin_kpoint[spin] != -1)
+            {
+                throw std::runtime_error(
+                    "FDE output requires exactly one Gamma point per spin");
+            }
+            spin_kpoint[spin] = kpoint;
         }
-        gathered_hamiltonian[spin]
-            = gather_matrix_to_root(local_hamiltonian,
-                                    full_ao_dimension_,
-                                    orbitals,
-                                    rank);
+        if (spin_kpoint[0] < 0 || spin_kpoint[1] < 0)
+        {
+            throw std::runtime_error("FDE output is missing a collinear spin channel");
+        }
+        for (int spin = 0; spin < 2; ++spin)
+        {
+            global_wavefunctions[spin]
+                = gather_wavefunctions_to_root(wavefunctions,
+                                               spin_kpoint[spin],
+                                               full_ao_dimension_,
+                                               global_band_count,
+                                               orbitals,
+                                               rank);
+        }
+        for (int spin = 0; spin < 2; ++spin)
+        {
+            full_hamiltonian.updateHk(spin_kpoint[spin]);
+            hamilt::MatrixBlock<double> local_hamiltonian;
+            hamilt::MatrixBlock<double> local_overlap;
+            full_hamiltonian.matrix(local_hamiltonian, local_overlap);
+            if (spin == 0)
+            {
+                gathered_overlap = gather_matrix_to_root(local_overlap,
+                                                         full_ao_dimension_,
+                                                         orbitals,
+                                                         rank);
+            }
+            gathered_hamiltonian[spin]
+                = gather_matrix_to_root(local_hamiltonian,
+                                        full_ao_dimension_,
+                                        orbitals,
+                                        rank);
+        }
     }
 
     if (rank != 0)
@@ -1089,24 +1140,29 @@ void FdeLcaoDriver::write_scf_artifacts(
         return;
     }
 
-    FrozenDensityArtifact density = active_initial_;
-    density.schema_version = 2;
-    density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-    density.scf_converged = status.converged;
-    density.scf_iterations = status.iterations;
-    density.scf_density_residual = status.density_residual;
-    density.rho_alpha_bohr3.swap(global_alpha);
-    density.rho_beta_bohr3.swap(global_beta);
+    FrozenDensityArtifact density;
     const std::string density_path
         = config_.output_prefix
           + (status.converged ? ".fde_density" : ".partial.fde_density");
-    std::ofstream density_output(density_path.c_str(), std::ios::binary);
-    if (!density_output)
     {
-        throw std::runtime_error("Cannot create FDE density artifact: " + density_path);
+        const ScopedFdeTimer timer("write_density_checkpoint");
+        density = active_initial_;
+        density.schema_version = 2;
+        density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+        density.scf_converged = status.converged;
+        density.scf_iterations = status.iterations;
+        density.scf_density_residual = status.density_residual;
+        density.rho_alpha_bohr3.swap(global_alpha);
+        density.rho_beta_bohr3.swap(global_beta);
+        std::ofstream density_output(density_path.c_str(), std::ios::binary);
+        if (!density_output)
+        {
+            throw std::runtime_error(
+                "Cannot create FDE density artifact: " + density_path);
+        }
+        DensityArtifactIO::write_binary(density_output, density);
+        close_artifact(density_output, density_path, "density");
     }
-    DensityArtifactIO::write_binary(density_output, density);
-    close_artifact(density_output, density_path, "density");
 
     // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
     // valid inputs to diabatic postprocessing.  Persist only the normalized
@@ -1116,53 +1172,58 @@ void FdeLcaoDriver::write_scf_artifacts(
         return;
     }
 
-    FragmentScfArtifact fragment;
-    fragment.schema_version = 1;
-    fragment.state_label = config_.active_state;
-    fragment.fragment_label = config_.active_fragment;
-    fragment.geometry_fingerprint = density.geometry_fingerprint;
-    fragment.orbital_fingerprint = density.orbital_fingerprint;
-    fragment.density_path = density_path;
-    fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
-    fragment.scf_converged = true;
-    fragment.ao_dimension = full_ao_dimension_;
-    fragment.active_orbitals = active_orbitals_;
-    append_occupied_spin(global_wavefunctions[0],
-                         electronic_state,
-                         spin_kpoint[0],
-                         active_alpha_electrons_,
-                         full_ao_dimension_,
-                         global_band_count,
-                         config_.active_fragment,
-                         fragment.alpha);
-    append_occupied_spin(global_wavefunctions[1],
-                         electronic_state,
-                         spin_kpoint[1],
-                         active_beta_electrons_,
-                         full_ao_dimension_,
-                         global_band_count,
-                         config_.active_fragment,
-                         fragment.beta);
-    fragment.ao_overlap.swap(gathered_overlap);
-    fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
-    fragment.hamiltonian_beta_ry.swap(gathered_hamiltonian[1]);
-    fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
-    fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
-    fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
-    fragment.nonadditive_kinetic_energy_ry
-        = embedding.nonadditive_kinetic_energy_ry;
-    fragment.nonadditive_xc_energy_ry = embedding.nonadditive_xc_energy_ry;
-
-    const std::string fragment_path = config_.output_prefix + ".fde_fragment";
-    std::ofstream fragment_output(fragment_path.c_str());
-    if (!fragment_output)
     {
-        throw std::runtime_error("Cannot create FDE fragment SCF artifact: " + fragment_path);
+        const ScopedFdeTimer timer("write_fragment_artifact");
+        FragmentScfArtifact fragment;
+        fragment.schema_version = 1;
+        fragment.state_label = config_.active_state;
+        fragment.fragment_label = config_.active_fragment;
+        fragment.geometry_fingerprint = density.geometry_fingerprint;
+        fragment.orbital_fingerprint = density.orbital_fingerprint;
+        fragment.density_path = density_path;
+        fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
+        fragment.scf_converged = true;
+        fragment.ao_dimension = full_ao_dimension_;
+        fragment.active_orbitals = active_orbitals_;
+        append_occupied_spin(global_wavefunctions[0],
+                             electronic_state,
+                             spin_kpoint[0],
+                             active_alpha_electrons_,
+                             full_ao_dimension_,
+                             global_band_count,
+                             config_.active_fragment,
+                             fragment.alpha);
+        append_occupied_spin(global_wavefunctions[1],
+                             electronic_state,
+                             spin_kpoint[1],
+                             active_beta_electrons_,
+                             full_ao_dimension_,
+                             global_band_count,
+                             config_.active_fragment,
+                             fragment.beta);
+        fragment.ao_overlap.swap(gathered_overlap);
+        fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
+        fragment.hamiltonian_beta_ry.swap(gathered_hamiltonian[1]);
+        fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
+        fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
+        fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
+        fragment.nonadditive_kinetic_energy_ry
+            = embedding.nonadditive_kinetic_energy_ry;
+        fragment.nonadditive_xc_energy_ry = embedding.nonadditive_xc_energy_ry;
+
+        const std::string fragment_path
+            = config_.output_prefix + ".fde_fragment";
+        std::ofstream fragment_output(fragment_path.c_str());
+        if (!fragment_output)
+        {
+            throw std::runtime_error(
+                "Cannot create FDE fragment SCF artifact: " + fragment_path);
+        }
+        FragmentScfArtifactIO::write(fragment_output,
+                                     fragment,
+                                     config_.symmetry_tolerance);
+        close_artifact(fragment_output, fragment_path, "fragment SCF");
     }
-    FragmentScfArtifactIO::write(fragment_output,
-                                 fragment,
-                                 config_.symmetry_tolerance);
-    close_artifact(fragment_output, fragment_path, "fragment SCF");
 }
 
 } // namespace fde

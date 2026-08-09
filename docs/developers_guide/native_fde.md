@@ -188,6 +188,15 @@ detect this container automatically. Legacy `FDE_DENSITY_ARTIFACT` text files
 and compact uniform seeds remain valid restart inputs, so existing scans do not
 need conversion.
 
+The ABACUS timer table separates checkpoint overhead under `FdeLcaoDriver`.
+In particular, `read_density_root`, `broadcast_density_meta`,
+`scatter_active_density`, `scatter_frozen_density`, and
+`build_embedding_potential` isolate startup work, while
+`evaluate_checkpoint`, `gather_checkpoint_density`, `gather_ao_artifacts`,
+`write_density_checkpoint`, and `write_fragment_artifact` isolate finalization.
+This makes filesystem, MPI distribution, grid evaluation, and output costs
+visible independently of the surrounding LCAO initialization timers.
+
 The converged density is distributed with the same z slabs as
 `ModulePW::PW_Basis`. Frozen and active artifact grids are checked against that
 layout. AO communicator rank zero alone opens and validates each checkpoint;
