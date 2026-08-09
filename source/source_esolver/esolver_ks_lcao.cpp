@@ -185,7 +185,14 @@ void ESolver_KS_LCAO<TK, TR>::before_all_runners(BaseCell& basecell, const Input
       this->pelec, this->orb_, this->pv, this->locpp, this->dftu,
       this->solvent, this->exx_nao, this->deepks, inp);
 
-    this->fde_driver_ = fde::FdeLcaoDriver::create(inp, ucell, this->pv);
+    try
+    {
+        this->fde_driver_ = fde::FdeLcaoDriver::create(inp, ucell, this->pv);
+    }
+    catch (const std::exception& error)
+    {
+        ModuleBase::WARNING_QUIT("ESolver_KS_LCAO::before_all_runners", error.what());
+    }
 
     //! if kpar is not divisible by nks, print a warning
     ModuleIO::print_kpar(this->kv.get_nks(), PARAM.globalv.kpar_lcao);

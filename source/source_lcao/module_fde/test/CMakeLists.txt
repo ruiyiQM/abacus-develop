@@ -151,6 +151,7 @@ AddTest(
 
 AddTest(
   TARGET MODULE_FDE_potential
+  LIBS $<$<BOOL:${ENABLE_LIBXC}>:Libxc::xc>
   SOURCES fde_potential_test.cpp
     ../fde_libxc_pbe_provider.cpp
     ../fde_potential_evaluator.cpp

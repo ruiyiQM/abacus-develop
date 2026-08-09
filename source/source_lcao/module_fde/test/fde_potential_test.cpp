@@ -2,9 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace
 {
@@ -18,6 +23,31 @@ fde::SpinDensity frozen_density()
 {
     return {{0.2, 0.3}, {0.1, 0.2}};
 }
+
+fde::SpinDensity extended_density(const std::size_t size, const double offset)
+{
+    fde::SpinDensity density;
+    density.alpha_bohr3.resize(size);
+    density.beta_bohr3.resize(size);
+    for (std::size_t index = 0; index < size; ++index)
+    {
+        density.alpha_bohr3[index] = offset + 0.01 * static_cast<double>(index % 17);
+        density.beta_bohr3[index] = offset + 0.02 * static_cast<double>(index % 11);
+    }
+    return density;
+}
+
+#ifdef _OPENMP
+class OpenmpThreadCountGuard
+{
+  public:
+    OpenmpThreadCountGuard() : original_(omp_get_max_threads()) {}
+    ~OpenmpThreadCountGuard() { omp_set_num_threads(original_); }
+
+  private:
+    int original_;
+};
+#endif
 
 } // namespace
 
@@ -65,3 +95,42 @@ TEST(FdePotential, LibxcPbeReportsBuildAvailability)
                  std::runtime_error);
 #endif
 }
+
+#if defined(__LIBXC) && defined(_OPENMP)
+TEST(FdePotential, LibxcPbeIsThreadCountInvariant)
+{
+    OpenmpThreadCountGuard guard;
+    const fde::UniformGrid grid{40, 40, 41, 0.35, 0.36, 0.37};
+    const std::size_t size = grid.x * grid.y * grid.z;
+    const fde::SpinDensity active = extended_density(size, 0.2);
+    const fde::SpinDensity frozen = extended_density(size, 0.1);
+    const fde::LibxcPbeProvider provider;
+
+    omp_set_num_threads(1);
+    const fde::NonadditiveFunctionalResult serial
+        = provider.evaluate(active, frozen, grid, 1.0e-12);
+    omp_set_num_threads(4);
+    const fde::NonadditiveFunctionalResult parallel
+        = provider.evaluate(active, frozen, grid, 1.0e-12);
+
+    EXPECT_NEAR(serial.energy_ry, parallel.energy_ry,
+                1.0e-11 * std::max(1.0, std::fabs(serial.energy_ry)));
+    ASSERT_EQ(serial.active_potential.alpha_ry.size(),
+              parallel.active_potential.alpha_ry.size());
+    double maximum_alpha_difference = 0.0;
+    double maximum_beta_difference = 0.0;
+    for (std::size_t index = 0; index < size; ++index)
+    {
+        maximum_alpha_difference
+            = std::max(maximum_alpha_difference,
+                       std::fabs(serial.active_potential.alpha_ry[index]
+                                 - parallel.active_potential.alpha_ry[index]));
+        maximum_beta_difference
+            = std::max(maximum_beta_difference,
+                       std::fabs(serial.active_potential.beta_ry[index]
+                                 - parallel.active_potential.beta_ry[index]));
+    }
+    EXPECT_LE(maximum_alpha_difference, 1.0e-12);
+    EXPECT_LE(maximum_beta_difference, 1.0e-12);
+}
+#endif
