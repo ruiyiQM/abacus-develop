@@ -24,8 +24,13 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
+
+#ifdef __MPI
+#include <mpi.h>
+#endif
 
 namespace fde
 {
@@ -43,8 +48,8 @@ FdeRuntimeConfig read_config_file(const std::string& path)
     return FdeRuntimeConfigIO::read(input);
 }
 
-FrozenDensityArtifact read_density_file(const std::string& path,
-                                        const double electron_tolerance)
+FrozenDensityArtifact read_density_file_serial(const std::string& path,
+                                               const double electron_tolerance)
 {
     std::ifstream input(path.c_str());
     if (!input)
@@ -52,6 +57,241 @@ FrozenDensityArtifact read_density_file(const std::string& path,
         throw std::runtime_error("Cannot open FDE density artifact: " + path);
     }
     return DensityArtifactIO::read_runtime(input, electron_tolerance);
+}
+
+#ifdef __MPI
+
+void require_mpi_success(const int result, const char* operation)
+{
+    if (result != MPI_SUCCESS)
+    {
+        throw std::runtime_error(std::string("FDE MPI failure while ") + operation);
+    }
+}
+
+void broadcast_size(std::size_t& value,
+                    const int rank,
+                    const int root,
+                    MPI_Comm communicator)
+{
+    unsigned long long transferred
+        = rank == root ? static_cast<unsigned long long>(value) : 0ULL;
+    require_mpi_success(MPI_Bcast(&transferred,
+                                  1,
+                                  MPI_UNSIGNED_LONG_LONG,
+                                  root,
+                                  communicator),
+                        "broadcasting an artifact size");
+    if (transferred > static_cast<unsigned long long>(
+                          std::numeric_limits<std::size_t>::max()))
+    {
+        throw std::overflow_error("FDE artifact size exceeds local size_t");
+    }
+    value = static_cast<std::size_t>(transferred);
+}
+
+void broadcast_chunks(void* data,
+                      const std::size_t count,
+                      MPI_Datatype datatype,
+                      const int root,
+                      MPI_Comm communicator,
+                      const char* operation)
+{
+    std::size_t offset = 0;
+    int datatype_size = 0;
+    require_mpi_success(MPI_Type_size(datatype, &datatype_size),
+                        "querying an artifact MPI datatype");
+    if (datatype_size <= 0)
+    {
+        throw std::runtime_error("FDE artifact MPI datatype has an invalid size");
+    }
+    unsigned char* bytes = static_cast<unsigned char*>(data);
+    while (offset < count)
+    {
+        const std::size_t remaining = count - offset;
+        const int chunk = static_cast<int>(
+            std::min(remaining,
+                     static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        require_mpi_success(MPI_Bcast(bytes + offset * static_cast<std::size_t>(datatype_size),
+                                      chunk,
+                                      datatype,
+                                      root,
+                                      communicator),
+                            operation);
+        offset += static_cast<std::size_t>(chunk);
+    }
+}
+
+void broadcast_string(std::string& value,
+                      const int rank,
+                      const int root,
+                      MPI_Comm communicator)
+{
+    std::size_t size = value.size();
+    broadcast_size(size, rank, root, communicator);
+    if (rank != root)
+    {
+        value.resize(size);
+    }
+    if (size != 0)
+    {
+        broadcast_chunks(&value[0],
+                         size,
+                         MPI_CHAR,
+                         root,
+                         communicator,
+                         "broadcasting artifact text");
+    }
+}
+
+void broadcast_density(std::vector<double>& density,
+                       const int rank,
+                       const int root,
+                       MPI_Comm communicator)
+{
+    std::size_t size = density.size();
+    broadcast_size(size, rank, root, communicator);
+    if (rank != root)
+    {
+        density.resize(size);
+    }
+    if (size != 0)
+    {
+        broadcast_chunks(density.data(),
+                         size,
+                         MPI_DOUBLE,
+                         root,
+                         communicator,
+                         "broadcasting artifact density");
+    }
+}
+
+void broadcast_density_artifact(FrozenDensityArtifact& artifact,
+                                const int rank,
+                                const int root,
+                                MPI_Comm communicator)
+{
+    int integer_fields[6];
+    double floating_fields[4];
+    std::size_t grid[3];
+    if (rank == root)
+    {
+        integer_fields[0] = artifact.schema_version;
+        integer_fields[1] = artifact.alpha_electrons;
+        integer_fields[2] = artifact.beta_electrons;
+        integer_fields[3] = artifact.freeze_thaw_cycle;
+        integer_fields[4] = artifact.scf_converged ? 1 : 0;
+        integer_fields[5] = artifact.scf_iterations;
+        floating_fields[0] = artifact.cell_volume_bohr3;
+        floating_fields[1] = artifact.scf_density_residual;
+        floating_fields[2] = artifact.orbital_kinetic_energy_ry;
+        floating_fields[3] = artifact.nonlocal_pseudopotential_energy_ry;
+        grid[0] = artifact.grid_x;
+        grid[1] = artifact.grid_y;
+        grid[2] = artifact.grid_z;
+    }
+    require_mpi_success(MPI_Bcast(integer_fields,
+                                  6,
+                                  MPI_INT,
+                                  root,
+                                  communicator),
+                        "broadcasting artifact integer metadata");
+    require_mpi_success(MPI_Bcast(floating_fields,
+                                  4,
+                                  MPI_DOUBLE,
+                                  root,
+                                  communicator),
+                        "broadcasting artifact floating-point metadata");
+    for (int dimension = 0; dimension < 3; ++dimension)
+    {
+        broadcast_size(grid[dimension], rank, root, communicator);
+    }
+    if (rank != root)
+    {
+        artifact.schema_version = integer_fields[0];
+        artifact.alpha_electrons = integer_fields[1];
+        artifact.beta_electrons = integer_fields[2];
+        artifact.freeze_thaw_cycle = integer_fields[3];
+        artifact.scf_converged = integer_fields[4] != 0;
+        artifact.scf_iterations = integer_fields[5];
+        artifact.cell_volume_bohr3 = floating_fields[0];
+        artifact.scf_density_residual = floating_fields[1];
+        artifact.orbital_kinetic_energy_ry = floating_fields[2];
+        artifact.nonlocal_pseudopotential_energy_ry = floating_fields[3];
+        artifact.grid_x = grid[0];
+        artifact.grid_y = grid[1];
+        artifact.grid_z = grid[2];
+    }
+    broadcast_string(artifact.fragment_label, rank, root, communicator);
+    broadcast_string(artifact.state_label, rank, root, communicator);
+    broadcast_string(artifact.geometry_fingerprint, rank, root, communicator);
+    broadcast_string(artifact.grid_fingerprint, rank, root, communicator);
+    broadcast_string(artifact.pseudopotential_fingerprint, rank, root, communicator);
+    broadcast_string(artifact.orbital_fingerprint, rank, root, communicator);
+    broadcast_string(artifact.core_density_fingerprint, rank, root, communicator);
+    broadcast_string(artifact.xc_functional, rank, root, communicator);
+    broadcast_string(artifact.kinetic_functional, rank, root, communicator);
+    broadcast_density(artifact.rho_alpha_bohr3, rank, root, communicator);
+    broadcast_density(artifact.rho_beta_bohr3, rank, root, communicator);
+}
+
+#endif
+
+FrozenDensityArtifact read_density_file(const std::string& path,
+                                        const double electron_tolerance,
+                                        const Parallel_Orbitals& orbitals)
+{
+#ifdef __MPI
+    MPI_Comm communicator = orbitals.comm();
+    if (communicator == MPI_COMM_NULL)
+    {
+        throw std::runtime_error(
+            "FDE density input requires an initialized AO communicator");
+    }
+    int rank = 0;
+    int process_count = 0;
+    require_mpi_success(MPI_Comm_rank(communicator, &rank),
+                        "querying the artifact-input rank");
+    require_mpi_success(MPI_Comm_size(communicator, &process_count),
+                        "querying the artifact-input communicator size");
+    const int root = 0;
+    if (root >= process_count)
+    {
+        throw std::runtime_error("FDE artifact-input root is outside the communicator");
+    }
+
+    FrozenDensityArtifact artifact;
+    int success = 1;
+    std::string error;
+    if (rank == root)
+    {
+        try
+        {
+            artifact = read_density_file_serial(path, electron_tolerance);
+        }
+        catch (const std::exception& exception)
+        {
+            success = 0;
+            error = exception.what();
+        }
+    }
+    require_mpi_success(MPI_Bcast(&success, 1, MPI_INT, root, communicator),
+                        "broadcasting artifact-input status");
+    broadcast_string(error, rank, root, communicator);
+    if (success == 0)
+    {
+        throw std::runtime_error(error);
+    }
+    broadcast_density_artifact(artifact, rank, root, communicator);
+    if (rank != root)
+    {
+        DensityArtifactIO::validate(artifact, electron_tolerance);
+    }
+    return artifact;
+#else
+    (void)orbitals;
+    return read_density_file_serial(path, electron_tolerance);
+#endif
 }
 
 const RuntimeStateDefinition& active_state(const FdeRuntimeConfig& config)
@@ -248,7 +488,9 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     }
 
     const FrozenDensityArtifact active_initial
-        = read_density_file(config.active_density_path, config.electron_tolerance);
+        = read_density_file(config.active_density_path,
+                            config.electron_tolerance,
+                            orbitals);
     if (active_initial.fragment_label != config.active_fragment
         || active_initial.state_label != config.active_state
         || active_initial.alpha_electrons != population.alpha
@@ -274,7 +516,9 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
             throw std::invalid_argument("FDE frozen environment labels are incomplete or duplicated");
         }
         const FrozenDensityArtifact artifact
-            = read_density_file(path.path, config.electron_tolerance);
+            = read_density_file(path.path,
+                                config.electron_tolerance,
+                                orbitals);
         if (artifact.fragment_label != path.label || artifact.state_label != config.active_state)
         {
             throw std::invalid_argument(
