@@ -153,6 +153,27 @@ TEST(FdePwPoolCollectivesMpi, LeavesSpinConservingQuadratureOffsetUnchanged)
     EXPECT_EQ(beta, original_beta);
 }
 
+TEST(FdePwPoolCollectivesMpi, LeavesSubmillielectronSpinDriftUnchanged)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+
+    const double volume = 42.0;
+    std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), (7.0 + 2.5e-4) / volume);
+    std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), (8.0 - 2.5e-4) / volume);
+    const std::vector<double> original_alpha = alpha;
+    const std::vector<double> original_beta = beta;
+
+    fde::normalize_spin_density(alpha.data(), beta.data(), alpha.size(), 7, 8, volume, 1.0e-3, basis);
+
+    EXPECT_EQ(alpha, original_alpha);
+    EXPECT_EQ(beta, original_beta);
+}
+
 int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);

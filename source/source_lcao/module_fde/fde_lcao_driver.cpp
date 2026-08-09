@@ -477,7 +477,7 @@ void FdeLcaoDriver::solve_projected(
                            active_alpha_electrons_,
                            active_beta_electrons_,
                            active_initial_.cell_volume_bohr3,
-                           1.0e-6,
+                           1.0e-3,
                            *density_basis_);
 }
 
