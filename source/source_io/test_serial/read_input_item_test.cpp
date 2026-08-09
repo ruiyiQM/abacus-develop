@@ -43,8 +43,10 @@ TEST_F(InputTest, NativeFdeInput)
 
     auto task = find_label("fde_task", readinput.input_lists);
     auto config = find_label("fde_config", readinput.input_lists);
+    auto nupdown = find_label("nupdown", readinput.input_lists);
     ASSERT_NE(task, readinput.input_lists.end());
     ASSERT_NE(config, readinput.input_lists.end());
+    ASSERT_NE(nupdown, readinput.input_lists.end());
     EXPECT_EQ(param.input.fde_task, "none");
     EXPECT_EQ(param.input.fde_config, "FDE_CONFIG");
 
@@ -54,6 +56,16 @@ TEST_F(InputTest, NativeFdeInput)
     config->second.read_value(config->second, param);
     EXPECT_EQ(param.input.fde_task, "embedded_scf");
     EXPECT_EQ(param.input.fde_config, "fde/reactant_F.cfg");
+
+    // Ordinary nupdown == 0 selects a shared Fermi level.  Embedded FDE must
+    // override that default because each fragment's alpha/beta populations
+    // are part of the diabatic-state definition, including the 0-spin case.
+    nupdown->second.str_values = {"0.0"};
+    nupdown->second.read_value(nupdown->second, param);
+    EXPECT_FALSE(param.sys.two_fermi);
+    ASSERT_NE(task->second.reset_value, nullptr);
+    task->second.reset_value(task->second, param);
+    EXPECT_TRUE(param.sys.two_fermi);
 
     param.input.calculation = "scf";
     param.input.basis_type = "lcao";

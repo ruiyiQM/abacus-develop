@@ -21,6 +21,16 @@ void ReadInput::item_fde()
         item.unit = "";
         item.availability = "LCAO Gamma-point, collinear-spin PBE calculations";
         read_sync_string(input.fde_task);
+        item.reset_value = [](const Input_Item&, Parameter& para) {
+            // An embedded subsystem carries a prescribed alpha/beta electron
+            // population.  In particular, nupdown == 0 means N_alpha == N_beta
+            // here, rather than the unconstrained single-Fermi-level behavior
+            // used by an ordinary spin-polarized calculation.
+            if (para.input.fde_task == "embedded_scf")
+            {
+                para.sys.two_fermi = true;
+            }
+        };
         item.check_value = [](const Input_Item& item, const Parameter& para) {
             const std::string& task = para.input.fde_task;
             if (task != "none" && task != "embedded_scf" && task != "diabatic_postprocess")
