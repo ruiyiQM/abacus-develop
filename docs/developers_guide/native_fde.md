@@ -191,6 +191,14 @@ and the two spin Hamiltonians are gathered through `Cpxgemr2d`; AO rank zero
 alone writes and explicitly closes both artifacts. A close failure is fatal so
 an NFS quota error cannot leave a seemingly successful truncated checkpoint.
 
+When an embedded SCF reaches `scf_nmax`, the driver instead writes only
+`<OUTPUT_PREFIX>.partial.fde_density`. Its schema-2 `SCF` record includes a
+false convergence flag, the completed electronic-iteration count, and the
+last density residual. The checkpoint contains the mixed density that would
+seed the next SCF and is independently normalized to the prescribed alpha and
+beta populations. No partial fragment, Hamiltonian, orbital, or energy
+artifact is written.
+
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,
 one active subsystem, and one freeze-thaw cycle. An external restartable
 workflow alternates A-in-B and B-in-A jobs. A frozen-density artifact records a
@@ -217,6 +225,12 @@ one isolated working directory and `FDE_CONFIG` per active-fragment update,
 sets `OMP_NUM_THREADS=1` unless the caller already selected a value, and runs
 the command without a shell. It checkpoints only after a complete A/B sweep.
 Restart never shares a density between state labels.
+
+`controls.allow_partial_scf` is false by default. When explicitly enabled,
+the workflow may pass a schema-2 partial density to the next fragment update.
+A sweep containing any partial update has no canonical energy, cannot satisfy
+the outer convergence test, and cannot enter determinant or diabatic-coupling
+postprocessing.
 
 For the current two-fragment runtime, the canonical state energy is recovered
 from the last complete sweep as

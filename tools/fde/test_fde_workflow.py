@@ -60,6 +60,14 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_partial_scf_control(self):
+        spec = self.spec()
+        spec["controls"] = {"allow_partial_scf": True}
+        fde_workflow.validate_spec(spec)
+        spec["controls"]["allow_partial_scf"] = "yes"
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
     def test_canonical_energy_counts_shared_terms_once(self):
         artifacts = [
             {"subsystem_total_energy_ry": -10.0, "ion_ion_energy_ry": 2.0,
@@ -86,6 +94,25 @@ class FdeWorkflowTest(unittest.TestCase):
             self.assertEqual(density["cycle"], 0)
             self.assertEqual(density["alpha"], [1.0, 1.0])
             self.assertEqual(density["beta"], [1.0, 1.0])
+
+    def test_selects_only_opted_in_schema_two_partial_density(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = Path(directory)
+            partial = job / "result.partial.fde_density"
+            partial.write_text(
+                "FDE_DENSITY_ARTIFACT 2\n"
+                "FRAGMENT F\nSTATE reactant\nGEOMETRY g0\n"
+                "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS pp\nORBITALS nao\n"
+                "CORE_DENSITY none\nFUNCTIONALS pbe lc94\n"
+                "GRID 1 1 1 1\nPOPULATIONS 1 0\nSCF 1 0 50 0.04\n"
+                "ENERGIES_RY 0 0\nRHO_ALPHA 1 1\nRHO_BETA 1 0\nEND\n",
+                encoding="utf-8")
+            with self.assertRaises(fde_workflow.WorkflowError):
+                fde_workflow.select_scf_density(job, False)
+            path, density = fde_workflow.select_scf_density(job, True)
+            self.assertEqual(path, partial)
+            self.assertFalse(density["scf_converged"])
+            self.assertEqual(density["scf_iterations"], 50)
 
 
 if __name__ == "__main__":

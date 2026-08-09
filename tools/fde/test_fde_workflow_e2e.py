@@ -53,6 +53,18 @@ populations = {
     ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
 }
 alpha, beta = populations[(state, fragment)]
+if (cwd / "PARTIAL_ON_FIRST_CYCLE").exists() and cycle == 1:
+    density = cwd / "result.partial.fde_density"
+    density.write_text(
+        "FDE_DENSITY_ARTIFACT 2\n"
+        f"FRAGMENT {fragment}\nSTATE {state}\nGEOMETRY g0\n"
+        "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS fake\nORBITALS fake\n"
+        "CORE_DENSITY none\nFUNCTIONALS pbe lc94\nGRID 1 1 1 1\n"
+        f"POPULATIONS {alpha} {beta}\nSCF {cycle} 0 50 0.04\n"
+        "ENERGIES_RY 0 0\n"
+        f"RHO_ALPHA 1 {alpha}\nRHO_BETA 1 {beta}\nEND\n",
+        encoding="utf-8")
+    raise SystemExit(0)
 density = cwd / "result.fde_density"
 density.write_text(
     "FDE_DENSITY_ARTIFACT 1\n"
@@ -79,7 +91,8 @@ fragment_artifact = cwd / "result.fde_fragment"
 fragment_artifact.write_text(
     "FDE_FRAGMENT_SCF_ARTIFACT 1\n"
     f"STATE {state}\nFRAGMENT {fragment}\nGEOMETRY g0\nCYCLE {cycle}\n"
-    "ORBITAL_BASIS fake\nDENSITY_PATH result.fde_density\nAO_DIMENSION 4\n"
+    "ORBITAL_BASIS fake\nDENSITY_PATH result.fde_density\nSCF_CONVERGED 1\n"
+    "AO_DIMENSION 4\n"
     f"ACTIVE_ORBITALS 1 {active}\nSUBSYSTEM_TOTAL_ENERGY_RY {subsystem}\n"
     "ION_ION_ENERGY_RY 2\nHARTREE_CROSS_ENERGY_RY 0.5\n"
     "NONADDITIVE_KINETIC_ENERGY_RY 0.3\nNONADDITIVE_XC_ENERGY_RY -0.2\n"
@@ -101,62 +114,71 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
         encoding="utf-8")
 
 
+def prepare_case(root: Path, partial_first_cycle: bool = False):
+    fake_abacus = root / "fake_abacus.py"
+    fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
+    template = root / "template"
+    template.mkdir()
+    (template / "INPUT").write_text("INPUT_PARAMETERS\n", encoding="utf-8")
+    if partial_first_cycle:
+        (template / "PARTIAL_ON_FIRST_CYCLE").write_text("1\n", encoding="utf-8")
+    seeds = root / "seeds"
+    seeds.mkdir()
+    populations = {
+        ("reactant", "F"): (4, 4), ("reactant", "CH3Cl"): (7, 7),
+        ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
+    }
+    initial = {"reactant": {}, "product": {}}
+    for (state, fragment), (alpha, beta) in populations.items():
+        seed = seeds / f"{state}_{fragment}.fde_seed"
+        write_seed(seed, state, fragment, alpha, beta)
+        initial[state][fragment] = str(seed)
+
+    work = root / "work"
+    controls = {"maximum_freeze_thaw_cycles": 4 if partial_first_cycle else 3,
+                "freeze_thaw_density_tolerance": 1e-12,
+                "energy_tolerance_ry": 1e-12,
+                "ks_solver": "genelpa", "kpar": 1,
+                "retain_completed_cycles": 3 if partial_first_cycle else 1,
+                "remove_abacus_restart_files": True,
+                "update_order": ["F", "CH3Cl"]}
+    if partial_first_cycle:
+        controls["allow_partial_scf"] = True
+    specification = {
+        "schema_version": 1,
+        "abacus_command": [sys.executable, str(fake_abacus)],
+        "postprocess_command": [sys.executable, str(fake_abacus)],
+        "run_postprocess": True,
+        "work_directory": str(work),
+        "fragments": [
+            {"label": "F", "neutral_valence_electrons": 7,
+             "atom_indices": [0]},
+            {"label": "CH3Cl", "neutral_valence_electrons": 14,
+             "atom_indices": [1, 2, 3, 4, 5]},
+        ],
+        "states": [
+            {"label": "reactant", "total_charge": -1, "total_spin": 0,
+             "fragments": {"F": {"charge": -1, "spin": 0},
+                           "CH3Cl": {"charge": 0, "spin": 0}}},
+            {"label": "product", "total_charge": -1, "total_spin": 0,
+             "fragments": {"F": {"charge": 0, "spin": 1},
+                           "CH3Cl": {"charge": -1, "spin": -1}}},
+        ],
+        "controls": controls,
+        "geometries": [{"label": "g0", "coordinate_angstrom": 0.2,
+                        "template_directory": str(template),
+                        "initial_densities": initial}],
+    }
+    spec_path = root / "workflow.json"
+    spec_path.write_text(json.dumps(specification), encoding="utf-8")
+    return work, spec_path
+
+
 class FdeWorkflowEndToEndTest(unittest.TestCase):
     def test_two_states_freeze_thaw_postprocess_and_pes_table(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            fake_abacus = root / "fake_abacus.py"
-            fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
-            template = root / "template"
-            template.mkdir()
-            (template / "INPUT").write_text("INPUT_PARAMETERS\n", encoding="utf-8")
-            seeds = root / "seeds"
-            seeds.mkdir()
-            populations = {
-                ("reactant", "F"): (4, 4), ("reactant", "CH3Cl"): (7, 7),
-                ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
-            }
-            initial = {"reactant": {}, "product": {}}
-            for (state, fragment), (alpha, beta) in populations.items():
-                seed = seeds / f"{state}_{fragment}.fde_seed"
-                write_seed(seed, state, fragment, alpha, beta)
-                initial[state][fragment] = str(seed)
-
-            work = root / "work"
-            specification = {
-                "schema_version": 1,
-                "abacus_command": [sys.executable, str(fake_abacus)],
-                "postprocess_command": [sys.executable, str(fake_abacus)],
-                "run_postprocess": True,
-                "work_directory": str(work),
-                "fragments": [
-                    {"label": "F", "neutral_valence_electrons": 7,
-                     "atom_indices": [0]},
-                    {"label": "CH3Cl", "neutral_valence_electrons": 14,
-                     "atom_indices": [1, 2, 3, 4, 5]},
-                ],
-                "states": [
-                    {"label": "reactant", "total_charge": -1, "total_spin": 0,
-                     "fragments": {"F": {"charge": -1, "spin": 0},
-                                   "CH3Cl": {"charge": 0, "spin": 0}}},
-                    {"label": "product", "total_charge": -1, "total_spin": 0,
-                     "fragments": {"F": {"charge": 0, "spin": 1},
-                                   "CH3Cl": {"charge": -1, "spin": -1}}},
-                ],
-                "controls": {"maximum_freeze_thaw_cycles": 3,
-                             "freeze_thaw_density_tolerance": 1e-12,
-                             "energy_tolerance_ry": 1e-12,
-                             "ks_solver": "genelpa",
-                             "kpar": 1,
-                             "retain_completed_cycles": 1,
-                             "remove_abacus_restart_files": True,
-                             "update_order": ["F", "CH3Cl"]},
-                "geometries": [{"label": "g0", "coordinate_angstrom": 0.2,
-                                "template_directory": str(template),
-                                "initial_densities": initial}],
-            }
-            spec_path = root / "workflow.json"
-            spec_path.write_text(json.dumps(specification), encoding="utf-8")
+            work, spec_path = prepare_case(root)
 
             fde_workflow.run_workflow(spec_path)
 
@@ -188,6 +210,30 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
             logs.append(work / "g0" / "postprocess" / "fde_postprocess.log")
             self.assertTrue(all("OMP_NUM_THREADS=1" in path.read_text(encoding="utf-8")
                                 for path in logs))
+
+    def test_partial_density_is_passed_without_partial_postprocessing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, partial_first_cycle=True)
+            fde_workflow.run_workflow(spec_path)
+
+            for state in ("reactant", "product"):
+                checkpoint = json.loads(
+                    (work / "g0" / state / "checkpoint.json").read_text(
+                        encoding="utf-8"))
+                self.assertTrue(checkpoint["converged"])
+                self.assertEqual(checkpoint["cycle"], 3)
+                first = checkpoint["history"][0]
+                self.assertFalse(first["all_inner_scf_converged"])
+                self.assertIsNone(first["energy_ry"])
+                self.assertEqual(first["inner_scf"]["F"]["iterations"], 50)
+                cycle_two_config = (work / "g0" / state / "cycle-002" / "F"
+                                    / "FDE_CONFIG").read_text(encoding="utf-8")
+                self.assertIn("partial.fde_density", cycle_two_config)
+                self.assertFalse(list((work / "g0" / state / "cycle-001").glob(
+                    "*/result.fde_fragment")))
+            self.assertTrue((work / "g0" / "postprocess"
+                             / "fde_diabatic.fde_diabatic").is_file())
 
 
 if __name__ == "__main__":

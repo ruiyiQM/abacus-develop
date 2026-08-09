@@ -68,6 +68,9 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     remove_restarts = controls.get("remove_abacus_restart_files", False)
     if not isinstance(remove_restarts, bool):
         raise WorkflowError("remove_abacus_restart_files must be a boolean")
+    allow_partial_scf = controls.get("allow_partial_scf", False)
+    if not isinstance(allow_partial_scf, bool):
+        raise WorkflowError("allow_partial_scf must be a boolean")
     fragments = spec.get("fragments")
     states = spec.get("states")
     if not isinstance(fragments, list) or len(fragments) != 2:
@@ -124,20 +127,38 @@ def read_density(path: Path) -> Dict[str, object]:
     records = _records(path)
     try:
         if "FDE_UNIFORM_DENSITY_SEED" in records:
+            schema_version = int(records["FDE_UNIFORM_DENSITY_SEED"][0][0])
             grid = records["GRID"][0]
             grid_size = int(grid[0]) * int(grid[1]) * int(grid[2])
             uniform = records["RHO_UNIFORM"][0]
             alpha = [float(uniform[0])] * grid_size
             beta = [float(uniform[1])] * grid_size
             cycle = 0
+            scf_converged = False
+            scf_iterations = 0
+            scf_density_residual = None
+            initialization_seed = True
         else:
+            schema_version = int(records["FDE_DENSITY_ARTIFACT"][0][0])
             alpha = [float(value) for value in records["RHO_ALPHA"][0][1:]]
             beta = [float(value) for value in records["RHO_BETA"][0][1:]]
             if (int(records["RHO_ALPHA"][0][0]) != len(alpha)
                     or int(records["RHO_BETA"][0][0]) != len(beta)):
                 raise WorkflowError("density vector length is inconsistent")
             grid = records["GRID"][0]
-            cycle = int(records["SCF"][0][0])
+            scf = records["SCF"][0]
+            cycle = int(scf[0])
+            convergence_flag = int(scf[1])
+            if convergence_flag not in (0, 1):
+                raise WorkflowError("density SCF convergence flag must be zero or one")
+            scf_converged = convergence_flag == 1
+            if schema_version >= 2:
+                scf_iterations = int(scf[2])
+                scf_density_residual = float(scf[3])
+            else:
+                scf_iterations = 0
+                scf_density_residual = None
+            initialization_seed = False
         if not alpha or len(alpha) != len(beta):
             raise WorkflowError("density grid must be nonempty and spin-compatible")
         grid = records["GRID"][0]
@@ -145,7 +166,12 @@ def read_density(path: Path) -> Dict[str, object]:
             "fragment": records["FRAGMENT"][0][0],
             "state": records["STATE"][0][0],
             "geometry": records["GEOMETRY"][0][0],
+            "schema_version": schema_version,
             "cycle": cycle,
+            "scf_converged": scf_converged,
+            "scf_iterations": scf_iterations,
+            "scf_density_residual": scf_density_residual,
+            "initialization_seed": initialization_seed,
             "grid_size": len(alpha),
             "cell_volume": float(grid[3]),
             "alpha": alpha,
@@ -153,6 +179,32 @@ def read_density(path: Path) -> Dict[str, object]:
         }
     except (KeyError, IndexError, ValueError) as error:
         raise WorkflowError(f"malformed density artifact {path}: {error}") from error
+
+
+def select_scf_density(job_directory: Path,
+                       allow_partial_scf: bool) -> Tuple[Path, Dict[str, object]]:
+    converged_path = job_directory / "result.fde_density"
+    partial_path = job_directory / "result.partial.fde_density"
+    if converged_path.is_file() and partial_path.is_file():
+        raise WorkflowError(f"ABACUS produced conflicting FDE densities in {job_directory}")
+    if converged_path.is_file():
+        density = read_density(converged_path)
+        if not density["scf_converged"]:
+            raise WorkflowError(f"converged FDE density has a false SCF flag: {converged_path}")
+        return converged_path, density
+    if not partial_path.is_file():
+        raise WorkflowError(f"ABACUS did not produce an FDE density in {job_directory}")
+    if not allow_partial_scf:
+        raise WorkflowError(
+            f"ABACUS produced only a partial FDE density in {job_directory}; "
+            "set controls.allow_partial_scf=true to accept it")
+    density = read_density(partial_path)
+    residual = density["scf_density_residual"]
+    if (density["schema_version"] < 2 or density["scf_converged"]
+            or density["scf_iterations"] <= 0 or residual is None
+            or not math.isfinite(float(residual)) or float(residual) < 0.0):
+        raise WorkflowError(f"partial FDE density lacks valid SCF metadata: {partial_path}")
+    return partial_path, density
 
 
 def density_rms(first: Mapping[str, object], second: Mapping[str, object]) -> float:
@@ -394,6 +446,7 @@ def run_state(spec: Mapping[str, object],
     kpar = int(controls.get("kpar", 1))
     retain_completed_cycles = int(controls.get("retain_completed_cycles", 0))
     remove_restarts = bool(controls.get("remove_abacus_restart_files", False))
+    allow_partial_scf = bool(controls.get("allow_partial_scf", False))
     state_directory = output_directory / str(state["label"])
     state_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = state_directory / "checkpoint.json"
@@ -402,7 +455,8 @@ def run_state(spec: Mapping[str, object],
         raise WorkflowError(f"state {state['label']} requires one initial density per fragment")
     densities = {label: Path(initial[label]).resolve() for label in labels}
     start_cycle = 1
-    previous_energy = None
+    previous_complete_energy = None
+    previous_cycle_complete = False
     history: List[Dict[str, object]] = []
     if checkpoint_path.exists():
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -410,15 +464,18 @@ def run_state(spec: Mapping[str, object],
             return checkpoint
         densities = {label: Path(checkpoint["densities"][label]) for label in labels}
         start_cycle = int(checkpoint["cycle"]) + 1
-        previous_energy = checkpoint.get("energy_ry")
+        previous_cycle_complete = bool(checkpoint.get("all_inner_scf_converged", False))
+        if previous_cycle_complete:
+            previous_complete_energy = checkpoint.get("energy_ry")
         history = list(checkpoint.get("history", []))
 
     neutral = {fragment["label"]: int(fragment["neutral_valence_electrons"])
                for fragment in fragments}
-    last_fragments: Dict[str, Path] = {}
     for cycle in range(start_cycle, maximum_cycles + 1):
         old_density_data = {label: read_density(path) for label, path in densities.items()}
         cycle_fragments: List[Mapping[str, object]] = []
+        cycle_fragment_paths: Dict[str, Path] = {}
+        cycle_scf: Dict[str, Dict[str, object]] = {}
         for active_label in update_order:
             assignment = state["fragments"][active_label]
             alpha, beta = spin_population(neutral[active_label],
@@ -446,40 +503,63 @@ def run_state(spec: Mapping[str, object],
                                            stderr=subprocess.STDOUT, check=False)
             if completed.returncode != 0:
                 raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
-            density_path = job_directory / "result.fde_density"
+            density_path, density_data = select_scf_density(job_directory,
+                                                            allow_partial_scf)
+            inner_converged = bool(density_data["scf_converged"])
             fragment_path = job_directory / "result.fde_fragment"
-            if not density_path.is_file() or not fragment_path.is_file():
-                raise WorkflowError(f"ABACUS did not produce FDE artifacts in {job_directory}")
+            if inner_converged and not fragment_path.is_file():
+                raise WorkflowError(
+                    f"converged ABACUS job did not produce an FDE fragment in {job_directory}")
+            if not inner_converged and fragment_path.exists():
+                raise WorkflowError(
+                    f"partial ABACUS job produced a final FDE fragment in {job_directory}")
             if remove_restarts:
                 remove_abacus_restart_files(job_directory)
             densities[active_label] = density_path.resolve()
-            last_fragments[active_label] = fragment_path.resolve()
-            cycle_fragments.append(read_fragment(fragment_path))
+            cycle_scf[active_label] = {
+                "converged": inner_converged,
+                "iterations": density_data["scf_iterations"],
+                "density_residual": density_data["scf_density_residual"],
+            }
+            if inner_converged:
+                cycle_fragment_paths[active_label] = fragment_path.resolve()
+                cycle_fragments.append(read_fragment(fragment_path))
         residual = max(density_rms(old_density_data[label], read_density(densities[label]))
                        for label in labels)
-        energy = canonical_two_fragment_energy(cycle_fragments, symmetry_tolerance)
-        energy_change = None if previous_energy is None else abs(energy - float(previous_energy))
-        converged = residual <= density_tolerance and energy_change is not None and energy_change <= energy_tolerance
+        all_inner_converged = len(cycle_fragment_paths) == len(labels)
+        energy = (canonical_two_fragment_energy(cycle_fragments, symmetry_tolerance)
+                  if all_inner_converged else None)
+        energy_change = (abs(float(energy) - float(previous_complete_energy))
+                         if (energy is not None and previous_cycle_complete
+                             and previous_complete_energy is not None) else None)
+        converged = (all_inner_converged and residual <= density_tolerance
+                     and energy_change is not None
+                     and energy_change <= energy_tolerance)
         history.append({"cycle": cycle, "density_rms": residual, "energy_ry": energy,
-                        "energy_change_ry": energy_change})
+                        "energy_change_ry": energy_change,
+                        "all_inner_scf_converged": all_inner_converged,
+                        "inner_scf": cycle_scf})
         checkpoint: Dict[str, object] = {
             "schema_version": 1, "geometry": geometry["label"], "state": state["label"],
             "cycle": cycle, "converged": converged, "density_rms": residual,
             "energy_ry": energy, "energy_change_ry": energy_change,
+            "all_inner_scf_converged": all_inner_converged,
+            "inner_scf": cycle_scf,
             "densities": {label: str(densities[label]) for label in labels},
-            "fragments": {label: str(last_fragments[label]) for label in labels},
+            "fragments": {label: str(path) for label, path in cycle_fragment_paths.items()},
             "history": history,
         }
         _atomic_json(checkpoint_path, checkpoint)
         prune_completed_cycles(state_directory, cycle, retain_completed_cycles)
         if converged:
             composed = compose_state(str(state["label"]),
-                                     [last_fragments[label] for label in labels],
-                                     energy, state_directory)
+                                     [cycle_fragment_paths[label] for label in labels],
+                                     float(energy), state_directory)
             checkpoint.update(composed)
             _atomic_json(checkpoint_path, checkpoint)
             return checkpoint
-        previous_energy = energy
+        previous_cycle_complete = all_inner_converged
+        previous_complete_energy = energy if all_inner_converged else None
     raise WorkflowError(f"state {state['label']} did not converge in {maximum_cycles} cycles")
 
 
