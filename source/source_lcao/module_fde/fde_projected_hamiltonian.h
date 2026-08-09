@@ -39,6 +39,7 @@ class FdeProjectedHamiltonian : public hamilt::Hamilt<double>
     double inactive_energy_ry_;
     std::vector<double> projected_hamiltonian_;
     std::vector<double> projected_overlap_;
+    bool overlap_initialized_;
 };
 
 } // namespace fde

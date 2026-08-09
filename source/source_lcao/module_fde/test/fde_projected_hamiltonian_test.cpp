@@ -111,3 +111,28 @@ TEST(FdeProjectedHamiltonian, RejectsUnsortedOrCompleteSelections)
                                               1.0e6),
                  std::invalid_argument);
 }
+
+TEST(FdeProjectedHamiltonian, PreservesFactorizedOverlapWithinOneSolve)
+{
+    DenseHamiltonian full;
+    Parallel_2D distribution;
+    distribution.set_serial(4, 4);
+    fde::FdeProjectedHamiltonian projected(full,
+                                           distribution,
+                                           4,
+                                           {0, 2},
+                                           1.0e6);
+    hamilt::MatrixBlock<double> h;
+    hamilt::MatrixBlock<double> s;
+    projected.matrix(h, s);
+
+    // Generalized ELPA factorizes S in place after solving alpha.  The beta
+    // call must see that same storage, not a newly reconstructed raw overlap.
+    s.p[0 + 0 * 4] = 7.0;
+    s.p[2 + 0 * 4] = 0.25;
+    projected.matrix(h, s);
+
+    EXPECT_DOUBLE_EQ(s.p[0 + 0 * 4], 7.0);
+    EXPECT_DOUBLE_EQ(s.p[2 + 0 * 4], 0.25);
+    EXPECT_DOUBLE_EQ(h.p[2 + 0 * 4], 0.2);
+}

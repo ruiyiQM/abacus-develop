@@ -24,7 +24,8 @@ FdeProjectedHamiltonian::FdeProjectedHamiltonian(
                              0.0),
       projected_overlap_(static_cast<std::size_t>(
                              orbital_distribution.get_local_size()),
-                         0.0)
+                         0.0),
+      overlap_initialized_(false)
 {
     if (full_dimension == 0 || active_orbitals.empty()
         || active_orbitals.size() >= full_dimension
@@ -82,7 +83,10 @@ void FdeProjectedHamiltonian::matrix(hamilt::MatrixBlock<double>& hamiltonian,
     }
 
     std::fill(projected_hamiltonian_.begin(), projected_hamiltonian_.end(), 0.0);
-    std::fill(projected_overlap_.begin(), projected_overlap_.end(), 0.0);
+    if (!overlap_initialized_)
+    {
+        std::fill(projected_overlap_.begin(), projected_overlap_.end(), 0.0);
+    }
     for (std::size_t local_column = 0; local_column < local_columns; ++local_column)
     {
         const std::size_t global_column = static_cast<std::size_t>(
@@ -95,15 +99,22 @@ void FdeProjectedHamiltonian::matrix(hamilt::MatrixBlock<double>& hamiltonian,
             if (is_active_[global_row] && is_active_[global_column])
             {
                 projected_hamiltonian_[offset] = full_h.p[offset];
-                projected_overlap_[offset] = full_s.p[offset];
+                if (!overlap_initialized_)
+                {
+                    projected_overlap_[offset] = full_s.p[offset];
+                }
             }
             else if (global_row == global_column)
             {
                 projected_hamiltonian_[offset] = inactive_energy_ry_;
-                projected_overlap_[offset] = 1.0;
+                if (!overlap_initialized_)
+                {
+                    projected_overlap_[offset] = 1.0;
+                }
             }
         }
     }
+    overlap_initialized_ = true;
     hamiltonian = hamilt::MatrixBlock<double>{projected_hamiltonian_.data(),
                                               local_rows,
                                               local_columns,
