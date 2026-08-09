@@ -68,7 +68,8 @@ class FdeLcaoDriver
 
     std::unique_ptr<FdeProjectedHamiltonian>
     projected_hamiltonian(
-        hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian) const;
+        hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+        const Parallel_Orbitals& orbitals) const;
 
     void solve_projected(hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
                          psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,

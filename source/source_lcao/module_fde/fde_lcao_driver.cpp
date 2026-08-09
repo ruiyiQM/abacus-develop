@@ -212,11 +212,9 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     }
     const std::size_t full_dimension
         = static_cast<std::size_t>(orbitals.get_global_row_size());
-    if (orbitals.get_row_size() != orbitals.get_global_row_size()
-        || orbitals.get_col_size() != orbitals.get_global_col_size())
+    if (orbitals.get_global_col_size() != orbitals.get_global_row_size())
     {
-        throw std::invalid_argument(
-            "FDE embedded_scf currently requires replicated Gamma AO matrices");
+        throw std::invalid_argument("FDE embedded_scf requires a square AO distribution");
     }
     const std::vector<std::size_t> active_orbitals
         = active_ao_indices(config, unit_cell, full_dimension);
@@ -416,10 +414,12 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
 }
 
 std::unique_ptr<FdeProjectedHamiltonian> FdeLcaoDriver::projected_hamiltonian(
-    hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian) const
+    hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+    const Parallel_Orbitals& orbitals) const
 {
     return std::unique_ptr<FdeProjectedHamiltonian>(
         new FdeProjectedHamiltonian(full_hamiltonian,
+                                    orbitals,
                                     full_ao_dimension_,
                                     active_orbitals_,
                                     1.0e6));
@@ -434,7 +434,7 @@ void FdeLcaoDriver::solve_projected(
     const Parallel_Orbitals& orbitals) const
 {
     std::unique_ptr<FdeProjectedHamiltonian> projected
-        = this->projected_hamiltonian(full_hamiltonian);
+        = this->projected_hamiltonian(full_hamiltonian, orbitals);
     hsolver::HSolverLCAO<double> solver(&orbitals,
                                        ks_solver_,
                                        kpar_,

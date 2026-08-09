@@ -1,6 +1,7 @@
 #ifndef FDE_PROJECTED_HAMILTONIAN_H
 #define FDE_PROJECTED_HAMILTONIAN_H
 
+#include "source_base/parallel_2d.h"
 #include "source_hamilt/hamilt.h"
 
 #include <cstddef>
@@ -10,13 +11,14 @@ namespace fde
 {
 
 /**
- * Replicated real-Gamma Hamiltonian view whose low-energy variational space is
- * exactly the selected fragment AO principal subspace.
+ * Distributed real-Gamma Hamiltonian view whose low-energy variational space
+ * is exactly the selected fragment AO principal subspace.
  */
 class FdeProjectedHamiltonian : public hamilt::Hamilt<double>
 {
   public:
     FdeProjectedHamiltonian(hamilt::Hamilt<double>& full_hamiltonian,
+                            const Parallel_2D& orbital_distribution,
                             std::size_t full_dimension,
                             const std::vector<std::size_t>& active_orbitals,
                             double inactive_energy_ry);
@@ -30,6 +32,7 @@ class FdeProjectedHamiltonian : public hamilt::Hamilt<double>
 
   private:
     hamilt::Hamilt<double>* full_hamiltonian_;
+    const Parallel_2D* orbital_distribution_;
     std::size_t full_dimension_;
     std::vector<std::size_t> active_orbitals_;
     std::vector<bool> is_active_;

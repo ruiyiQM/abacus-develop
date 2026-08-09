@@ -67,7 +67,13 @@ class DenseHamiltonian : public hamilt::Hamilt<double>
 TEST(FdeProjectedHamiltonian, RetainsOnlyActivePrincipalSubspace)
 {
     DenseHamiltonian full;
-    fde::FdeProjectedHamiltonian projected(full, 4, {0, 2}, 1.0e6);
+    Parallel_2D distribution;
+    distribution.set_serial(4, 4);
+    fde::FdeProjectedHamiltonian projected(full,
+                                           distribution,
+                                           4,
+                                           {0, 2},
+                                           1.0e6);
     projected.updateHk(0);
     hamilt::MatrixBlock<double> h;
     hamilt::MatrixBlock<double> s;
@@ -90,8 +96,18 @@ TEST(FdeProjectedHamiltonian, RetainsOnlyActivePrincipalSubspace)
 TEST(FdeProjectedHamiltonian, RejectsUnsortedOrCompleteSelections)
 {
     DenseHamiltonian full;
-    EXPECT_THROW(fde::FdeProjectedHamiltonian(full, 4, {2, 0}, 1.0e6),
+    Parallel_2D distribution;
+    distribution.set_serial(4, 4);
+    EXPECT_THROW(fde::FdeProjectedHamiltonian(full,
+                                              distribution,
+                                              4,
+                                              {2, 0},
+                                              1.0e6),
                  std::invalid_argument);
-    EXPECT_THROW(fde::FdeProjectedHamiltonian(full, 4, {0, 1, 2, 3}, 1.0e6),
+    EXPECT_THROW(fde::FdeProjectedHamiltonian(full,
+                                              distribution,
+                                              4,
+                                              {0, 1, 2, 3},
+                                              1.0e6),
                  std::invalid_argument);
 }
