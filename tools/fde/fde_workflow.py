@@ -51,6 +51,23 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     command = spec.get("abacus_command")
     if not isinstance(command, list) or not command or not all(isinstance(x, str) and x for x in command):
         raise WorkflowError("abacus_command must be a nonempty JSON string array")
+    controls = spec.get("controls", {})
+    if not isinstance(controls, dict):
+        raise WorkflowError("controls must be a JSON object")
+    solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
+    if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
+        raise WorkflowError(
+            "ks_solver must be lapack, genelpa, elpa, or scalapack_gvx")
+    if int(controls.get("kpar", 1)) != 1:
+        raise WorkflowError("the Gamma-point FDE workflow currently requires kpar 1")
+    retained_cycles = controls.get("retain_completed_cycles", 0)
+    if (isinstance(retained_cycles, bool)
+            or not isinstance(retained_cycles, int)
+            or retained_cycles < 0):
+        raise WorkflowError("retain_completed_cycles must be a nonnegative integer")
+    remove_restarts = controls.get("remove_abacus_restart_files", False)
+    if not isinstance(remove_restarts, bool):
+        raise WorkflowError("remove_abacus_restart_files must be a boolean")
     fragments = spec.get("fragments")
     states = spec.get("states")
     if not isinstance(fragments, list) or len(fragments) != 2:
@@ -335,6 +352,32 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
     temporary.replace(path)
 
 
+def remove_abacus_restart_files(job_directory: Path) -> None:
+    """Remove large, reproducible charge restart files from one finished job."""
+    for output_directory in job_directory.glob("OUT.*"):
+        if not output_directory.is_dir() or output_directory.is_symlink():
+            continue
+        for restart in output_directory.glob("*-CHARGE-DENSITY.restart"):
+            if restart.is_file() and not restart.is_symlink():
+                restart.unlink()
+
+
+def prune_completed_cycles(state_directory: Path,
+                           current_cycle: int,
+                           retain_completed_cycles: int) -> None:
+    """Keep only the requested newest complete freeze--thaw cycle directories."""
+    if retain_completed_cycles <= 0:
+        return
+    first_retained_cycle = current_cycle - retain_completed_cycles + 1
+    for candidate in state_directory.iterdir():
+        match = re.fullmatch(r"cycle-([0-9]+)", candidate.name)
+        if (match is not None
+                and int(match.group(1)) < first_retained_cycle
+                and candidate.is_dir()
+                and not candidate.is_symlink()):
+            shutil.rmtree(candidate)
+
+
 def run_state(spec: Mapping[str, object],
               geometry: Mapping[str, object],
               state: Mapping[str, object],
@@ -347,6 +390,10 @@ def run_state(spec: Mapping[str, object],
     density_tolerance = float(controls.get("freeze_thaw_density_tolerance", 1e-7))
     energy_tolerance = float(controls.get("energy_tolerance_ry", 1e-8))
     symmetry_tolerance = float(controls.get("symmetry_tolerance", 1e-10))
+    ks_solver = str(controls.get("ks_solver", "lapack"))
+    kpar = int(controls.get("kpar", 1))
+    retain_completed_cycles = int(controls.get("retain_completed_cycles", 0))
+    remove_restarts = bool(controls.get("remove_abacus_restart_files", False))
     state_directory = output_directory / str(state["label"])
     state_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = state_directory / "checkpoint.json"
@@ -386,7 +433,7 @@ def run_state(spec: Mapping[str, object],
             patch_input(job_directory / "INPUT", {
                 "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
                 "nspin": 2, "noncolin": 0, "lspinorb": 0, "symmetry": 0,
-                "dft_functional": "pbe", "ks_solver": "lapack", "kpar": 1,
+                "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
                 "nelec": alpha + beta, "nupdown": alpha - beta,
                 "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
             })
@@ -403,6 +450,8 @@ def run_state(spec: Mapping[str, object],
             fragment_path = job_directory / "result.fde_fragment"
             if not density_path.is_file() or not fragment_path.is_file():
                 raise WorkflowError(f"ABACUS did not produce FDE artifacts in {job_directory}")
+            if remove_restarts:
+                remove_abacus_restart_files(job_directory)
             densities[active_label] = density_path.resolve()
             last_fragments[active_label] = fragment_path.resolve()
             cycle_fragments.append(read_fragment(fragment_path))
@@ -422,6 +471,7 @@ def run_state(spec: Mapping[str, object],
             "history": history,
         }
         _atomic_json(checkpoint_path, checkpoint)
+        prune_completed_cycles(state_directory, cycle, retain_completed_cycles)
         if converged:
             composed = compose_state(str(state["label"]),
                                      [last_fragments[label] for label in labels],

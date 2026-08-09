@@ -45,6 +45,9 @@ config = Path(value(cwd / "INPUT", "fde_config"))
 state = value(config, "ACTIVE_STATE")
 fragment = value(config, "ACTIVE_FRAGMENT")
 cycle = int(cwd.parent.name.split("-")[1])
+output = cwd / "OUT.fake"
+output.mkdir()
+(output / "fake-CHARGE-DENSITY.restart").write_text("restart", encoding="utf-8")
 populations = {
     ("reactant", "F"): (4, 4), ("reactant", "CH3Cl"): (7, 7),
     ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
@@ -143,6 +146,10 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 "controls": {"maximum_freeze_thaw_cycles": 3,
                              "freeze_thaw_density_tolerance": 1e-12,
                              "energy_tolerance_ry": 1e-12,
+                             "ks_solver": "genelpa",
+                             "kpar": 1,
+                             "retain_completed_cycles": 1,
+                             "remove_abacus_restart_files": True,
                              "update_order": ["F", "CH3Cl"]},
                 "geometries": [{"label": "g0", "coordinate_angstrom": 0.2,
                                 "template_directory": str(template),
@@ -172,6 +179,11 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 self.assertTrue(checkpoint["converged"])
                 self.assertEqual(checkpoint["cycle"], 2)
                 self.assertIn(f"/{state}/", checkpoint["densities"]["F"])
+                self.assertFalse((checkpoint_path.parent / "cycle-001").exists())
+                input_text = (checkpoint_path.parent / "cycle-002" / "F" / "INPUT").read_text(
+                    encoding="utf-8")
+                self.assertIn("ks_solver                genelpa", input_text)
+            self.assertFalse(list(work.glob("**/*-CHARGE-DENSITY.restart")))
             logs = list(work.glob("g0/*/cycle-*/*/fde_abacus.log"))
             logs.append(work / "g0" / "postprocess" / "fde_postprocess.log")
             self.assertTrue(all("OMP_NUM_THREADS=1" in path.read_text(encoding="utf-8")

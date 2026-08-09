@@ -47,6 +47,19 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_distributed_solver_and_cleanup_controls(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "ks_solver": "genelpa",
+            "kpar": 1,
+            "retain_completed_cycles": 1,
+            "remove_abacus_restart_files": True,
+        }
+        fde_workflow.validate_spec(spec)
+        spec["controls"]["ks_solver"] = "cg"
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
     def test_canonical_energy_counts_shared_terms_once(self):
         artifacts = [
             {"subsystem_total_energy_ry": -10.0, "ion_ion_energy_ry": 2.0,
