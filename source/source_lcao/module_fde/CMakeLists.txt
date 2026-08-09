@@ -9,6 +9,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_electronic_coupling.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_energy_ledger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_finite_difference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_fragment_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_freeze_thaw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_lcao_driver.cpp

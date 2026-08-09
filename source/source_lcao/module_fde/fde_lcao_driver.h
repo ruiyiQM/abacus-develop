@@ -14,6 +14,7 @@ class Charge;
 struct Input_para;
 class Parallel_Orbitals;
 class UnitCell;
+class K_Vectors;
 
 namespace ModulePW
 {
@@ -44,6 +45,7 @@ namespace fde
 {
 
 class FdeProjectedHamiltonian;
+class PotFde;
 
 /** Runtime-owned bridge from one task-local FDE_CONFIG to ABACUS LCAO. */
 class FdeLcaoDriver
@@ -59,6 +61,7 @@ class FdeLcaoDriver
     int active_beta_electrons() const;
 
     void initialize_active_charge(Charge& charge) const;
+    void validate_core_density(const Charge& charge) const;
     void attach_embedding_potential(ModulePW::PW_Basis& density_basis,
                                     const UnitCell& unit_cell,
                                     elecstate::Potential& potential);
@@ -73,6 +76,13 @@ class FdeLcaoDriver
                          elecstate::DensityMatrix<double, double>& density_matrix,
                          Charge& charge,
                          const Parallel_Orbitals& orbitals) const;
+
+    void write_converged_artifacts(
+        Charge& charge,
+        psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+        elecstate::ElecState& electronic_state,
+        hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+        const K_Vectors& kpoints);
 
   private:
     FdeLcaoDriver(const FdeRuntimeConfig& config,
@@ -98,6 +108,7 @@ class FdeLcaoDriver
     int active_beta_electrons_;
     FrozenDensityArtifact active_initial_;
     std::vector<FrozenDensityArtifact> frozen_environment_;
+    PotFde* embedding_potential_;
 };
 
 } // namespace fde

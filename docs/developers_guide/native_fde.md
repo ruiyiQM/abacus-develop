@@ -160,6 +160,22 @@ replicated real-Gamma matrices, `ks_solver lapack`, and an orthogonal molecular
 cell. Distributed AO/grid execution is rejected explicitly instead of silently
 using rank-local matrix or density fragments.
 
+The first executable runtime also rejects pseudopotentials with a nonzero
+nonlinear core correction. The RP0 equations describe fragment-owned core
+densities, but ABACUS does not yet expose that ownership to the task-local
+driver. Rejecting NLCC avoids evaluating PBE nonadditivity with the complete
+supersystem core density in both subsystem jobs. Use norm-conserving
+pseudopotentials without NLCC for the current molecular path.
+
+After a converged embedded SCF, the driver writes
+`<OUTPUT_PREFIX>.fde_density` and `<OUTPUT_PREFIX>.fde_fragment`. The latter
+contains the subsystem `etot`, the shared ion-ion term, the three embedding
+energy corrections, occupied alpha/beta AO columns, the AO overlap, and the
+final unprojected spin Hamiltonians. Every matrix remains in the authoritative
+supersystem AO order. These versioned artifacts are sufficient to restart the
+outer loop and to construct a two-state determinant and a linearized
+transition-energy model without scraping human-readable ABACUS logs.
+
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,
 one active subsystem, and one freeze-thaw cycle. An external restartable
 workflow alternates A-in-B and B-in-A jobs. A frozen-density artifact records a
@@ -169,6 +185,32 @@ and convergence metadata.
 
 Warm starts are allowed only between neighboring geometries on the same state
 branch. The two quasi-diabatic states must never initialize one another.
+
+`tools/fde/fde_workflow.py` is the process-level owner of freeze-thaw and PES
+execution. A JSON specification supplies an ABACUS command array, two
+fragments, two or more explicit charge/spin states, one template calculation
+directory per geometry, and initial density artifacts. The workflow creates
+one isolated working directory and `FDE_CONFIG` per active-fragment update,
+sets `OMP_NUM_THREADS=1` unless the caller already selected a value, and runs
+the command without a shell. It checkpoints only after a complete A/B sweep.
+Restart never shares a density between state labels.
+
+For the current two-fragment runtime, the canonical state energy is recovered
+from the last complete sweep as
+
+```text
+E_FDE = E_A^ABACUS + E_B^ABACUS - E_nn
+      + E_H^nad + T_s^nad + E_xc^nad.
+```
+
+The correction is taken from the final update of the sweep, where its active
+and frozen densities are the final A/B pair. The workflow requires both jobs
+to report the same `E_nn`, then applies density and energy thresholds only at
+the sweep boundary. On convergence it writes one determinant and one
+linearized-state artifact per state, an AO-overlap artifact, and a postprocess
+`FDE_CONFIG`. More-than-two-fragment in-memory APIs remain available, but the
+external production scheduler deliberately stops at two until the generalized
+runtime energy recomputation is connected.
 
 `OneWayScf` owns the RP5 embedded-SCF loop. It reads a compatible active/frozen
 artifact pair, evaluates the embedding potential, solves alpha and beta active

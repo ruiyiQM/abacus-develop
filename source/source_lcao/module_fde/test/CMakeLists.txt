@@ -45,6 +45,14 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_fragment_artifact
+  SOURCES fde_fragment_artifact_test.cpp
+    ../fde_fragment_artifact.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_determinant_artifact
   SOURCES fde_determinant_artifact_test.cpp
     ../fde_ao_projection.cpp

@@ -79,6 +79,45 @@ bool solve_native_fde<double>(
     return true;
 }
 
+template <typename TK>
+void write_native_fde(
+    fde::FdeLcaoDriver* driver,
+    Charge& charge,
+    psi::Psi<TK>& wavefunctions,
+    elecstate::ElecState* electronic_state,
+    hamilt::Hamilt<TK>* full_hamiltonian,
+    const K_Vectors& kpoints)
+{
+    (void)charge;
+    (void)wavefunctions;
+    (void)electronic_state;
+    (void)full_hamiltonian;
+    (void)kpoints;
+    if (driver != nullptr)
+    {
+        throw std::runtime_error("FDE artifact output requires real Gamma LCAO data");
+    }
+}
+
+template <>
+void write_native_fde<double>(
+    fde::FdeLcaoDriver* driver,
+    Charge& charge,
+    psi::Psi<double>& wavefunctions,
+    elecstate::ElecState* electronic_state,
+    hamilt::Hamilt<double>* full_hamiltonian,
+    const K_Vectors& kpoints)
+{
+    if (driver != nullptr)
+    {
+        driver->write_converged_artifacts(charge,
+                                          wavefunctions,
+                                          *electronic_state,
+                                          *full_hamiltonian,
+                                          kpoints);
+    }
+}
+
 } // namespace
 
 namespace ModuleESolver
@@ -276,6 +315,10 @@ void ESolver_KS_LCAO<TK, TR>::before_scf(UnitCell& ucell, const int istep)
     }
     elecstate::init_scf(ucell, this->Pgrid, this->sf.strucFac, this->locpp.numeric,
                           istep, PARAM.globalv.global_out_dir, PARAM.inp, this->pelec);
+    if (this->fde_driver_)
+    {
+        this->fde_driver_->validate_core_density(this->chr);
+    }
 
 #ifdef __MLALGO
     // 14) initialize DM2(R) of DeePKS, the DM2(R) is different from DM(R)
@@ -635,6 +678,16 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
 
     //! 1) call after_scf() of ESolver_KS
     ESolver_KS::after_scf(ucell, istep, conv_esolver);
+
+    if (conv_esolver)
+    {
+        write_native_fde<TK>(this->fde_driver_.get(),
+                             this->chr,
+                             this->psi[0],
+                             this->pelec,
+                             static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt),
+                             this->kv);
+    }
 
     //! 2) output of lcao every few ionic steps
     ModuleIO::ctrl_scf_lcao<TK, TR>(ucell,

@@ -2,19 +2,24 @@
 
 #include "fde_potential_evaluator.h"
 #include "fde_projected_hamiltonian.h"
+#include "fde_fragment_artifact.h"
 #include "pot_fde.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
 #include "source_basis/module_pw/pw_basis.h"
 #include "source_cell/unitcell.h"
+#include "source_cell/klist.h"
+#include "source_estate/elecstate.h"
 #include "source_estate/module_charge/charge.h"
 #include "source_estate/module_pot/H_Hartree_pw.h"
 #include "source_estate/module_pot/potential_new.h"
 #include "source_io/module_parameter/input_parameter.h"
 #include "source_hsolver/hsolver_lcao.h"
+#include "source_psi/psi.h"
 
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -182,7 +187,8 @@ FdeLcaoDriver::FdeLcaoDriver(
       active_alpha_electrons_(active_alpha_electrons),
       active_beta_electrons_(active_beta_electrons),
       active_initial_(active_initial),
-      frozen_environment_(frozen_environment)
+      frozen_environment_(frozen_environment),
+      embedding_potential_(nullptr)
 {
 }
 
@@ -326,6 +332,25 @@ void FdeLcaoDriver::initialize_active_charge(Charge& charge) const
               charge.rho[1]);
 }
 
+void FdeLcaoDriver::validate_core_density(const Charge& charge) const
+{
+    if (charge.rhopw == nullptr || charge.rho_core == nullptr)
+    {
+        throw std::invalid_argument("FDE core-density validation requires an initialized Charge grid");
+    }
+    double maximum_core_density = 0.0;
+    for (int point = 0; point < charge.rhopw->nrxx; ++point)
+    {
+        maximum_core_density = std::max(maximum_core_density,
+                                        std::fabs(charge.rho_core[point]));
+    }
+    if (maximum_core_density > 1.0e-14)
+    {
+        throw std::invalid_argument(
+            "FDE embedded_scf currently requires pseudopotentials without nonlinear core correction");
+    }
+}
+
 void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis,
                                                const UnitCell& unit_cell,
                                                elecstate::Potential& potential)
@@ -366,12 +391,13 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
     potential_config.kinetic_functional = config_.kinetic_functional;
     potential_config.density_floor_bohr3 = config_.density_floor_bohr3;
     std::shared_ptr<const NonadditiveXcProvider> xc_provider(new LibxcPbeProvider());
-    potential.append_component(std::unique_ptr<elecstate::PotBase>(
-        new PotFde(&density_basis,
-                   frozen,
-                   hartree,
-                   potential_config,
-                   xc_provider)));
+    std::unique_ptr<PotFde> component(new PotFde(&density_basis,
+                                                frozen,
+                                                hartree,
+                                                potential_config,
+                                                xc_provider));
+    embedding_potential_ = component.get();
+    potential.append_component(std::unique_ptr<elecstate::PotBase>(component.release()));
 }
 
 std::unique_ptr<FdeProjectedHamiltonian> FdeLcaoDriver::projected_hamiltonian(
@@ -408,6 +434,200 @@ void FdeLcaoDriver::solve_projected(
                  charge,
                  2,
                  false);
+}
+
+namespace
+{
+
+void normalize_density(std::vector<double>& density,
+                       const int electron_count,
+                       const double cell_volume_bohr3)
+{
+    double integral = 0.0;
+    for (std::size_t point = 0; point < density.size(); ++point)
+    {
+        if (!std::isfinite(density[point]))
+        {
+            throw std::runtime_error("FDE converged density contains a non-finite value");
+        }
+        density[point] = std::max(0.0, density[point]);
+        integral += density[point];
+    }
+    integral *= cell_volume_bohr3 / static_cast<double>(density.size());
+    if (electron_count == 0)
+    {
+        std::fill(density.begin(), density.end(), 0.0);
+        return;
+    }
+    if (!std::isfinite(integral) || integral <= std::numeric_limits<double>::min())
+    {
+        throw std::runtime_error("FDE converged density has zero integrated population");
+    }
+    const double scale = static_cast<double>(electron_count) / integral;
+    for (std::size_t point = 0; point < density.size(); ++point)
+    {
+        density[point] *= scale;
+    }
+}
+
+void copy_matrix(const hamilt::MatrixBlock<double>& matrix,
+                 const std::size_t dimension,
+                 std::vector<double>& output)
+{
+    if (matrix.p == nullptr || matrix.row != dimension || matrix.col != dimension)
+    {
+        throw std::runtime_error("FDE runtime output requires a replicated square AO matrix");
+    }
+    output.assign(matrix.p, matrix.p + dimension * dimension);
+}
+
+void append_occupied_spin(const psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+                          const elecstate::ElecState& electronic_state,
+                          const int kpoint,
+                          const int electron_count,
+                          const std::size_t dimension,
+                          const std::string& fragment_label,
+                          OccupiedSpinOrbitals& output)
+{
+    if (electron_count < 0 || electron_count > wavefunctions.get_nbands())
+    {
+        throw std::runtime_error("FDE occupied population does not fit the solved band space");
+    }
+    output.coefficients.assign(dimension * static_cast<std::size_t>(electron_count), 0.0);
+    output.orbital_energies_ry.resize(static_cast<std::size_t>(electron_count));
+    output.source_fragment_labels.assign(static_cast<std::size_t>(electron_count),
+                                         fragment_label);
+    for (int band = 0; band < electron_count; ++band)
+    {
+        output.orbital_energies_ry[band] = electronic_state.ekb(kpoint, band);
+        for (std::size_t ao = 0; ao < dimension; ++ao)
+        {
+            output.coefficients[ao + static_cast<std::size_t>(band) * dimension]
+                = wavefunctions(kpoint, band, static_cast<int>(ao));
+        }
+    }
+}
+
+} // namespace
+
+void FdeLcaoDriver::write_converged_artifacts(
+    Charge& charge,
+    psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+    elecstate::ElecState& electronic_state,
+    hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+    const K_Vectors& kpoints)
+{
+    if (embedding_potential_ == nullptr || charge.nspin != 2
+        || charge.rhopw == nullptr || charge.rho_save == nullptr
+        || wavefunctions.get_nbasis() != static_cast<int>(full_ao_dimension_)
+        || wavefunctions.get_nk() != kpoints.get_nks())
+    {
+        throw std::runtime_error("FDE converged artifact output contract is incomplete");
+    }
+
+    FrozenDensityArtifact density = active_initial_;
+    density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+    density.scf_converged = true;
+    const std::size_t grid_size = density.grid_x * density.grid_y * density.grid_z;
+    density.rho_alpha_bohr3.assign(charge.rho_save[0], charge.rho_save[0] + grid_size);
+    density.rho_beta_bohr3.assign(charge.rho_save[1], charge.rho_save[1] + grid_size);
+    normalize_density(density.rho_alpha_bohr3,
+                      active_alpha_electrons_,
+                      density.cell_volume_bohr3);
+    normalize_density(density.rho_beta_bohr3,
+                      active_beta_electrons_,
+                      density.cell_volume_bohr3);
+    const std::string density_path = config_.output_prefix + ".fde_density";
+    std::ofstream density_output(density_path.c_str());
+    if (!density_output)
+    {
+        throw std::runtime_error("Cannot create FDE density artifact: " + density_path);
+    }
+    DensityArtifactIO::write(density_output, density);
+
+    FragmentScfArtifact fragment;
+    fragment.schema_version = 1;
+    fragment.state_label = config_.active_state;
+    fragment.fragment_label = config_.active_fragment;
+    fragment.geometry_fingerprint = density.geometry_fingerprint;
+    fragment.orbital_fingerprint = density.orbital_fingerprint;
+    fragment.density_path = density_path;
+    fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
+    fragment.scf_converged = true;
+    fragment.ao_dimension = full_ao_dimension_;
+    fragment.active_orbitals = active_orbitals_;
+
+    int spin_kpoint[2] = {-1, -1};
+    for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
+    {
+        const int spin = kpoints.isk[kpoint];
+        if (spin < 0 || spin > 1 || spin_kpoint[spin] != -1)
+        {
+            throw std::runtime_error("FDE output requires exactly one Gamma point per spin");
+        }
+        spin_kpoint[spin] = kpoint;
+    }
+    if (spin_kpoint[0] < 0 || spin_kpoint[1] < 0)
+    {
+        throw std::runtime_error("FDE output is missing a collinear spin channel");
+    }
+    append_occupied_spin(wavefunctions,
+                         electronic_state,
+                         spin_kpoint[0],
+                         active_alpha_electrons_,
+                         full_ao_dimension_,
+                         config_.active_fragment,
+                         fragment.alpha);
+    append_occupied_spin(wavefunctions,
+                         electronic_state,
+                         spin_kpoint[1],
+                         active_beta_electrons_,
+                         full_ao_dimension_,
+                         config_.active_fragment,
+                         fragment.beta);
+
+    for (int spin = 0; spin < 2; ++spin)
+    {
+        full_hamiltonian.updateHk(spin_kpoint[spin]);
+        hamilt::MatrixBlock<double> hamiltonian;
+        hamilt::MatrixBlock<double> overlap;
+        full_hamiltonian.matrix(hamiltonian, overlap);
+        if (spin == 0)
+        {
+            copy_matrix(overlap, full_ao_dimension_, fragment.ao_overlap);
+            copy_matrix(hamiltonian,
+                        full_ao_dimension_,
+                        fragment.hamiltonian_alpha_ry);
+        }
+        else
+        {
+            copy_matrix(hamiltonian,
+                        full_ao_dimension_,
+                        fragment.hamiltonian_beta_ry);
+        }
+    }
+
+    SpinDensity active_density;
+    active_density.alpha_bohr3 = density.rho_alpha_bohr3;
+    active_density.beta_bohr3 = density.rho_beta_bohr3;
+    const EmbeddingPotentialResult embedding
+        = embedding_potential_->evaluate(active_density);
+    fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
+    fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
+    fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
+    fragment.nonadditive_kinetic_energy_ry
+        = embedding.nonadditive_kinetic_energy_ry;
+    fragment.nonadditive_xc_energy_ry = embedding.nonadditive_xc_energy_ry;
+
+    const std::string fragment_path = config_.output_prefix + ".fde_fragment";
+    std::ofstream fragment_output(fragment_path.c_str());
+    if (!fragment_output)
+    {
+        throw std::runtime_error("Cannot create FDE fragment SCF artifact: " + fragment_path);
+    }
+    FragmentScfArtifactIO::write(fragment_output,
+                                 fragment,
+                                 config_.symmetry_tolerance);
 }
 
 } // namespace fde
