@@ -1,5 +1,10 @@
 #include "fde_solver_policy.h"
 
+#ifdef __ELPA
+#include "source_hsolver/diago_elpa.h"
+#include "source_hsolver/diago_elpa_native.h"
+#endif
+
 #include <stdexcept>
 
 namespace fde
@@ -38,6 +43,22 @@ void FdeSolverPolicy::validate(const std::string& solver,
         throw std::invalid_argument(
             "FDE requested an ELPA solver but ABACUS was built without ELPA");
     }
+#endif
+}
+
+void FdeSolverPolicy::prepare_fresh_overlap(const std::string& solver)
+{
+#ifdef __ELPA
+    if (solver == "genelpa")
+    {
+        hsolver::DiagoElpa<double>::DecomposedState = 0;
+    }
+    else if (solver == "elpa")
+    {
+        hsolver::DiagoElpaNative<double>::DecomposedState = 0;
+    }
+#else
+    (void)solver;
 #endif
 }
 

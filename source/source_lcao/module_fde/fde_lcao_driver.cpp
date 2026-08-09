@@ -447,6 +447,12 @@ void FdeLcaoDriver::solve_projected(
 {
     std::unique_ptr<FdeProjectedHamiltonian> projected
         = this->projected_hamiltonian(full_hamiltonian, orbitals);
+    // Both legacy and native ELPA cache the factorized overlap in static
+    // solver state.  That optimization is valid for ABACUS' persistent full
+    // AO overlap, but FDE creates a new projected overlap object here on every
+    // SCF iteration.  Reusing the cache would treat the fresh S matrix as the
+    // previous Cholesky inverse and corrupt multi-atom fragment eigenvectors.
+    FdeSolverPolicy::prepare_fresh_overlap(ks_solver_);
     hsolver::HSolverLCAO<double> solver(&orbitals,
                                        ks_solver_,
                                        kpar_,

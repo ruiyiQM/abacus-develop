@@ -1,5 +1,10 @@
 #include "../fde_solver_policy.h"
 
+#ifdef __ELPA
+#include "source_hsolver/diago_elpa.h"
+#include "source_hsolver/diago_elpa_native.h"
+#endif
+
 #include <gtest/gtest.h>
 
 #include <stdexcept>
@@ -24,6 +29,19 @@ TEST(FdeSolverPolicy, AcceptsDistributedElpaSolversWhenBuiltWithElpa)
     EXPECT_TRUE(fde::FdeSolverPolicy::is_distributed_solver("elpa"));
     EXPECT_NO_THROW(fde::FdeSolverPolicy::validate("genelpa", true, 1));
     EXPECT_NO_THROW(fde::FdeSolverPolicy::validate("elpa", true, 1));
+}
+
+TEST(FdeSolverPolicy, ResetsElpaFactorizationForFreshProjectedOverlap)
+{
+    hsolver::DiagoElpa<double>::DecomposedState = 2;
+    hsolver::DiagoElpaNative<double>::DecomposedState = 1;
+
+    fde::FdeSolverPolicy::prepare_fresh_overlap("genelpa");
+    EXPECT_EQ(hsolver::DiagoElpa<double>::DecomposedState, 0);
+    EXPECT_EQ(hsolver::DiagoElpaNative<double>::DecomposedState, 1);
+
+    fde::FdeSolverPolicy::prepare_fresh_overlap("elpa");
+    EXPECT_EQ(hsolver::DiagoElpaNative<double>::DecomposedState, 0);
 }
 #endif
 
