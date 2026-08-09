@@ -89,7 +89,7 @@ TEST(FdePwPoolCollectivesMpi, NormalizesFixedSpinPopulationsIndependently)
     std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), static_cast<double>(rank + 1));
     std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), 5.0 * static_cast<double>(rank + 1));
     const double volume = 42.0;
-    fde::normalize_spin_density(alpha.data(), beta.data(), alpha.size(), 7, 8, volume, basis);
+    fde::normalize_spin_density(alpha.data(), beta.data(), alpha.size(), 7, 8, volume, 1.0e-6, basis);
 
     double populations[2] = {0.0, 0.0};
     for (std::size_t point = 0; point < alpha.size(); ++point)
@@ -119,7 +119,7 @@ TEST(FdePwPoolCollectivesMpi, PreservesScfShapeButClampsArtifactDensity)
     std::vector<double> artifact_alpha = scf_alpha;
     std::vector<double> artifact_beta = scf_beta;
 
-    fde::normalize_spin_density(scf_alpha.data(), scf_beta.data(), scf_alpha.size(), 7, 8, 42.0, basis);
+    fde::normalize_spin_density(scf_alpha.data(), scf_beta.data(), scf_alpha.size(), 7, 8, 42.0, 1.0e-6, basis);
     fde::normalize_nonnegative_spin_density(artifact_alpha.data(),
                                             artifact_beta.data(),
                                             artifact_alpha.size(),
@@ -130,6 +130,27 @@ TEST(FdePwPoolCollectivesMpi, PreservesScfShapeButClampsArtifactDensity)
 
     EXPECT_LT(scf_alpha.front(), 0.0);
     EXPECT_DOUBLE_EQ(artifact_alpha.front(), 0.0);
+}
+
+TEST(FdePwPoolCollectivesMpi, LeavesSubMicroelectronQuadratureErrorUnchanged)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+
+    const double volume = 42.0;
+    std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), (7.0 + 5.0e-7) / volume);
+    std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), (8.0 - 5.0e-7) / volume);
+    const std::vector<double> original_alpha = alpha;
+    const std::vector<double> original_beta = beta;
+
+    fde::normalize_spin_density(alpha.data(), beta.data(), alpha.size(), 7, 8, volume, 1.0e-6, basis);
+
+    EXPECT_EQ(alpha, original_alpha);
+    EXPECT_EQ(beta, original_beta);
 }
 
 int main(int argc, char** argv)

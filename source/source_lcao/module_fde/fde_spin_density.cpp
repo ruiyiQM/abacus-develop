@@ -36,8 +36,16 @@ void prepare_density(double* density,
     }
 }
 
-void apply_population(double* density, const std::size_t local_size, const int electron_count, const double integral)
+void apply_population(double* density,
+                      const std::size_t local_size,
+                      const int electron_count,
+                      const double integral,
+                      const double population_tolerance)
 {
+    if (std::fabs(integral - static_cast<double>(electron_count)) <= population_tolerance)
+    {
+        return;
+    }
     if (electron_count == 0)
     {
         for (std::size_t point = 0; point < local_size; ++point)
@@ -64,11 +72,13 @@ void normalize_spin_density_impl(double* alpha_density,
                                  const int beta_electrons,
                                  const double cell_volume_bohr3,
                                  const ModulePW::PW_Basis& basis,
+                                 const double population_tolerance,
                                  const bool clamp_negative)
 {
     if (local_size != static_cast<std::size_t>(basis.nrxx) || basis.nxyz <= 0
         || (local_size != 0 && (alpha_density == nullptr || beta_density == nullptr)) || alpha_electrons < 0
-        || beta_electrons < 0 || !std::isfinite(cell_volume_bohr3) || cell_volume_bohr3 <= 0.0)
+        || beta_electrons < 0 || !std::isfinite(cell_volume_bohr3) || cell_volume_bohr3 <= 0.0
+        || !std::isfinite(population_tolerance) || population_tolerance < 0.0)
     {
         throw std::invalid_argument("FDE spin-density normalization inputs are invalid");
     }
@@ -85,8 +95,8 @@ void normalize_spin_density_impl(double* alpha_density,
     }
 
     const double volume_element = cell_volume_bohr3 / static_cast<double>(basis.nxyz);
-    apply_population(alpha_density, local_size, alpha_electrons, sums[0] * volume_element);
-    apply_population(beta_density, local_size, beta_electrons, sums[1] * volume_element);
+    apply_population(alpha_density, local_size, alpha_electrons, sums[0] * volume_element, population_tolerance);
+    apply_population(beta_density, local_size, beta_electrons, sums[1] * volume_element, population_tolerance);
 }
 
 } // namespace
@@ -97,6 +107,7 @@ void normalize_spin_density(double* alpha_density,
                             const int alpha_electrons,
                             const int beta_electrons,
                             const double cell_volume_bohr3,
+                            const double population_tolerance,
                             const ModulePW::PW_Basis& basis)
 {
     normalize_spin_density_impl(alpha_density,
@@ -106,6 +117,7 @@ void normalize_spin_density(double* alpha_density,
                                 beta_electrons,
                                 cell_volume_bohr3,
                                 basis,
+                                population_tolerance,
                                 false);
 }
 
@@ -124,6 +136,7 @@ void normalize_nonnegative_spin_density(double* alpha_density,
                                 beta_electrons,
                                 cell_volume_bohr3,
                                 basis,
+                                0.0,
                                 true);
 }
 

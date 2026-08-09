@@ -18,6 +18,7 @@ void normalize_spin_density(double* alpha_density,
                             int alpha_electrons,
                             int beta_electrons,
                             double cell_volume_bohr3,
+                            double population_tolerance,
                             const ModulePW::PW_Basis& basis);
 
 /** Clamp negative values before normalizing final FDE density artifacts. */
