@@ -70,15 +70,21 @@ class FdeWorkflowTest(unittest.TestCase):
 
     def test_canonical_energy_counts_shared_terms_once(self):
         artifacts = [
-            {"subsystem_total_energy_ry": -10.0, "ion_ion_energy_ry": 2.0,
+            {"scf_converged": True, "subsystem_total_energy_ry": -10.0,
+             "ion_ion_energy_ry": 2.0,
              "hartree_cross_energy_ry": 0.4, "nonadditive_kinetic_energy_ry": 0.2,
              "nonadditive_xc_energy_ry": -0.1},
-            {"subsystem_total_energy_ry": -12.0, "ion_ion_energy_ry": 2.0,
+            {"scf_converged": True, "subsystem_total_energy_ry": -12.0,
+             "ion_ion_energy_ry": 2.0,
              "hartree_cross_energy_ry": 0.5, "nonadditive_kinetic_energy_ry": 0.3,
              "nonadditive_xc_energy_ry": -0.2},
         ]
         self.assertAlmostEqual(fde_workflow.canonical_two_fragment_energy(artifacts, 1e-12),
                                -23.4)
+
+        artifacts[1]["scf_converged"] = False
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.canonical_two_fragment_energy(artifacts, 1e-12)
 
     def test_reads_compact_uniform_initial_density(self):
         with tempfile.TemporaryDirectory() as directory:

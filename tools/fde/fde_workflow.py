@@ -245,6 +245,11 @@ def read_fragment(path: Path) -> Dict[str, object]:
             result[key.lower()] = fields[1]
         elif key in ("CYCLE", "AO_DIMENSION"):
             result[key.lower()] = int(fields[1])
+        elif key == "SCF_CONVERGED":
+            flag = int(fields[1])
+            if flag not in (0, 1):
+                raise WorkflowError(f"invalid SCF convergence flag in {path}")
+            result["scf_converged"] = flag == 1
         elif key == "ACTIVE_ORBITALS":
             result["active_orbitals"] = [int(value) for value in fields[2:]]
         elif key in ("AO_OVERLAP", "HAMILTONIAN_ALPHA_RY", "HAMILTONIAN_BETA_RY"):
@@ -255,6 +260,8 @@ def read_fragment(path: Path) -> Dict[str, object]:
         elif key in scalar_names:
             result[key.lower()] = float(fields[1])
     dimension = int(result.get("ao_dimension", 0))
+    if result.get("scf_converged") is not True:
+        raise WorkflowError(f"FDE fragment is not a converged SCF result: {path}")
     if dimension <= 0 or any(len(orbital["coefficients"]) != dimension
                              for name in ("alpha", "beta") for orbital in result[name]):
         raise WorkflowError(f"invalid occupied-orbital dimensions in {path}")
@@ -265,6 +272,8 @@ def canonical_two_fragment_energy(artifacts: Sequence[Mapping[str, object]],
                                   tolerance: float) -> float:
     if len(artifacts) != 2:
         raise WorkflowError("canonical runtime energy currently requires two fragment artifacts")
+    if not all(item.get("scf_converged") is True for item in artifacts):
+        raise WorkflowError("canonical runtime energy requires converged fragment SCFs")
     ion_ion = [float(item["ion_ion_energy_ry"]) for item in artifacts]
     if abs(ion_ion[0] - ion_ion[1]) > tolerance:
         raise WorkflowError("fragment jobs disagree on the ion-ion energy")
@@ -567,6 +576,12 @@ def write_postprocess_inputs(spec: Mapping[str, object],
                              geometry: Mapping[str, object],
                              results: Sequence[Mapping[str, object]],
                              output_directory: Path) -> Path:
+    fragment_labels = {str(fragment["label"]) for fragment in spec["fragments"]}
+    for result in results:
+        if (result.get("converged") is not True
+                or set(result.get("fragments", {})) != fragment_labels):
+            raise WorkflowError(
+                "diabatic postprocessing requires converged artifacts for every fragment")
     first_fragment = read_fragment(Path(next(iter(results[0]["fragments"].values()))))
     overlap = list(first_fragment["ao_overlap"])
     dimension = int(first_fragment["ao_dimension"])
