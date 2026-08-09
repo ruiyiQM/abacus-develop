@@ -50,6 +50,8 @@ EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
     const double volume_element = config.grid.spacing_x_bohr
                                   * config.grid.spacing_y_bohr
                                   * config.grid.spacing_z_bohr;
+    double hartree_cross_energy_ry = 0.0;
+#pragma omp parallel for reduction(+:hartree_cross_energy_ry) schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
         result.potential.alpha_ry[index]
@@ -60,10 +62,11 @@ EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
             = frozen_hartree_potential_ry[index]
               + kinetic.active_potential.beta_ry[index]
               + xc.active_potential.beta_ry[index];
-        result.hartree_cross_energy_ry
+        hartree_cross_energy_ry
             += (active_density.alpha_bohr3[index] + active_density.beta_bohr3[index])
                * frozen_hartree_potential_ry[index] * volume_element;
     }
+    result.hartree_cross_energy_ry = hartree_cross_energy_ry;
     return result;
 }
 

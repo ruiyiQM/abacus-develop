@@ -1,10 +1,25 @@
 #include "pot_fde.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 namespace fde
 {
+
+namespace
+{
+
+double sanitize_charge_density(const double value)
+{
+    // AO-density projection can ring below zero around density nodes.  Apply
+    // the same nonnegative projection used by FdeLcaoDriver when normalizing
+    // a converged density. NaN/Inf validation is performed before entering
+    // the OpenMP loop because exceptions must not escape a parallel region.
+    return std::max(0.0, value);
+}
+
+} // namespace
 
 PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
                const SpinDensity& frozen_density,
@@ -60,9 +75,26 @@ void PotFde::cal_v_eff(const Charge* const charge,
         throw std::invalid_argument("FDE potential requires a matching collinear-spin Charge object");
     }
     SpinDensity active;
-    active.alpha_bohr3.assign(charge->rho[0], charge->rho[0] + effective_potential.nc);
-    active.beta_bohr3.assign(charge->rho[1], charge->rho[1] + effective_potential.nc);
+    active.alpha_bohr3.resize(static_cast<std::size_t>(effective_potential.nc));
+    active.beta_bohr3.resize(static_cast<std::size_t>(effective_potential.nc));
+    for (int index = 0; index < effective_potential.nc; ++index)
+    {
+        if (!std::isfinite(charge->rho[0][index])
+            || !std::isfinite(charge->rho[1][index]))
+        {
+            throw std::invalid_argument("FDE Charge density contains a non-finite value");
+        }
+    }
+#pragma omp parallel for schedule(static)
+    for (int index = 0; index < effective_potential.nc; ++index)
+    {
+        active.alpha_bohr3[index]
+            = sanitize_charge_density(charge->rho[0][index]);
+        active.beta_bohr3[index]
+            = sanitize_charge_density(charge->rho[1][index]);
+    }
     last_result_ = this->evaluate(active);
+#pragma omp parallel for schedule(static)
     for (int index = 0; index < effective_potential.nc; ++index)
     {
         effective_potential(0, index) += last_result_.potential.alpha_ry[index];

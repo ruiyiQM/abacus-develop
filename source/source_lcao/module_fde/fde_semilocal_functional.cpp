@@ -69,6 +69,7 @@ std::vector<double> add_density(const std::vector<double>& first,
                                 const std::vector<double>& second)
 {
     std::vector<double> sum(first.size(), 0.0);
+#pragma omp parallel for schedule(static)
     for (std::size_t index = 0; index < first.size(); ++index)
     {
         sum[index] = first[index] + second[index];
@@ -86,6 +87,7 @@ void gradient(const std::vector<double>& values,
     gradient_x.assign(size, 0.0);
     gradient_y.assign(size, 0.0);
     gradient_z.assign(size, 0.0);
+#pragma omp parallel for collapse(3) schedule(static)
     for (std::size_t z = 0; z < grid.z; ++z)
     {
         for (std::size_t y = 0; y < grid.y; ++y)
@@ -116,6 +118,7 @@ std::vector<double> divergence(const std::vector<double>& vector_x,
                                const UniformGrid& grid)
 {
     std::vector<double> result(vector_x.size(), 0.0);
+#pragma omp parallel for collapse(3) schedule(static)
     for (std::size_t z = 0; z < grid.z; ++z)
     {
         for (std::size_t y = 0; y < grid.y; ++y)
@@ -184,11 +187,12 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
 {
     const std::size_t size = grid_size(grid);
     std::vector<double> regularized(size, density_floor);
-    std::vector<bool> active(size, false);
+    std::vector<unsigned char> active(size, 0);
+#pragma omp parallel for schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
         regularized[index] = std::max(density[index], density_floor);
-        active[index] = density[index] > density_floor;
+        active[index] = density[index] > density_floor ? 1 : 0;
     }
 
     std::vector<double> gradient_x;
@@ -208,6 +212,8 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
     std::vector<double> flux_y(size, 0.0);
     std::vector<double> flux_z(size, 0.0);
 
+    double energy_hartree = 0.0;
+#pragma omp parallel for reduction(+:energy_hartree) schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
         const double rho = regularized[index];
@@ -222,7 +228,7 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
                             reduced_gradient,
                             enhancement,
                             enhancement_derivative);
-        result.energy_hartree
+        energy_hartree
             += (c_tf * std::pow(rho, 5.0 / 3.0) * enhancement - reference_energy_density)
                * volume_element;
         result.potential_hartree[index]
@@ -239,8 +245,10 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
             flux_z[index] = flux_scale * gradient_z[index];
         }
     }
+    result.energy_hartree = energy_hartree;
 
     const std::vector<double> flux_divergence = divergence(flux_x, flux_y, flux_z, grid);
+#pragma omp parallel for schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
         result.potential_hartree[index]
@@ -260,16 +268,19 @@ ScalarFunctionalResult evaluate_unpolarized_dirac_exchange(const std::vector<dou
     ScalarFunctionalResult result;
     result.energy_hartree = 0.0;
     result.potential_hartree.assign(density.size(), 0.0);
+    double energy_hartree = 0.0;
+#pragma omp parallel for reduction(+:energy_hartree) schedule(static)
     for (std::size_t index = 0; index < density.size(); ++index)
     {
         const double rho = std::max(density[index], density_floor);
-        result.energy_hartree
+        energy_hartree
             += (-c_x * std::pow(rho, 4.0 / 3.0) - reference_energy_density) * volume_element;
         if (density[index] > density_floor)
         {
             result.potential_hartree[index] = -4.0 * c_x * std::pow(rho, 1.0 / 3.0) / 3.0;
         }
     }
+    result.energy_hartree = energy_hartree;
     return result;
 }
 
@@ -308,6 +319,7 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
     {
         std::vector<double> active_scaled(size, 0.0);
         std::vector<double> frozen_scaled(size, 0.0);
+#pragma omp parallel for schedule(static)
         for (std::size_t index = 0; index < size; ++index)
         {
             active_scaled[index] = 2.0 * (*active_channels[spin])[index];
@@ -320,6 +332,7 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
         result.energy_ry += hartree_to_rydberg * 0.5
                             * (total.energy_hartree - active.energy_hartree
                                - frozen.energy_hartree);
+#pragma omp parallel for schedule(static)
         for (std::size_t index = 0; index < size; ++index)
         {
             (*active_potentials[spin])[index]
