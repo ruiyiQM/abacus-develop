@@ -1,0 +1,6 @@
+label,f_c_angstrom,c_cl_angstrom
+g_reactant_far,3.200000,1.800000
+g_reactant_near,2.600000,1.900000
+g_symmetric,2.150000,2.150000
+g_product_near,1.900000,2.600000
+g_product_far,1.800000,3.200000

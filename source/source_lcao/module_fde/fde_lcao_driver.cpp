@@ -47,7 +47,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
     {
         throw std::runtime_error("Cannot open FDE density artifact: " + path);
     }
-    return DensityArtifactIO::read(input, electron_tolerance);
+    return DensityArtifactIO::read_runtime(input, electron_tolerance);
 }
 
 const RuntimeStateDefinition& active_state(const FdeRuntimeConfig& config)

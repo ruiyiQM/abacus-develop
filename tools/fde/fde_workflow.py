@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,14 @@ def _absolute_token(path: Path, description: str) -> str:
     return _token(path.resolve(), description)
 
 
+def _label(value: object, description: str) -> str:
+    text = _token(value, description)
+    if text in (".", "..") or re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", text) is None:
+        raise WorkflowError(
+            f"{description} must use only letters, digits, dot, underscore, or hyphen")
+    return text
+
+
 def spin_population(neutral_electrons: int, charge: int, spin: int) -> Tuple[int, int]:
     electrons = neutral_electrons - charge
     if electrons < 0 or abs(spin) > electrons or (electrons + spin) % 2:
@@ -48,7 +57,7 @@ def validate_spec(spec: Mapping[str, object]) -> None:
         raise WorkflowError("the production workflow currently requires exactly two fragments")
     if not isinstance(states, list) or len(states) < 2:
         raise WorkflowError("the workflow requires at least two diabatic states")
-    labels = [_token(fragment["label"], "fragment label") for fragment in fragments]
+    labels = [_label(fragment["label"], "fragment label") for fragment in fragments]
     if len(set(labels)) != len(labels):
         raise WorkflowError("fragment labels must be unique")
     atoms: List[int] = []
@@ -65,7 +74,7 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     neutral = {str(fragment["label"]): int(fragment["neutral_valence_electrons"])
                for fragment in fragments}
     for state in states:
-        state_labels.append(_token(state["label"], "state label"))
+        state_labels.append(_label(state["label"], "state label"))
         assignments = state.get("fragments")
         if not isinstance(assignments, dict) or set(assignments) != set(labels):
             raise WorkflowError("every state must assign charge and spin to both fragments")
@@ -97,16 +106,29 @@ def _records(path: Path) -> Dict[str, List[List[str]]]:
 def read_density(path: Path) -> Dict[str, object]:
     records = _records(path)
     try:
-        alpha = [float(value) for value in records["RHO_ALPHA"][0][1:]]
-        beta = [float(value) for value in records["RHO_BETA"][0][1:]]
-        if int(records["RHO_ALPHA"][0][0]) != len(alpha) or int(records["RHO_BETA"][0][0]) != len(beta):
-            raise WorkflowError("density vector length is inconsistent")
+        if "FDE_UNIFORM_DENSITY_SEED" in records:
+            grid = records["GRID"][0]
+            grid_size = int(grid[0]) * int(grid[1]) * int(grid[2])
+            uniform = records["RHO_UNIFORM"][0]
+            alpha = [float(uniform[0])] * grid_size
+            beta = [float(uniform[1])] * grid_size
+            cycle = 0
+        else:
+            alpha = [float(value) for value in records["RHO_ALPHA"][0][1:]]
+            beta = [float(value) for value in records["RHO_BETA"][0][1:]]
+            if (int(records["RHO_ALPHA"][0][0]) != len(alpha)
+                    or int(records["RHO_BETA"][0][0]) != len(beta)):
+                raise WorkflowError("density vector length is inconsistent")
+            grid = records["GRID"][0]
+            cycle = int(records["SCF"][0][0])
+        if not alpha or len(alpha) != len(beta):
+            raise WorkflowError("density grid must be nonempty and spin-compatible")
         grid = records["GRID"][0]
         return {
             "fragment": records["FRAGMENT"][0][0],
             "state": records["STATE"][0][0],
             "geometry": records["GEOMETRY"][0][0],
-            "cycle": int(records["SCF"][0][0]),
+            "cycle": cycle,
             "grid_size": len(alpha),
             "cell_volume": float(grid[3]),
             "alpha": alpha,
@@ -479,16 +501,66 @@ def run_workflow(spec_path: Path) -> None:
     pes_rows: List[Dict[str, object]] = []
     for geometry in geometries:
         geometry = dict(geometry)
-        geometry["label"] = _token(geometry["label"], "geometry label")
+        geometry["label"] = _label(geometry["label"], "geometry label")
         geometry["template_directory"] = str(Path(geometry["template_directory"]).resolve())
         geometry_directory = root / geometry["label"]
         geometry_directory.mkdir(parents=True, exist_ok=True)
         results = [run_state(spec, geometry, state, geometry_directory) for state in spec["states"]]
         postprocess = write_postprocess_inputs(spec, geometry, results, geometry_directory)
-        pes_rows.append({"geometry": geometry["label"],
-                         "states": {result["state"]: result["energy_ry"] for result in results},
-                         "postprocess_config": str(postprocess.resolve())})
+        postprocess_directory = geometry_directory / "postprocess"
+        postprocess_directory.mkdir(exist_ok=True)
+        postprocess_input = postprocess_directory / "INPUT"
+        postprocess_input.write_text(
+            "INPUT_PARAMETERS\ncalculation              scf\n"
+            "fde_task                diabatic_postprocess\n"
+            f"fde_config              {_absolute_token(postprocess, 'postprocess config')}\n",
+            encoding="utf-8")
+        if bool(spec.get("run_postprocess", True)):
+            postprocess_command = spec.get("postprocess_command", spec["abacus_command"])
+            if not isinstance(postprocess_command, list) or not postprocess_command:
+                raise WorkflowError("postprocess_command must be a nonempty string array")
+            environment = dict(os.environ)
+            environment.setdefault("OMP_NUM_THREADS", "1")
+            log_path = postprocess_directory / "fde_postprocess.log"
+            with log_path.open("w", encoding="utf-8") as log:
+                completed = subprocess.run(list(postprocess_command), cwd=postprocess_directory,
+                                           env=environment, stdout=log,
+                                           stderr=subprocess.STDOUT, check=False)
+            if completed.returncode != 0:
+                raise WorkflowError(f"FDE postprocess failed; see {log_path}")
+        row: Dict[str, object] = {
+            "geometry": geometry["label"],
+            "coordinate_angstrom": geometry.get("coordinate_angstrom"),
+            "states": {result["state"]: result["energy_ry"] for result in results},
+            "postprocess_config": str(postprocess.resolve()),
+            "postprocess_directory": str(postprocess_directory.resolve()),
+        }
+        result_path = postprocess_directory / "fde_diabatic.fde_diabatic"
+        if result_path.is_file():
+            records = _records(result_path)
+            row["pairs"] = [{"first_state_index": int(fields[0]),
+                             "second_state_index": int(fields[1]),
+                             "overlap": float(fields[2]),
+                             "h12_ry": float(fields[3]),
+                             "orthogonalized_coupling_ry": float(fields[4])}
+                            for fields in records.get("PAIR", [])]
+            adiabatic = records.get("ADIABATIC_ENERGIES_RY", [["0"]])[0]
+            row["adiabatic_energies_ry"] = [float(value) for value in adiabatic[1:]]
+        pes_rows.append(row)
     _atomic_json(root / "fde_pes.json", {"schema_version": 1, "points": pes_rows})
+    state_labels = [state["label"] for state in spec["states"]]
+    table_lines = ["geometry\tcoordinate_angstrom\t" + "\t".join(
+        f"{label}_energy_ry" for label in state_labels)
+        + "\toverlap\th12_ry\torthogonalized_coupling_ry"]
+    for row in pes_rows:
+        pair = row.get("pairs", [{}])[0] if row.get("pairs") else {}
+        coordinate = row.get("coordinate_angstrom")
+        fields = [str(row["geometry"]), "" if coordinate is None else format(float(coordinate), ".17g")]
+        fields.extend(format(float(row["states"][label]), ".17g") for label in state_labels)
+        fields.extend("" if key not in pair else format(float(pair[key]), ".17g")
+                      for key in ("overlap", "h12_ry", "orthogonalized_coupling_ry"))
+        table_lines.append("\t".join(fields))
+    (root / "fde_pes.tsv").write_text("\n".join(table_lines) + "\n", encoding="utf-8")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

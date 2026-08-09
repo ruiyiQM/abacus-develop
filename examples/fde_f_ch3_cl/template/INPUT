@@ -1,0 +1,20 @@
+INPUT_PARAMETERS
+suffix                  fde_f_ch3_cl
+calculation             scf
+basis_type              lcao
+gamma_only              1
+ecutwfc                 100
+scf_thr                 1e-8
+scf_nmax                120
+smearing_method         fixed
+mixing_type             broyden
+mixing_beta             0.25
+symmetry                 0
+nspin                    2
+noncolin                 0
+lspinorb                 0
+dft_functional          pbe
+ks_solver               lapack
+kpar                     1
+nbands                   8
+out_chg                  0

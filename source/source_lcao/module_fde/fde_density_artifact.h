@@ -52,6 +52,10 @@ class DensityArtifactIO
 
     static FrozenDensityArtifact read(std::istream& input,
                                       const double electron_tolerance);
+
+    /** Read a full artifact or expand a compact uniform initialization seed. */
+    static FrozenDensityArtifact read_runtime(std::istream& input,
+                                              double electron_tolerance);
 };
 
 } // namespace fde

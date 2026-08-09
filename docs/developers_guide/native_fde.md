@@ -186,6 +186,14 @@ and convergence metadata.
 Warm starts are allowed only between neighboring geometries on the same state
 branch. The two quasi-diabatic states must never initialize one another.
 
+The embedded-SCF reader also accepts the compact
+`FDE_UNIFORM_DENSITY_SEED 1` initialization format. It stores grid dimensions,
+cell volume, exact alpha/beta populations, and one constant value per spin
+instead of materializing two large grid vectors on disk. The reader expands
+and validates it in memory. This format is only an intentionally uninformative
+cycle-zero start: every converged update is written as a full, fingerprinted
+`FDE_DENSITY_ARTIFACT`, and a seed must never cross state labels.
+
 `tools/fde/fde_workflow.py` is the process-level owner of freeze-thaw and PES
 execution. A JSON specification supplies an ABACUS command array, two
 fragments, two or more explicit charge/spin states, one template calculation
@@ -211,6 +219,13 @@ linearized-state artifact per state, an AO-overlap artifact, and a postprocess
 `FDE_CONFIG`. More-than-two-fragment in-memory APIs remain available, but the
 external production scheduler deliberately stops at two until the generalized
 runtime energy recomputation is connected.
+
+`examples/fde_f_ch3_cl` prepares a five-point illustrative SN2 scan for the
+two charge-localized states. Given an ABACUS executable, no-NLCC PBE
+pseudopotentials, numerical orbitals, and a cube header from the target grid,
+it generates state-local compact seeds and an absolute-path workflow. The
+example geometries and uniform seeds are execution scaffolding, not benchmark
+reference data.
 
 The generated postprocess sidecar adds one `LINEARIZED_STATE <state> <path>`
 record per determinant. Run it with a minimal `INPUT` containing

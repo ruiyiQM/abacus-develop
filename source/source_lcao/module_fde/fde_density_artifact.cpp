@@ -6,6 +6,7 @@
 #include <limits>
 #include <ostream>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 
 namespace fde
@@ -273,6 +274,81 @@ FrozenDensityArtifact DensityArtifactIO::read(std::istream& input,
         throw std::invalid_argument("FDE density artifact contains trailing content");
     }
 
+    DensityArtifactIO::validate(artifact, electron_tolerance);
+    return artifact;
+}
+
+FrozenDensityArtifact DensityArtifactIO::read_runtime(std::istream& input,
+                                                      const double electron_tolerance)
+{
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    std::istringstream header(buffer.str());
+    std::string kind;
+    header >> kind;
+    if (kind == "FDE_DENSITY_ARTIFACT")
+    {
+        std::istringstream full(buffer.str());
+        return DensityArtifactIO::read(full, electron_tolerance);
+    }
+    if (kind != "FDE_UNIFORM_DENSITY_SEED")
+    {
+        throw std::invalid_argument("Unsupported FDE runtime density artifact header");
+    }
+
+    FrozenDensityArtifact artifact;
+    std::istringstream seed(buffer.str());
+    require_token(seed, "FDE_UNIFORM_DENSITY_SEED");
+    seed >> artifact.schema_version;
+    require_token(seed, "FRAGMENT");
+    seed >> artifact.fragment_label;
+    require_token(seed, "STATE");
+    seed >> artifact.state_label;
+    require_token(seed, "GEOMETRY");
+    seed >> artifact.geometry_fingerprint;
+    require_token(seed, "GRID_FINGERPRINT");
+    seed >> artifact.grid_fingerprint;
+    require_token(seed, "PSEUDOPOTENTIALS");
+    seed >> artifact.pseudopotential_fingerprint;
+    require_token(seed, "ORBITALS");
+    seed >> artifact.orbital_fingerprint;
+    require_token(seed, "CORE_DENSITY");
+    seed >> artifact.core_density_fingerprint;
+    require_token(seed, "FUNCTIONALS");
+    seed >> artifact.xc_functional >> artifact.kinetic_functional;
+    require_token(seed, "GRID");
+    seed >> artifact.grid_x >> artifact.grid_y >> artifact.grid_z
+         >> artifact.cell_volume_bohr3;
+    require_token(seed, "POPULATIONS");
+    seed >> artifact.alpha_electrons >> artifact.beta_electrons;
+    require_token(seed, "RHO_UNIFORM");
+    double alpha = 0.0;
+    double beta = 0.0;
+    seed >> alpha >> beta;
+    require_token(seed, "END");
+    if (!seed)
+    {
+        throw std::invalid_argument("FDE uniform density seed is truncated");
+    }
+    std::string trailing;
+    if (seed >> trailing)
+    {
+        throw std::invalid_argument("FDE uniform density seed has trailing content");
+    }
+    if (artifact.grid_x == 0 || artifact.grid_y == 0 || artifact.grid_z == 0
+        || artifact.grid_x > std::numeric_limits<std::size_t>::max() / artifact.grid_y
+        || artifact.grid_x * artifact.grid_y
+               > std::numeric_limits<std::size_t>::max() / artifact.grid_z)
+    {
+        throw std::invalid_argument("FDE uniform density seed grid is invalid or overflows");
+    }
+    const std::size_t size = artifact.grid_x * artifact.grid_y * artifact.grid_z;
+    artifact.freeze_thaw_cycle = 0;
+    artifact.scf_converged = false;
+    artifact.orbital_kinetic_energy_ry = 0.0;
+    artifact.nonlocal_pseudopotential_energy_ry = 0.0;
+    artifact.rho_alpha_bohr3.assign(size, alpha);
+    artifact.rho_beta_bohr3.assign(size, beta);
     DensityArtifactIO::validate(artifact, electron_tolerance);
     return artifact;
 }

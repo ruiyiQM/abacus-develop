@@ -41,6 +41,12 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_rejects_labels_that_can_escape_work_directory(self):
+        spec = self.spec()
+        spec["fragments"][0]["label"] = "../F"
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
     def test_canonical_energy_counts_shared_terms_once(self):
         artifacts = [
             {"subsystem_total_energy_ry": -10.0, "ion_ion_energy_ry": 2.0,
@@ -52,6 +58,21 @@ class FdeWorkflowTest(unittest.TestCase):
         ]
         self.assertAlmostEqual(fde_workflow.canonical_two_fragment_energy(artifacts, 1e-12),
                                -23.4)
+
+    def test_reads_compact_uniform_initial_density(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "seed.fde"
+            path.write_text(
+                "FDE_UNIFORM_DENSITY_SEED 1\n"
+                "FRAGMENT F\nSTATE reactant\nGEOMETRY g0\n"
+                "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS pp\nORBITALS nao\n"
+                "CORE_DENSITY none\nFUNCTIONALS pbe lc94\n"
+                "GRID 2 1 1 4\nPOPULATIONS 4 4\nRHO_UNIFORM 1 1\nEND\n",
+                encoding="utf-8")
+            density = fde_workflow.read_density(path)
+            self.assertEqual(density["cycle"], 0)
+            self.assertEqual(density["alpha"], [1.0, 1.0])
+            self.assertEqual(density["beta"], [1.0, 1.0])
 
 
 if __name__ == "__main__":

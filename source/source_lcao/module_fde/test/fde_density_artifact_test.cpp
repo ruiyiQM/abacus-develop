@@ -72,3 +72,28 @@ TEST(FdeDensityArtifact, RejectsIncorrectElectronIntegrals)
     invalid.rho_beta_bohr3[0] = 0.25;
     EXPECT_THROW(fde::DensityArtifactIO::validate(invalid, 1.0e-12), std::invalid_argument);
 }
+
+TEST(FdeDensityArtifact, ExpandsCompactUniformRuntimeSeed)
+{
+    std::istringstream input(R"(FDE_UNIFORM_DENSITY_SEED 1
+FRAGMENT F
+STATE reactant
+GEOMETRY geometry
+GRID_FINGERPRINT grid
+PSEUDOPOTENTIALS pseudo
+ORBITALS basis
+CORE_DENSITY none
+FUNCTIONALS pbe lc94
+GRID 2 1 1 2
+POPULATIONS 1 0
+RHO_UNIFORM 0.5 0
+END
+)");
+    const fde::FrozenDensityArtifact seed
+        = fde::DensityArtifactIO::read_runtime(input, 1.0e-12);
+    EXPECT_FALSE(seed.scf_converged);
+    ASSERT_EQ(seed.rho_alpha_bohr3.size(), 2);
+    EXPECT_DOUBLE_EQ(seed.rho_alpha_bohr3[0], 0.5);
+    EXPECT_DOUBLE_EQ(seed.rho_alpha_bohr3[1], 0.5);
+    EXPECT_DOUBLE_EQ(seed.rho_beta_bohr3[0], 0.0);
+}
