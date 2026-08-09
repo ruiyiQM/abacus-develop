@@ -154,4 +154,97 @@ void DensityGridPartition::extract_into(const std::vector<double>& global_densit
     }
 }
 
+std::vector<double> DensityGridPartition::gather_to_root(
+    const double* local_density,
+    const ModulePW::PW_Basis& basis,
+    const int root)
+{
+    if (basis.nx <= 0 || basis.ny <= 0 || basis.nz <= 0
+        || basis.nrxx < 0 || basis.nplane < 0
+        || static_cast<std::size_t>(basis.nrxx)
+               != static_cast<std::size_t>(basis.nx)
+                      * static_cast<std::size_t>(basis.ny)
+                      * static_cast<std::size_t>(basis.nplane)
+        || (basis.nrxx != 0 && local_density == nullptr))
+    {
+        throw std::invalid_argument("FDE cannot gather an invalid PW_Basis density slab");
+    }
+    if (root < 0 || root >= basis.poolnproc)
+    {
+        throw std::invalid_argument("FDE density gather root is outside the PW pool");
+    }
+
+    const std::size_t xy_size
+        = static_cast<std::size_t>(basis.nx) * static_cast<std::size_t>(basis.ny);
+    const std::size_t global_size = xy_size * static_cast<std::size_t>(basis.nz);
+#ifdef __MPI
+    if (basis.pool_world == MPI_COMM_NULL || basis.startz == nullptr
+        || basis.numz == nullptr)
+    {
+        throw std::invalid_argument("FDE density gather requires an initialized PW communicator");
+    }
+    std::vector<int> counts(static_cast<std::size_t>(basis.poolnproc), 0);
+    std::vector<int> displacements(static_cast<std::size_t>(basis.poolnproc), 0);
+    int gathered_size = 0;
+    for (int rank = 0; rank < basis.poolnproc; ++rank)
+    {
+        const std::size_t count
+            = xy_size * static_cast<std::size_t>(basis.numz[rank]);
+        if (count > static_cast<std::size_t>(std::numeric_limits<int>::max())
+            || gathered_size > std::numeric_limits<int>::max() - static_cast<int>(count))
+        {
+            throw std::overflow_error("FDE density gather exceeds MPI integer counts");
+        }
+        counts[rank] = static_cast<int>(count);
+        displacements[rank] = gathered_size;
+        gathered_size += counts[rank];
+    }
+    if (static_cast<std::size_t>(gathered_size) != global_size)
+    {
+        throw std::invalid_argument("FDE PW z-slabs do not cover the global density grid");
+    }
+
+    std::vector<double> gathered(
+        basis.poolrank == root ? global_size : std::size_t{0});
+    MPI_Gatherv(local_density,
+                basis.nrxx,
+                MPI_DOUBLE,
+                gathered.data(),
+                counts.data(),
+                displacements.data(),
+                MPI_DOUBLE,
+                root,
+                basis.pool_world);
+    if (basis.poolrank != root)
+    {
+        return std::vector<double>();
+    }
+
+    std::vector<double> global(global_size, 0.0);
+    for (int rank = 0; rank < basis.poolnproc; ++rank)
+    {
+        const std::size_t local_z = static_cast<std::size_t>(basis.numz[rank]);
+        const std::size_t start_z = static_cast<std::size_t>(basis.startz[rank]);
+        for (std::size_t xy = 0; xy < xy_size; ++xy)
+        {
+            const std::size_t gathered_begin
+                = static_cast<std::size_t>(displacements[rank]) + xy * local_z;
+            const std::size_t global_begin
+                = xy * static_cast<std::size_t>(basis.nz) + start_z;
+            std::copy(gathered.begin() + gathered_begin,
+                      gathered.begin() + gathered_begin + local_z,
+                      global.begin() + global_begin);
+        }
+    }
+    return global;
+#else
+    if (basis.poolnproc != 1 || basis.poolrank != 0
+        || static_cast<std::size_t>(basis.nrxx) != global_size)
+    {
+        throw std::invalid_argument("FDE serial density gather requires one complete grid");
+    }
+    return std::vector<double>(local_density, local_density + global_size);
+#endif
+}
+
 } // namespace fde

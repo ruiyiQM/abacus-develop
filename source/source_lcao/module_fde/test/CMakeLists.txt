@@ -106,6 +106,29 @@ set_tests_properties(MODULE_FDE_workflow_serial PROPERTIES
 )
 
 if(ENABLE_MPI)
+  add_executable(MODULE_FDE_pw_pool_collectives_mpi
+    fde_pw_pool_collectives_mpi_test.cpp
+    ../fde_grid_partition.cpp
+    ../fde_pw_pool_collectives.cpp
+  )
+  target_link_libraries(MODULE_FDE_pw_pool_collectives_mpi PRIVATE
+    MPI::MPI_CXX GTest::gtest planewave device base parameter
+    abacus::linalg_libs
+  )
+  install(TARGETS MODULE_FDE_pw_pool_collectives_mpi
+    DESTINATION ${CMAKE_BINARY_DIR}/tests)
+  add_test(
+    NAME MODULE_FDE_pw_pool_collectives_4rank
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4
+      ${MPIEXEC_PREFLAGS}
+      $<TARGET_FILE:MODULE_FDE_pw_pool_collectives_mpi>
+      ${MPIEXEC_POSTFLAGS}
+  )
+  set_tests_properties(MODULE_FDE_pw_pool_collectives_4rank PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1"
+    PROCESSORS 4
+  )
+
   add_executable(MODULE_FDE_projected_hamiltonian_mpi
     fde_projected_hamiltonian_mpi_test.cpp
     ../fde_projected_hamiltonian.cpp

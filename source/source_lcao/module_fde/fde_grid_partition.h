@@ -45,6 +45,11 @@ class DensityGridPartition
                       double* local_density,
                       std::size_t local_size) const;
 
+    /** Gather PW_Basis z-slabs and restore canonical xy*nz+z order on root. */
+    static std::vector<double> gather_to_root(const double* local_density,
+                                              const ModulePW::PW_Basis& basis,
+                                              int root = 0);
+
   private:
     std::size_t grid_x_;
     std::size_t grid_y_;

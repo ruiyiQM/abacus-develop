@@ -83,7 +83,8 @@ class FdeLcaoDriver
         psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
         elecstate::ElecState& electronic_state,
         hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
-        const K_Vectors& kpoints);
+        const K_Vectors& kpoints,
+        const Parallel_Orbitals& orbitals);
 
   private:
     FdeLcaoDriver(const FdeRuntimeConfig& config,
@@ -113,6 +114,7 @@ class FdeLcaoDriver
     std::vector<double> active_beta_local_;
     std::vector<double> frozen_alpha_local_;
     std::vector<double> frozen_beta_local_;
+    ModulePW::PW_Basis* density_basis_;
     PotFde* embedding_potential_;
 };
 

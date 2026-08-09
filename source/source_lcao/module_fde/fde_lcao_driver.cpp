@@ -3,11 +3,13 @@
 #include "fde_grid_partition.h"
 #include "fde_potential_evaluator.h"
 #include "fde_projected_hamiltonian.h"
+#include "fde_pw_pool_collectives.h"
 #include "fde_solver_policy.h"
 #include "fde_fragment_artifact.h"
 #include "pot_fde.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
 #include "source_basis/module_pw/pw_basis.h"
+#include "source_base/module_external/scalapack_connector.h"
 #include "source_cell/unitcell.h"
 #include "source_cell/klist.h"
 #include "source_estate/elecstate.h"
@@ -187,6 +189,7 @@ FdeLcaoDriver::FdeLcaoDriver(
       active_beta_electrons_(active_beta_electrons),
       active_initial_(active_initial),
       frozen_environment_(frozen_environment),
+      density_basis_(nullptr),
       embedding_potential_(nullptr)
 {
 }
@@ -348,6 +351,8 @@ void FdeLcaoDriver::validate_core_density(const Charge& charge) const
         maximum_core_density = std::max(maximum_core_density,
                                         std::fabs(charge.rho_core[point]));
     }
+    maximum_core_density
+        = PwPoolCollectives::maximum(maximum_core_density, *charge.rhopw);
     if (maximum_core_density > 1.0e-14)
     {
         throw std::invalid_argument(
@@ -359,6 +364,7 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
                                                const UnitCell& unit_cell,
                                                elecstate::Potential& potential)
 {
+    density_basis_ = &density_basis;
     if (!LibxcPbeProvider::available())
     {
         throw std::runtime_error("FDE embedded_scf requires an ABACUS build with Libxc");
@@ -460,26 +466,41 @@ void FdeLcaoDriver::solve_projected(
 namespace
 {
 
-void normalize_density(std::vector<double>& density,
-                       const int electron_count,
-                       const double cell_volume_bohr3)
+void normalize_local_density(std::vector<double>& density,
+                             const int electron_count,
+                             const double cell_volume_bohr3,
+                             const ModulePW::PW_Basis& basis)
 {
-    double integral = 0.0;
+    if (density.size() != static_cast<std::size_t>(basis.nrxx)
+        || basis.nxyz <= 0)
+    {
+        throw std::runtime_error("FDE converged density does not match its PW grid");
+    }
+    double invalid = 0.0;
+    double density_sum = 0.0;
     for (std::size_t point = 0; point < density.size(); ++point)
     {
         if (!std::isfinite(density[point]))
         {
-            throw std::runtime_error("FDE converged density contains a non-finite value");
+            invalid = 1.0;
+            density[point] = 0.0;
         }
         density[point] = std::max(0.0, density[point]);
-        integral += density[point];
+        density_sum += density[point];
     }
-    integral *= cell_volume_bohr3 / static_cast<double>(density.size());
+    invalid = PwPoolCollectives::maximum(invalid, basis);
+    PwPoolCollectives::sum_in_place(&density_sum, 1, basis);
+    if (invalid != 0.0)
+    {
+        throw std::runtime_error("FDE converged density contains a non-finite value");
+    }
     if (electron_count == 0)
     {
         std::fill(density.begin(), density.end(), 0.0);
         return;
     }
+    const double integral
+        = density_sum * cell_volume_bohr3 / static_cast<double>(basis.nxyz);
     if (!std::isfinite(integral) || integral <= std::numeric_limits<double>::min())
     {
         throw std::runtime_error("FDE converged density has zero integrated population");
@@ -491,26 +512,151 @@ void normalize_density(std::vector<double>& density,
     }
 }
 
-void copy_matrix(const hamilt::MatrixBlock<double>& matrix,
-                 const std::size_t dimension,
-                 std::vector<double>& output)
+int ao_rank(const Parallel_Orbitals& orbitals)
 {
-    if (matrix.p == nullptr || matrix.row != dimension || matrix.col != dimension)
+#ifdef __MPI
+    int rank = 0;
+    if (orbitals.comm() == MPI_COMM_NULL)
     {
-        throw std::runtime_error("FDE runtime output requires a replicated square AO matrix");
+        throw std::runtime_error("FDE artifact output requires an initialized AO communicator");
     }
-    output.assign(matrix.p, matrix.p + dimension * dimension);
+    MPI_Comm_rank(orbitals.comm(), &rank);
+    return rank;
+#else
+    (void)orbitals;
+    return 0;
+#endif
 }
 
-void append_occupied_spin(const psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+void validate_parallel_layout(const ModulePW::PW_Basis& basis,
+                              const Parallel_Orbitals& orbitals)
+{
+#ifdef __MPI
+    int comparison = MPI_UNEQUAL;
+    MPI_Comm_compare(basis.pool_world, orbitals.comm(), &comparison);
+    if ((comparison != MPI_IDENT && comparison != MPI_CONGRUENT)
+        || ao_rank(orbitals) != basis.poolrank)
+    {
+        throw std::runtime_error(
+            "FDE artifact output requires congruent PW and AO communicators");
+    }
+#else
+    (void)basis;
+    (void)orbitals;
+#endif
+}
+
+std::vector<double> gather_matrix_to_root(
+    const hamilt::MatrixBlock<double>& matrix,
+    const std::size_t dimension,
+    const Parallel_Orbitals& orbitals,
+    const int rank)
+{
+    if ((matrix.row * matrix.col != 0 && matrix.p == nullptr)
+        || matrix.row != static_cast<std::size_t>(orbitals.get_row_size())
+        || matrix.col != static_cast<std::size_t>(orbitals.get_col_size()))
+    {
+        throw std::runtime_error("FDE AO matrix does not match Parallel_Orbitals");
+    }
+    std::vector<double> output(
+        rank == 0 ? dimension * dimension : std::size_t{0});
+#ifdef __MPI
+    if (matrix.desc == nullptr
+        || matrix.desc[2] != static_cast<int>(dimension)
+        || matrix.desc[3] != static_cast<int>(dimension))
+    {
+        throw std::runtime_error("FDE AO matrix has an invalid ScaLAPACK descriptor");
+    }
+    Parallel_2D global;
+    global.set(static_cast<int>(dimension),
+               static_cast<int>(dimension),
+               static_cast<int>(dimension),
+               orbitals.blacs_ctxt);
+    Cpxgemr2d(static_cast<int>(dimension),
+              static_cast<int>(dimension),
+              matrix.p,
+              1,
+              1,
+              const_cast<int*>(matrix.desc),
+              output.data(),
+              1,
+              1,
+              global.desc,
+              global.blacs_ctxt);
+#else
+    std::copy(matrix.p, matrix.p + dimension * dimension, output.begin());
+#endif
+    return output;
+}
+
+std::vector<double> gather_wavefunctions_to_root(
+    psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+    const int kpoint,
+    const std::size_t dimension,
+    const int global_band_count,
+    const Parallel_Orbitals& orbitals,
+    const int rank)
+{
+    if (global_band_count <= 0)
+    {
+        throw std::runtime_error("FDE wavefunction gather requires solved bands");
+    }
+    wavefunctions.fix_k(kpoint);
+    std::vector<double> output(
+        rank == 0 ? dimension * static_cast<std::size_t>(global_band_count)
+                  : std::size_t{0});
+#ifdef __MPI
+    if (orbitals.desc_wfc[2] != static_cast<int>(dimension)
+        || orbitals.desc_wfc[3] != global_band_count)
+    {
+        throw std::runtime_error("FDE wavefunction descriptor has invalid global dimensions");
+    }
+    Parallel_2D global;
+    global.set(static_cast<int>(dimension),
+               global_band_count,
+               std::max(static_cast<int>(dimension), global_band_count),
+               orbitals.blacs_ctxt);
+    Cpxgemr2d(static_cast<int>(dimension),
+              global_band_count,
+              wavefunctions.get_pointer(),
+              1,
+              1,
+              const_cast<int*>(orbitals.desc_wfc),
+              output.data(),
+              1,
+              1,
+              global.desc,
+              global.blacs_ctxt);
+#else
+    if (wavefunctions.get_nbasis() != static_cast<int>(dimension)
+        || wavefunctions.get_nbands() != global_band_count)
+    {
+        throw std::runtime_error("FDE serial wavefunction dimensions are invalid");
+    }
+    for (int band = 0; band < global_band_count; ++band)
+    {
+        for (std::size_t ao = 0; ao < dimension; ++ao)
+        {
+            output[ao + static_cast<std::size_t>(band) * dimension]
+                = wavefunctions(band, static_cast<int>(ao));
+        }
+    }
+#endif
+    return output;
+}
+
+void append_occupied_spin(const std::vector<double>& global_wavefunctions,
                           const elecstate::ElecState& electronic_state,
                           const int kpoint,
                           const int electron_count,
                           const std::size_t dimension,
+                          const int solved_band_count,
                           const std::string& fragment_label,
                           OccupiedSpinOrbitals& output)
 {
-    if (electron_count < 0 || electron_count > wavefunctions.get_nbands())
+    if (electron_count < 0 || electron_count > solved_band_count
+        || global_wavefunctions.size()
+               != dimension * static_cast<std::size_t>(solved_band_count))
     {
         throw std::runtime_error("FDE occupied population does not fit the solved band space");
     }
@@ -524,8 +670,26 @@ void append_occupied_spin(const psi::Psi<double, base_device::DEVICE_CPU>& wavef
         for (std::size_t ao = 0; ao < dimension; ++ao)
         {
             output.coefficients[ao + static_cast<std::size_t>(band) * dimension]
-                = wavefunctions(kpoint, band, static_cast<int>(ao));
+                = global_wavefunctions[ao + static_cast<std::size_t>(band) * dimension];
         }
+    }
+}
+
+void close_artifact(std::ofstream& output,
+                    const std::string& path,
+                    const char* description)
+{
+    output.flush();
+    if (!output)
+    {
+        throw std::runtime_error(std::string("Failed to flush FDE ")
+                                 + description + " artifact: " + path);
+    }
+    output.close();
+    if (!output)
+    {
+        throw std::runtime_error(std::string("Failed to close FDE ")
+                                 + description + " artifact: " + path);
     }
 }
 
@@ -536,47 +700,49 @@ void FdeLcaoDriver::write_converged_artifacts(
     psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
     hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
-    const K_Vectors& kpoints)
+    const K_Vectors& kpoints,
+    const Parallel_Orbitals& orbitals)
 {
-    if (embedding_potential_ == nullptr || charge.nspin != 2
+    if (embedding_potential_ == nullptr || density_basis_ == nullptr
+        || charge.nspin != 2
         || charge.rhopw == nullptr || charge.rho_save == nullptr
-        || wavefunctions.get_nbasis() != static_cast<int>(full_ao_dimension_)
-        || wavefunctions.get_nk() != kpoints.get_nks())
+        || charge.rhopw != density_basis_
+        || wavefunctions.get_nk() != kpoints.get_nks()
+        || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
+        || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
     {
         throw std::runtime_error("FDE converged artifact output contract is incomplete");
     }
+    validate_parallel_layout(*density_basis_, orbitals);
+    const int rank = ao_rank(orbitals);
+#ifdef __MPI
+    const int global_band_count = orbitals.get_wfc_global_nbands();
+#else
+    const int global_band_count = wavefunctions.get_nbands();
+#endif
 
-    FrozenDensityArtifact density = active_initial_;
-    density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-    density.scf_converged = true;
-    const std::size_t grid_size = density.grid_x * density.grid_y * density.grid_z;
-    density.rho_alpha_bohr3.assign(charge.rho_save[0], charge.rho_save[0] + grid_size);
-    density.rho_beta_bohr3.assign(charge.rho_save[1], charge.rho_save[1] + grid_size);
-    normalize_density(density.rho_alpha_bohr3,
-                      active_alpha_electrons_,
-                      density.cell_volume_bohr3);
-    normalize_density(density.rho_beta_bohr3,
-                      active_beta_electrons_,
-                      density.cell_volume_bohr3);
-    const std::string density_path = config_.output_prefix + ".fde_density";
-    std::ofstream density_output(density_path.c_str());
-    if (!density_output)
-    {
-        throw std::runtime_error("Cannot create FDE density artifact: " + density_path);
-    }
-    DensityArtifactIO::write(density_output, density);
-
-    FragmentScfArtifact fragment;
-    fragment.schema_version = 1;
-    fragment.state_label = config_.active_state;
-    fragment.fragment_label = config_.active_fragment;
-    fragment.geometry_fingerprint = density.geometry_fingerprint;
-    fragment.orbital_fingerprint = density.orbital_fingerprint;
-    fragment.density_path = density_path;
-    fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
-    fragment.scf_converged = true;
-    fragment.ao_dimension = full_ao_dimension_;
-    fragment.active_orbitals = active_orbitals_;
+    const std::size_t local_grid_size = static_cast<std::size_t>(density_basis_->nrxx);
+    std::vector<double> local_alpha(charge.rho_save[0],
+                                    charge.rho_save[0] + local_grid_size);
+    std::vector<double> local_beta(charge.rho_save[1],
+                                   charge.rho_save[1] + local_grid_size);
+    normalize_local_density(local_alpha,
+                            active_alpha_electrons_,
+                            active_initial_.cell_volume_bohr3,
+                            *density_basis_);
+    normalize_local_density(local_beta,
+                            active_beta_electrons_,
+                            active_initial_.cell_volume_bohr3,
+                            *density_basis_);
+    SpinDensity active_density;
+    active_density.alpha_bohr3 = local_alpha;
+    active_density.beta_bohr3 = local_beta;
+    const EmbeddingPotentialResult embedding
+        = embedding_potential_->evaluate(active_density);
+    std::vector<double> global_alpha
+        = DensityGridPartition::gather_to_root(local_alpha.data(), *density_basis_);
+    std::vector<double> global_beta
+        = DensityGridPartition::gather_to_root(local_beta.data(), *density_basis_);
 
     int spin_kpoint[2] = {-1, -1};
     for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
@@ -592,47 +758,89 @@ void FdeLcaoDriver::write_converged_artifacts(
     {
         throw std::runtime_error("FDE output is missing a collinear spin channel");
     }
-    append_occupied_spin(wavefunctions,
+    std::vector<double> global_wavefunctions[2];
+    for (int spin = 0; spin < 2; ++spin)
+    {
+        global_wavefunctions[spin]
+            = gather_wavefunctions_to_root(wavefunctions,
+                                           spin_kpoint[spin],
+                                           full_ao_dimension_,
+                                           global_band_count,
+                                           orbitals,
+                                           rank);
+    }
+
+    std::vector<double> gathered_overlap;
+    std::vector<double> gathered_hamiltonian[2];
+    for (int spin = 0; spin < 2; ++spin)
+    {
+        full_hamiltonian.updateHk(spin_kpoint[spin]);
+        hamilt::MatrixBlock<double> local_hamiltonian;
+        hamilt::MatrixBlock<double> local_overlap;
+        full_hamiltonian.matrix(local_hamiltonian, local_overlap);
+        if (spin == 0)
+        {
+            gathered_overlap = gather_matrix_to_root(local_overlap,
+                                                     full_ao_dimension_,
+                                                     orbitals,
+                                                     rank);
+        }
+        gathered_hamiltonian[spin]
+            = gather_matrix_to_root(local_hamiltonian,
+                                    full_ao_dimension_,
+                                    orbitals,
+                                    rank);
+    }
+
+    if (rank != 0)
+    {
+        return;
+    }
+
+    FrozenDensityArtifact density = active_initial_;
+    density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+    density.scf_converged = true;
+    density.rho_alpha_bohr3.swap(global_alpha);
+    density.rho_beta_bohr3.swap(global_beta);
+    const std::string density_path = config_.output_prefix + ".fde_density";
+    std::ofstream density_output(density_path.c_str());
+    if (!density_output)
+    {
+        throw std::runtime_error("Cannot create FDE density artifact: " + density_path);
+    }
+    DensityArtifactIO::write(density_output, density);
+    close_artifact(density_output, density_path, "density");
+
+    FragmentScfArtifact fragment;
+    fragment.schema_version = 1;
+    fragment.state_label = config_.active_state;
+    fragment.fragment_label = config_.active_fragment;
+    fragment.geometry_fingerprint = density.geometry_fingerprint;
+    fragment.orbital_fingerprint = density.orbital_fingerprint;
+    fragment.density_path = density_path;
+    fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
+    fragment.scf_converged = true;
+    fragment.ao_dimension = full_ao_dimension_;
+    fragment.active_orbitals = active_orbitals_;
+    append_occupied_spin(global_wavefunctions[0],
                          electronic_state,
                          spin_kpoint[0],
                          active_alpha_electrons_,
                          full_ao_dimension_,
+                         global_band_count,
                          config_.active_fragment,
                          fragment.alpha);
-    append_occupied_spin(wavefunctions,
+    append_occupied_spin(global_wavefunctions[1],
                          electronic_state,
                          spin_kpoint[1],
                          active_beta_electrons_,
                          full_ao_dimension_,
+                         global_band_count,
                          config_.active_fragment,
                          fragment.beta);
-
-    for (int spin = 0; spin < 2; ++spin)
-    {
-        full_hamiltonian.updateHk(spin_kpoint[spin]);
-        hamilt::MatrixBlock<double> hamiltonian;
-        hamilt::MatrixBlock<double> overlap;
-        full_hamiltonian.matrix(hamiltonian, overlap);
-        if (spin == 0)
-        {
-            copy_matrix(overlap, full_ao_dimension_, fragment.ao_overlap);
-            copy_matrix(hamiltonian,
-                        full_ao_dimension_,
-                        fragment.hamiltonian_alpha_ry);
-        }
-        else
-        {
-            copy_matrix(hamiltonian,
-                        full_ao_dimension_,
-                        fragment.hamiltonian_beta_ry);
-        }
-    }
-
-    SpinDensity active_density;
-    active_density.alpha_bohr3 = density.rho_alpha_bohr3;
-    active_density.beta_bohr3 = density.rho_beta_bohr3;
-    const EmbeddingPotentialResult embedding
-        = embedding_potential_->evaluate(active_density);
+    fragment.ao_overlap.swap(gathered_overlap);
+    fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
+    fragment.hamiltonian_beta_ry.swap(gathered_hamiltonian[1]);
     fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
     fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
     fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
@@ -649,6 +857,7 @@ void FdeLcaoDriver::write_converged_artifacts(
     FragmentScfArtifactIO::write(fragment_output,
                                  fragment,
                                  config_.symmetry_tolerance);
+    close_artifact(fragment_output, fragment_path, "fragment SCF");
 }
 
 } // namespace fde

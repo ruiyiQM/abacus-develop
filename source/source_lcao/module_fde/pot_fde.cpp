@@ -1,5 +1,7 @@
 #include "pot_fde.h"
 
+#include "fde_pw_pool_collectives.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -63,12 +65,21 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
 
 EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) const
 {
-    return EmbeddingPotentialEvaluator::evaluate(active_density,
-                                                 frozen_density_,
-                                                 frozen_hartree_potential_ry_,
-                                                 config_,
-                                                 *xc_provider_,
-                                                 differential_operator_.get());
+    EmbeddingPotentialResult result
+        = EmbeddingPotentialEvaluator::evaluate(active_density,
+                                                frozen_density_,
+                                                frozen_hartree_potential_ry_,
+                                                config_,
+                                                *xc_provider_,
+                                                differential_operator_.get());
+    double energies[3] = {result.hartree_cross_energy_ry,
+                          result.nonadditive_kinetic_energy_ry,
+                          result.nonadditive_xc_energy_ry};
+    PwPoolCollectives::sum_in_place(energies, 3, *this->rho_basis_);
+    result.hartree_cross_energy_ry = energies[0];
+    result.nonadditive_kinetic_energy_ry = energies[1];
+    result.nonadditive_xc_energy_ry = energies[2];
+    return result;
 }
 
 void PotFde::cal_v_eff(const Charge* const charge,

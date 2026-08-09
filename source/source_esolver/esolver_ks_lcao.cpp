@@ -86,13 +86,15 @@ void write_native_fde(
     psi::Psi<TK>& wavefunctions,
     elecstate::ElecState* electronic_state,
     hamilt::Hamilt<TK>* full_hamiltonian,
-    const K_Vectors& kpoints)
+    const K_Vectors& kpoints,
+    const Parallel_Orbitals& orbitals)
 {
     (void)charge;
     (void)wavefunctions;
     (void)electronic_state;
     (void)full_hamiltonian;
     (void)kpoints;
+    (void)orbitals;
     if (driver != nullptr)
     {
         throw std::runtime_error("FDE artifact output requires real Gamma LCAO data");
@@ -106,7 +108,8 @@ void write_native_fde<double>(
     psi::Psi<double>& wavefunctions,
     elecstate::ElecState* electronic_state,
     hamilt::Hamilt<double>* full_hamiltonian,
-    const K_Vectors& kpoints)
+    const K_Vectors& kpoints,
+    const Parallel_Orbitals& orbitals)
 {
     if (driver != nullptr)
     {
@@ -114,7 +117,8 @@ void write_native_fde<double>(
                                           wavefunctions,
                                           *electronic_state,
                                           *full_hamiltonian,
-                                          kpoints);
+                                          kpoints,
+                                          orbitals);
     }
 }
 
@@ -693,7 +697,8 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
                              this->psi[0],
                              this->pelec,
                              static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt),
-                             this->kv);
+                             this->kv,
+                             this->pv);
     }
 
     //! 2) output of lcao every few ionic steps
