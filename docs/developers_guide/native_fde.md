@@ -70,13 +70,15 @@ but environment nuclear operators are not removed. The active AO list must be
 strictly increasing, unique, nonempty, and expressed in the authoritative
 supersystem AO order. `ActiveAoProjection` encodes and tests this boundary.
 
-`SubspaceSolver` implements the first executable form of this contract for a
-replicated real Gamma-point matrix. It solves the projected generalized
-eigenproblem with LAPACK, constructs the spin-channel density as `C f C^T`,
-and expands that density into the supersystem AO order with exactly zero rows
-and columns on environment AOs. Electron counts are checked with `Tr(P S)`.
-Distributed ScaLAPACK/ELPA projection is deliberately deferred until the
-serial scientific path is validated.
+`SubspaceSolver` is the dense reference implementation of this contract. It
+solves the projected generalized eigenproblem with LAPACK, constructs the
+spin-channel density as `C f C^T`, and expands that density into the
+supersystem AO order with exactly zero rows and columns on environment AOs.
+Electron counts are checked with `Tr(P S)`. The production
+`FdeProjectedHamiltonian` applies the same projection directly to each local
+2D block described by `Parallel_Orbitals`; the ordinary ABACUS LCAO solver can
+therefore diagonalize the projected matrices with ELPA or ScaLAPACK without
+replicating them.
 
 ## Canonical total energy
 
@@ -114,7 +116,7 @@ gamma_only        1
 nspin             2
 dft_functional    pbe
 symmetry          0
-ks_solver         lapack
+ks_solver         genelpa
 nelec             <active-fragment electron count>
 nupdown           <active alpha minus beta population>
 fde_task          embedded_scf
@@ -155,10 +157,12 @@ full supersystem Hamiltonian—including every nuclear local and nonlocal
 pseudopotential operator—but supplies the eigensolver with an exactly decoupled
 low-energy block containing only the active fragment AOs. Inactive AOs receive
 an identity metric and a high dummy eigenvalue; `nbands` is required to fit
-inside the active AO dimension. This first runtime path deliberately requires
-replicated real-Gamma matrices, `ks_solver lapack`, and an orthogonal molecular
-cell. Distributed AO/grid execution is rejected explicitly instead of silently
-using rank-local matrix or density fragments.
+inside the active AO dimension. The projection is performed in the local
+`Parallel_Orbitals` row/column block and retains the original ScaLAPACK
+descriptor. `lapack` remains valid for a replicated serial matrix;
+`genelpa`, `elpa`, and `scalapack_gvx` are accepted for a distributed matrix.
+The native runtime remains restricted to `kpar 1`, real Gamma-point LCAO,
+`nspin 2`, and an orthogonal molecular cell.
 
 The first executable runtime also rejects pseudopotentials with a nonzero
 nonlinear core correction. The RP0 equations describe fragment-owned core
@@ -175,6 +179,17 @@ final unprojected spin Hamiltonians. Every matrix remains in the authoritative
 supersystem AO order. These versioned artifacts are sufficient to restart the
 outer loop and to construct a two-state determinant and a linearized
 transition-energy model without scraping human-readable ABACUS logs.
+
+The converged density is distributed with the same z slabs as
+`ModulePW::PW_Basis`. Frozen and active artifact grids are checked against that
+layout and sliced to `nrxx` before entering the potential path. Gradient and
+divergence operations for semilocal nonadditive functionals use the native
+distributed PW FFT, while grid integrals and embedding energies are reduced
+over the PW pool. At output, the density slabs are gathered back into the
+canonical `xy * nz + z` artifact order. Distributed wavefunctions, overlap,
+and the two spin Hamiltonians are gathered through `Cpxgemr2d`; AO rank zero
+alone writes and explicitly closes both artifacts. A close failure is fatal so
+an NFS quota error cannot leave a seemingly successful truncated checkpoint.
 
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,
 one active subsystem, and one freeze-thaw cycle. An external restartable
@@ -287,23 +302,23 @@ the two central differences in Ry/Bohr. Their difference supplies an error
 estimate and must remain below an explicit step-halving threshold. This path
 validates PES derivatives but does not implement analytic FDE forces.
 
-`AbacusGammaBackend` is the RP9 native runtime bridge. It converts each spin
-channel between the dense Γ-point AO contract and ABACUS `HContainer` data,
-then delegates the real-space transforms to the production Gint calls. The
-current dense AO contract is serial by construction, so the adapter rejects a
-distributed 2D-block AO container instead of silently assembling an incomplete
-matrix. `Potential::append_component` transfers explicit ownership of a
-configured `PotFde` after the legacy potential registry has run. This avoids a
-new global FDE selector and keeps the frozen density and functional provider in
-the driver-owned object graph.
+`AbacusGammaBackend` is the dense RP9 reference bridge. It converts each spin
+channel between the dense Gamma-point AO contract and ABACUS `HContainer`
+data, then delegates the real-space transforms to the production Gint calls;
+that reference adapter still rejects a distributed container. The native
+`FdeLcaoDriver` bypasses the dense contract and operates on the production
+rank-local density grid and AO containers. `Potential::append_component`
+transfers explicit ownership of a configured `PotFde` after the legacy
+potential registry has run. This avoids a new global FDE selector and keeps
+the frozen density and functional provider in the driver-owned object graph.
 
 `LibxcPbeProvider` evaluates spin-polarized PBE exchange and correlation with
-explicit Libxc functional identifiers. It forms the GGA functional derivative
-on the same orthorhombic replicated grid used by the RP0-RP8 prototype and does
-not change ABACUS's process-wide XC selection. A build without Libxc reports the
-provider as unavailable and fails explicitly if it is selected. General-cell,
-distributed-grid PBE must use the later native PW-gradient driver rather than
-this replicated-grid adapter.
+explicit Libxc functional identifiers and does not change ABACUS's
+process-wide XC selection. Its standalone reference path uses finite
+differences on a replicated orthorhombic grid. The production `PotFde` path
+injects `PwGridDifferential`, so the same Libxc evaluation uses the distributed
+ABACUS PW gradient and divergence. A build without Libxc reports the provider
+as unavailable and fails explicitly if it is selected.
 
 `MultiFragmentFreezeThawWorkflow` is the RP10 N-fragment outer loop. It stores
 fragments in a deterministic vector, requires the caller to provide a complete
@@ -390,6 +405,47 @@ finite-difference validation path. RP15 does not implement derivatives of
 off-diagonal electronic couplings or state overlaps, hybrid-exchange response,
 spinor forces, stress, or periodic k-point forces.
 
+## Euler MPI consistency and strong scaling
+
+`tools/fde/euler/submit_fde_mpi_scaling.sh` submits four GCC/OpenMPI/ELPA
+layouts for the same native embedded-SCF input. Every case uses
+`ks_solver genelpa`, `scf_nmax 1`, `scf_thr 1.0e-12`, and one OpenBLAS thread;
+the test therefore compares one identical FDE SCF step rather than claiming a
+fully converged production benchmark. The parser records physical input
+fingerprints, energy, residual, ABACUS timing, and both active and allocated
+CPU counts. The summarizer rejects mismatched `STRU`, `KPT`, or `FDE_CONFIG`
+fingerprints and fails when either the energy or residual tolerance is
+exceeded.
+
+The 2026-08-09 Euler validation produced:
+
+| Slurm job | nodes | MPI x OMP | active cores | SCF step (s) | Etot (Ry) | Delta E from 1 rank (Ry) | speedup |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10142237 | 1 | 1 x 1 | 1 | 216.19 | -62.5379739198 | 0.0 | 1.00 |
+| 10142238 | 1 | 4 x 1 | 4 | 63.21 | -62.5379739109 | 8.9e-9 | 3.42 |
+| 10142240 | 1 | 20 x 4 | 80 | 11.64 | -62.5379739123 | 7.5e-9 | 18.57 |
+| 10142241 | 2 | 40 x 4 | 160 | 5.29 | -62.5379739129 | 6.9e-9 | 40.87 |
+
+All four cases reported `DRHO = 1.9889`; the maximum difference from the
+1-rank reference was zero at the recorded precision. The maximum energy
+difference was `8.9e-9 Ry`, passing the `1.0e-8 Ry` gate. Doubling the large
+layout from 80 to 160 active cores reduced the measured SCF step from 11.64 to
+5.29 seconds, a 2.20x speedup for this single-step sample. The 1- and 4-rank
+jobs reserved 80 CPUs per node to obtain enough memory but intentionally ran
+only 1 and 4 OpenMP threads in total; the table and efficiency calculations
+use active threads, while the JSON also preserves the Slurm allocation.
+The exact job metadata, input hashes, source commit, and executable hash are
+archived in
+`tools/fde/euler/reference/fde_mpi_scaling_euler_2026-08-09.json`.
+
+Run and summarize the test on Euler with:
+
+```bash
+bash tools/fde/euler/submit_fde_mpi_scaling.sh
+python3 tools/fde/euler/summarize_fde_mpi_scaling.py \
+  /cluster/scratch/zhourui/abacus-fde-mpi-scaling/results --markdown
+```
+
 ## Delivery slices
 
 - RP0: theory contract and AO-subspace pseudopotential spike.
@@ -409,12 +465,13 @@ spinor forces, stress, or periodic k-point forces.
 - RP14: explicit `FDE-diab(K,L,M)` multi-state/multi-fragment assembly.
 - RP15: semilocal diagonal-state analytic FDE force correction and Gint bridge.
 
-RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
+RP10-RP15 extend the Gamma-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state
 diagonalization, controlled multi-fragment FDE-diab approximations, and the
-semilocal analytic diagonal-state force ledger. Periodic k-point sampling,
-hybrid functionals, spinors, and analytic off-diagonal coupling/overlap
-derivatives remain separate follow-up work.
+semilocal analytic diagonal-state force ledger. The native embedded-SCF path
+supports MPI-distributed AO and PW layouts; periodic k-point sampling, hybrid
+functionals, spinors, and analytic off-diagonal coupling/overlap derivatives
+remain separate follow-up work.
 
 ## Acceptance gates
 
@@ -433,12 +490,13 @@ derivatives remain separate follow-up work.
 updates, complete-sweep checkpointing, canonical energy assembly, automatic
 postprocessing, and PES table output with a deterministic solver fixture.
 `MODULE_FDE_diabatic_postprocess` covers the nonorthogonal solve. When MPI is
-enabled, `MODULE_FDE_electronic_coupling_2rank` independently evaluates the
-determinant overlap, transition densities, and symmetric coupling on two
-ranks and requires identical finite results. This MPI coverage does not widen
-the active embedded-SCF boundary: active-subsystem calculations remain
-serial/replicated Gamma tasks, while production MPI launches are supported for
-artifact postprocessing.
+enabled, the PW-differential, projected-Hamiltonian, and pool-collective tests
+exercise the distributed grid, local AO blocks, reductions, and canonical
+density gather on two or four ranks. `MODULE_FDE_electronic_coupling_2rank`
+independently evaluates the determinant overlap, transition densities, and
+symmetric coupling on two ranks and requires identical finite results. The
+Euler 1/4/80/160 test above is the executable production-level MPI acceptance
+gate.
 
 The quasi-diabatic-state construction follows the FDE-diab framework described
 in J. Chem. Phys. 148, 214104 (2018), DOI 10.1063/1.5023290. The first
