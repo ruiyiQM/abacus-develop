@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/abacusmodeling/ABACUS-orbitals",
+  "source_commit": "3b634f1618f5c56baa97084a41ae17e801d46ab9",
+  "source_description": "SG15-v1.0 PBE norm-conserving pseudopotentials and StandardOrbitals-v2.0 DZP at 100 Ry",
+  "resources": [
+    {
+      "kind": "pseudopotentials",
+      "element": "H",
+      "path": "SG15_v1.0/Pseudopotential/H_ONCV_PBE-1.0.upf",
+      "sha256": "3f5deaaf57ff09d87da2c2c186eb1654d174fe385c9edc265036b3c8869286ef"
+    },
+    {
+      "kind": "pseudopotentials",
+      "element": "C",
+      "path": "SG15_v1.0/Pseudopotential/C_ONCV_PBE-1.0.upf",
+      "sha256": "e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99"
+    },
+    {
+      "kind": "pseudopotentials",
+      "element": "F",
+      "path": "SG15_v1.0/Pseudopotential/F_ONCV_PBE-1.0.upf",
+      "sha256": "7f48a250e426b09cfb3a360dad77cfb3e575fca898143f4320f277a917138861"
+    },
+    {
+      "kind": "pseudopotentials",
+      "element": "Cl",
+      "path": "SG15_v1.0/Pseudopotential/Cl_ONCV_PBE-1.0.upf",
+      "sha256": "69ae244a5546b00c66645d515bd2b59cc31f106693878a42a5d74bd5f855fa19"
+    },
+    {
+      "kind": "orbitals",
+      "element": "H",
+      "cutoff_bohr": 8,
+      "path": "SG15_v1.0/Orbitals_v2.0/H_DZP/H_gga_8au_100Ry_2s1p.orb",
+      "sha256": "1950927d0760d25a3cdbfa0f5d15acd74848087d0d01dd4b5046931ef82c7489"
+    },
+    {
+      "kind": "orbitals",
+      "element": "C",
+      "cutoff_bohr": 8,
+      "path": "SG15_v1.0/Orbitals_v2.0/C_DZP/C_gga_8au_100Ry_2s2p1d.orb",
+      "sha256": "e8085a5ff072b38b68d641803b681cd3008b9f82e6cf118aac457fa88e209811"
+    },
+    {
+      "kind": "orbitals",
+      "element": "F",
+      "cutoff_bohr": 7,
+      "path": "SG15_v1.0/Orbitals_v2.0/F_DZP/F_gga_7au_100Ry_2s2p1d.orb",
+      "sha256": "55c69e6721127f9f382bd4285b999938a31b19cb741beb3c2422686f1cff880f"
+    },
+    {
+      "kind": "orbitals",
+      "element": "Cl",
+      "cutoff_bohr": 8,
+      "path": "SG15_v1.0/Orbitals_v2.0/Cl_DZP/Cl_gga_8au_100Ry_2s2p1d.orb",
+      "sha256": "74440e05120f810e6a33db6f0667831286aa8109ecfca405fba89ebf203b42f7"
+    }
+  ]
+}
