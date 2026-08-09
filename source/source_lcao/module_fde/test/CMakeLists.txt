@@ -34,6 +34,11 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_solver_policy
+  SOURCES fde_solver_policy_test.cpp ../fde_solver_policy.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_projected_hamiltonian
   SOURCES fde_projected_hamiltonian_test.cpp
     ../fde_projected_hamiltonian.cpp

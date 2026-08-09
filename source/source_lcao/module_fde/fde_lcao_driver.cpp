@@ -3,6 +3,7 @@
 #include "fde_grid_partition.h"
 #include "fde_potential_evaluator.h"
 #include "fde_projected_hamiltonian.h"
+#include "fde_solver_policy.h"
 #include "fde_fragment_artifact.h"
 #include "pot_fde.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
@@ -230,12 +231,17 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         throw std::invalid_argument(
             "FDE INPUT nelec/nupdown do not match the active fragment state assignment");
     }
-    if (input.ks_solver != "lapack" || input.kpar != 1
-        || input.nbands < std::max(population.alpha, population.beta)
+    const bool distributed_ao_matrices
+        = orbitals.get_row_size() != orbitals.get_global_row_size()
+          || orbitals.get_col_size() != orbitals.get_global_col_size();
+    FdeSolverPolicy::validate(input.ks_solver,
+                              distributed_ao_matrices,
+                              input.kpar);
+    if (input.nbands < std::max(population.alpha, population.beta)
         || static_cast<std::size_t>(input.nbands) > active_orbitals.size())
     {
         throw std::invalid_argument(
-            "FDE embedded_scf requires ks_solver lapack, kpar 1, and nbands within the active AO space");
+            "FDE embedded_scf requires nbands within the occupied active AO space");
     }
 
     const FrozenDensityArtifact active_initial
