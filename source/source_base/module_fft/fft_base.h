@@ -5,14 +5,13 @@
 
 // These FFT virtuals are declared weak so the ELF linker can resolve the
 // unused single-precision (FFT_CPU<float>) vtable slots to null when
-// ENABLE_FLOAT_FFTW is off. MinGW/PE has no working equivalent: weak template
-// members there either collide ("multiple definition") or leave null vtable
-// slots that crash on dispatch. On Windows we therefore drop the attribute and
-// rely on the build defining the symbols (ENABLE_FLOAT_FFTW=ON supplies the
-// real FFT_CPU<float> methods; the float CPU path is unused otherwise).
+// ENABLE_FLOAT_FFTW is off. MinGW/PE and Mach-O have no working equivalent:
+// weak template members there either fail to link or leave null vtable slots
+// that crash on dispatch. On Windows and macOS we therefore drop the attribute
+// and provide the never-called base fallback definitions below.
 // Linux/ELF behaviour is unchanged -- ABACUS_FFT_WEAK expands to exactly
 // __attribute__((weak)) there.
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
 #define ABACUS_FFT_WEAK
 #else
 #define ABACUS_FFT_WEAK __attribute__((weak))
@@ -172,14 +171,12 @@ class FFT_BASE
     int nz = 0;
 };
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
 // On Linux the non-pure base virtuals above are __attribute__((weak)) and the
-// ELF linker resolves their (never-used) vtable slots to null. MinGW/PE has no
-// such fallback, so define trivial bodies for them here -- they are never
-// executed (FFT_BASE is abstract; every backend overrides what it actually
-// uses, and the unoverridden slots, e.g. fft3D_* on the CPU backend, are not
-// called). This block is compiled only on Windows; Linux keeps the upstream
-// weak declarations unchanged.
+// ELF linker resolves their (never-used) vtable slots to null. PE and Mach-O
+// have no equivalent fallback, so define trivial bodies for them here. They
+// are never executed: FFT_BASE is abstract and every backend overrides the
+// operations it uses.
 template <typename FPTYPE>
 void FFT_BASE<FPTYPE>::initfft(int, int, int, int, int, int, int, int, bool, bool) {}
 template <typename FPTYPE>
@@ -208,7 +205,7 @@ template <typename FPTYPE>
 void FFT_BASE<FPTYPE>::fft3D_forward(std::complex<FPTYPE>*, std::complex<FPTYPE>*) const {}
 template <typename FPTYPE>
 void FFT_BASE<FPTYPE>::fft3D_backward(std::complex<FPTYPE>*, std::complex<FPTYPE>*) const {}
-#endif // _WIN32
+#endif // _WIN32 || __APPLE__
 
 template FFT_BASE<float>::FFT_BASE();
 template FFT_BASE<double>::FFT_BASE();
