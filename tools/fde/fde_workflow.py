@@ -45,6 +45,20 @@ def spin_population(neutral_electrons: int, charge: int, spin: int) -> Tuple[int
     return (electrons + spin) // 2, (electrons - spin) // 2
 
 
+def fragment_mixing_parameters(controls: Mapping[str, object],
+                               fragment_label: str) -> Dict[str, object]:
+    fragment_mixing = controls.get("fragment_mixing", {})
+    if not isinstance(fragment_mixing, dict):
+        raise WorkflowError("fragment_mixing must be a JSON object")
+    settings = fragment_mixing.get(fragment_label, {})
+    if not isinstance(settings, dict):
+        raise WorkflowError(
+            f"fragment_mixing entry for {fragment_label} must be a JSON object")
+    return {name: settings[name]
+            for name in ("mixing_type", "mixing_beta", "mixing_beta_mag")
+            if name in settings}
+
+
 def validate_spec(spec: Mapping[str, object]) -> None:
     if int(spec.get("schema_version", 0)) != 1:
         raise WorkflowError("workflow schema_version must be 1")
@@ -106,6 +120,26 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     labels = [_label(fragment["label"], "fragment label") for fragment in fragments]
     if len(set(labels)) != len(labels):
         raise WorkflowError("fragment labels must be unique")
+    fragment_mixing = controls.get("fragment_mixing", {})
+    if not isinstance(fragment_mixing, dict):
+        raise WorkflowError("fragment_mixing must be a JSON object")
+    if not set(fragment_mixing).issubset(labels):
+        raise WorkflowError("fragment_mixing contains an unknown fragment label")
+    for label in fragment_mixing:
+        settings = fragment_mixing_parameters(controls, label)
+        mixing_type = _token(settings.get("mixing_type", "broyden"),
+                             f"mixing_type for fragment {label}")
+        if mixing_type not in ("plain", "pulay", "broyden"):
+            raise WorkflowError(
+                f"mixing_type for fragment {label} must be plain, pulay, or broyden")
+        for name in ("mixing_beta", "mixing_beta_mag"):
+            if name not in settings:
+                continue
+            value = settings[name]
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value)) or float(value) <= 0.0):
+                raise WorkflowError(
+                    f"{name} for fragment {label} must be finite and positive")
     atoms: List[int] = []
     for fragment in fragments:
         indices = fragment.get("atom_indices")
@@ -557,7 +591,7 @@ def run_state(spec: Mapping[str, object],
                                  "result",
                                  int(schedule["maximum_iterations"]),
                                  float(schedule["density_tolerance"]))
-            patch_input(job_directory / "INPUT", {
+            input_parameters: Dict[str, object] = {
                 "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
                 "nspin": 2, "noncolin": 0, "lspinorb": 0, "symmetry": 0,
                 "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
@@ -565,7 +599,10 @@ def run_state(spec: Mapping[str, object],
                 "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
                 "scf_nmax": int(schedule["maximum_iterations"]),
                 "scf_thr": float(schedule["density_tolerance"]),
-            })
+            }
+            input_parameters.update(
+                fragment_mixing_parameters(controls, active_label))
+            patch_input(job_directory / "INPUT", input_parameters)
             log_path = job_directory / "fde_abacus.log"
             environment = dict(os.environ)
             environment.setdefault("OMP_NUM_THREADS", "1")

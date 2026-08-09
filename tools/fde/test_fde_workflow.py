@@ -68,6 +68,43 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_and_selects_fragment_mixing_controls(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "fragment_mixing": {
+                "F": {"mixing_type": "broyden", "mixing_beta": 0.1},
+                "CH3Cl": {"mixing_type": "plain", "mixing_beta": 0.1,
+                          "mixing_beta_mag": 0.05},
+            }
+        }
+        fde_workflow.validate_spec(spec)
+        self.assertEqual(
+            fde_workflow.fragment_mixing_parameters(spec["controls"], "F"),
+            {"mixing_type": "broyden", "mixing_beta": 0.1})
+        self.assertEqual(
+            fde_workflow.fragment_mixing_parameters(spec["controls"], "CH3Cl"),
+            {"mixing_type": "plain", "mixing_beta": 0.1,
+             "mixing_beta_mag": 0.05})
+
+        spec["controls"]["fragment_mixing"]["unknown"] = {
+            "mixing_type": "plain"
+        }
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
+    def test_rejects_invalid_fragment_mixing_values(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "fragment_mixing": {"CH3Cl": {"mixing_type": "diis"}}
+        }
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+        spec["controls"]["fragment_mixing"]["CH3Cl"] = {
+            "mixing_type": "plain", "mixing_beta_mag": 0.0
+        }
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
     def test_builds_inexact_then_strict_scf_schedule(self):
         controls = {
             "inexact_freeze_thaw_cycles": 3,

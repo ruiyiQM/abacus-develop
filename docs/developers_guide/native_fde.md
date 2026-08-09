@@ -241,6 +241,13 @@ actual embedded calculation. Final artifacts require at least two consecutive
 complete strict sweeps (`strict_confirmation_cycles`) plus the outer density
 and energy-change tolerances. Inexact-sweep energies are never assembled.
 
+Spin-polarized fragments can require different mixing algorithms. The
+optional `controls.fragment_mixing` object therefore accepts per-fragment
+overrides for `mixing_type`, `mixing_beta`, and `mixing_beta_mag`. Every
+generated fragment `INPUT` receives its matching overrides; fragments omitted
+from the object retain the template values. Supported mixing types are
+`plain`, `pulay`, and `broyden`.
+
 For the current two-fragment runtime, the canonical state energy is recovered
 from the last complete sweep as
 
