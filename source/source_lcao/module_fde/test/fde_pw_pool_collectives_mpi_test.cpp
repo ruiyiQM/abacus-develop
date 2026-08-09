@@ -132,7 +132,7 @@ TEST(FdePwPoolCollectivesMpi, PreservesScfShapeButClampsArtifactDensity)
     EXPECT_DOUBLE_EQ(artifact_alpha.front(), 0.0);
 }
 
-TEST(FdePwPoolCollectivesMpi, LeavesSubMicroelectronQuadratureErrorUnchanged)
+TEST(FdePwPoolCollectivesMpi, LeavesSpinConservingQuadratureOffsetUnchanged)
 {
     int process_count = 0;
     int rank = 0;
@@ -142,8 +142,8 @@ TEST(FdePwPoolCollectivesMpi, LeavesSubMicroelectronQuadratureErrorUnchanged)
     initialize_basis(basis, process_count, rank);
 
     const double volume = 42.0;
-    std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), (7.0 + 5.0e-7) / volume);
-    std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), (8.0 - 5.0e-7) / volume);
+    std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), (7.0 + 5.0e-5) / volume);
+    std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), (8.0 + 5.0e-5) / volume);
     const std::vector<double> original_alpha = alpha;
     const std::vector<double> original_beta = beta;
 
