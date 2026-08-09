@@ -1,5 +1,6 @@
 #include "fde_lcao_driver.h"
 
+#include "fde_grid_partition.h"
 #include "fde_potential_evaluator.h"
 #include "fde_projected_hamiltonian.h"
 #include "fde_fragment_artifact.h"
@@ -125,12 +126,9 @@ UniformGrid make_grid(const FrozenDensityArtifact& artifact,
 {
     if (artifact.grid_x != static_cast<std::size_t>(basis.nx)
         || artifact.grid_y != static_cast<std::size_t>(basis.ny)
-        || artifact.grid_z != static_cast<std::size_t>(basis.nz)
-        || artifact.grid_x * artifact.grid_y * artifact.grid_z
-               != static_cast<std::size_t>(basis.nrxx))
+        || artifact.grid_z != static_cast<std::size_t>(basis.nz))
     {
-        throw std::invalid_argument(
-            "FDE native LCAO runtime currently requires a replicated density grid");
+        throw std::invalid_argument("FDE density artifact does not match the ABACUS grid");
     }
     const ModuleBase::Matrix3& lattice = unit_cell.latvec;
     const double a = vector_norm(lattice.e11, lattice.e12, lattice.e13) * unit_cell.lat0;
@@ -319,16 +317,18 @@ int FdeLcaoDriver::active_beta_electrons() const
 void FdeLcaoDriver::initialize_active_charge(Charge& charge) const
 {
     if (charge.nspin != 2 || charge.rho == nullptr
-        || active_initial_.rho_alpha_bohr3.size()
-               != static_cast<std::size_t>(charge.rhopw->nrxx))
+        || charge.rhopw == nullptr
+        || active_alpha_local_.size() != static_cast<std::size_t>(charge.rhopw->nrxx)
+        || active_beta_local_.size() != active_alpha_local_.size())
     {
-        throw std::invalid_argument("FDE active density does not match the ABACUS Charge grid");
+        throw std::invalid_argument(
+            "FDE active density has not been partitioned for the ABACUS Charge grid");
     }
-    std::copy(active_initial_.rho_alpha_bohr3.begin(),
-              active_initial_.rho_alpha_bohr3.end(),
+    std::copy(active_alpha_local_.begin(),
+              active_alpha_local_.end(),
               charge.rho[0]);
-    std::copy(active_initial_.rho_beta_bohr3.begin(),
-              active_initial_.rho_beta_bohr3.end(),
+    std::copy(active_beta_local_.begin(),
+              active_beta_local_.end(),
               charge.rho[1]);
 }
 
@@ -359,20 +359,35 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
     {
         throw std::runtime_error("FDE embedded_scf requires an ABACUS build with Libxc");
     }
+    if (frozen_environment_.empty())
+    {
+        throw std::invalid_argument("FDE embedded_scf requires a frozen environment density");
+    }
     const FrozenDensityArtifact& reference = frozen_environment_.front();
+    const DensityGridPartition partition
+        = DensityGridPartition::from_pw_basis(reference, density_basis);
+    (void)DensityGridPartition::from_pw_basis(active_initial_, density_basis);
+    active_alpha_local_ = partition.extract(active_initial_.rho_alpha_bohr3);
+    active_beta_local_ = partition.extract(active_initial_.rho_beta_bohr3);
     SpinDensity frozen;
-    frozen.alpha_bohr3.assign(reference.rho_alpha_bohr3.size(), 0.0);
-    frozen.beta_bohr3.assign(reference.rho_beta_bohr3.size(), 0.0);
+    frozen.alpha_bohr3.assign(partition.local_size(), 0.0);
+    frozen.beta_bohr3.assign(partition.local_size(), 0.0);
     for (std::size_t fragment = 0; fragment < frozen_environment_.size(); ++fragment)
     {
+        const DensityGridPartition fragment_partition
+            = DensityGridPartition::from_pw_basis(frozen_environment_[fragment], density_basis);
+        const std::vector<double> alpha
+            = fragment_partition.extract(frozen_environment_[fragment].rho_alpha_bohr3);
+        const std::vector<double> beta
+            = fragment_partition.extract(frozen_environment_[fragment].rho_beta_bohr3);
         for (std::size_t point = 0; point < frozen.alpha_bohr3.size(); ++point)
         {
-            frozen.alpha_bohr3[point]
-                += frozen_environment_[fragment].rho_alpha_bohr3[point];
-            frozen.beta_bohr3[point]
-                += frozen_environment_[fragment].rho_beta_bohr3[point];
+            frozen.alpha_bohr3[point] += alpha[point];
+            frozen.beta_bohr3[point] += beta[point];
         }
     }
+    frozen_alpha_local_ = frozen.alpha_bohr3;
+    frozen_beta_local_ = frozen.beta_bohr3;
     const UniformGrid grid = make_grid(reference, density_basis, unit_cell);
     double* density[2] = {frozen.alpha_bohr3.data(), frozen.beta_bohr3.data()};
     const double* const_density[2] = {density[0], density[1]};

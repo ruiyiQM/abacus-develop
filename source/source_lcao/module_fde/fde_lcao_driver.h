@@ -108,6 +108,10 @@ class FdeLcaoDriver
     int active_beta_electrons_;
     FrozenDensityArtifact active_initial_;
     std::vector<FrozenDensityArtifact> frozen_environment_;
+    std::vector<double> active_alpha_local_;
+    std::vector<double> active_beta_local_;
+    std::vector<double> frozen_alpha_local_;
+    std::vector<double> frozen_beta_local_;
     PotFde* embedding_potential_;
 };
 

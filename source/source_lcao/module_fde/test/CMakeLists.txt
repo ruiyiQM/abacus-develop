@@ -45,6 +45,13 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_grid_partition
+  SOURCES fde_grid_partition_test.cpp
+    ../fde_grid_partition.cpp
+    ../fde_density_artifact.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_fragment_artifact
   SOURCES fde_fragment_artifact_test.cpp
     ../fde_fragment_artifact.cpp
