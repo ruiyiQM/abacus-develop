@@ -154,6 +154,105 @@ void DensityGridPartition::extract_into(const std::vector<double>& global_densit
     }
 }
 
+std::vector<double> DensityGridPartition::scatter_from_root(
+    const std::vector<double>& global_density,
+    const ModulePW::PW_Basis& basis,
+    const int root)
+{
+    if (basis.nx <= 0 || basis.ny <= 0 || basis.nz <= 0
+        || basis.nrxx < 0 || basis.nplane < 0
+        || static_cast<std::size_t>(basis.nrxx)
+               != static_cast<std::size_t>(basis.nx)
+                      * static_cast<std::size_t>(basis.ny)
+                      * static_cast<std::size_t>(basis.nplane))
+    {
+        throw std::invalid_argument("FDE cannot scatter an invalid PW_Basis density slab");
+    }
+    if (root < 0 || root >= basis.poolnproc)
+    {
+        throw std::invalid_argument("FDE density scatter root is outside the PW pool");
+    }
+
+    const std::size_t xy_size
+        = static_cast<std::size_t>(basis.nx) * static_cast<std::size_t>(basis.ny);
+    const std::size_t global_size = xy_size * static_cast<std::size_t>(basis.nz);
+#ifdef __MPI
+    if (basis.pool_world == MPI_COMM_NULL || basis.startz == nullptr
+        || basis.numz == nullptr)
+    {
+        throw std::invalid_argument("FDE density scatter requires an initialized PW communicator");
+    }
+    if ((basis.poolrank == root && global_density.size() != global_size)
+        || (basis.poolrank != root && !global_density.empty()))
+    {
+        throw std::invalid_argument(
+            "FDE density scatter requires a global artifact only on root");
+    }
+
+    std::vector<int> counts(static_cast<std::size_t>(basis.poolnproc), 0);
+    std::vector<int> displacements(static_cast<std::size_t>(basis.poolnproc), 0);
+    int packed_size = 0;
+    for (int rank = 0; rank < basis.poolnproc; ++rank)
+    {
+        const std::size_t count
+            = xy_size * static_cast<std::size_t>(basis.numz[rank]);
+        if (count > static_cast<std::size_t>(std::numeric_limits<int>::max())
+            || packed_size > std::numeric_limits<int>::max() - static_cast<int>(count))
+        {
+            throw std::overflow_error("FDE density scatter exceeds MPI integer counts");
+        }
+        counts[rank] = static_cast<int>(count);
+        displacements[rank] = packed_size;
+        packed_size += counts[rank];
+    }
+    if (static_cast<std::size_t>(packed_size) != global_size)
+    {
+        throw std::invalid_argument("FDE PW z-slabs do not cover the global density grid");
+    }
+
+    std::vector<double> packed(
+        basis.poolrank == root ? global_size : std::size_t{0});
+    if (basis.poolrank == root)
+    {
+        for (int rank = 0; rank < basis.poolnproc; ++rank)
+        {
+            const std::size_t local_z = static_cast<std::size_t>(basis.numz[rank]);
+            const std::size_t start_z = static_cast<std::size_t>(basis.startz[rank]);
+            for (std::size_t xy = 0; xy < xy_size; ++xy)
+            {
+                const std::size_t global_begin
+                    = xy * static_cast<std::size_t>(basis.nz) + start_z;
+                const std::size_t packed_begin
+                    = static_cast<std::size_t>(displacements[rank]) + xy * local_z;
+                std::copy(global_density.begin() + global_begin,
+                          global_density.begin() + global_begin + local_z,
+                          packed.begin() + packed_begin);
+            }
+        }
+    }
+
+    std::vector<double> local(static_cast<std::size_t>(basis.nrxx), 0.0);
+    MPI_Scatterv(packed.data(),
+                 counts.data(),
+                 displacements.data(),
+                 MPI_DOUBLE,
+                 local.data(),
+                 basis.nrxx,
+                 MPI_DOUBLE,
+                 root,
+                 basis.pool_world);
+    return local;
+#else
+    if (basis.poolnproc != 1 || basis.poolrank != 0
+        || static_cast<std::size_t>(basis.nrxx) != global_size
+        || global_density.size() != global_size)
+    {
+        throw std::invalid_argument("FDE serial density scatter requires one complete grid");
+    }
+    return global_density;
+#endif
+}
+
 std::vector<double> DensityGridPartition::gather_to_root(
     const double* local_density,
     const ModulePW::PW_Basis& basis,

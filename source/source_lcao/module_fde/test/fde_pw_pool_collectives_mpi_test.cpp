@@ -77,6 +77,44 @@ TEST(FdePwPoolCollectivesMpi, GathersZSlabsInCanonicalArtifactOrder)
     }
 }
 
+TEST(FdePwPoolCollectivesMpi, ScattersCanonicalArtifactIntoZSlabs)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+
+    std::vector<double> global;
+    if (rank == 0)
+    {
+        global.resize(static_cast<std::size_t>(basis.nxyz), 0.0);
+        for (int xy = 0; xy < basis.nxy; ++xy)
+        {
+            for (int z = 0; z < basis.nz; ++z)
+            {
+                global[static_cast<std::size_t>(xy * basis.nz + z)]
+                    = 100.0 * static_cast<double>(xy) + static_cast<double>(z);
+            }
+        }
+    }
+
+    const std::vector<double> local
+        = fde::DensityGridPartition::scatter_from_root(global, basis);
+    ASSERT_EQ(local.size(), static_cast<std::size_t>(basis.nrxx));
+    for (int xy = 0; xy < basis.nxy; ++xy)
+    {
+        for (int local_z = 0; local_z < basis.nplane; ++local_z)
+        {
+            EXPECT_DOUBLE_EQ(
+                local[static_cast<std::size_t>(xy * basis.nplane + local_z)],
+                100.0 * static_cast<double>(xy)
+                    + static_cast<double>(basis.startz_current + local_z));
+        }
+    }
+}
+
 TEST(FdePwPoolCollectivesMpi, NormalizesFixedSpinPopulationsIndependently)
 {
     int process_count = 0;

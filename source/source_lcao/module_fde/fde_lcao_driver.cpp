@@ -144,32 +144,10 @@ void broadcast_string(std::string& value,
     }
 }
 
-void broadcast_density(std::vector<double>& density,
-                       const int rank,
-                       const int root,
-                       MPI_Comm communicator)
-{
-    std::size_t size = density.size();
-    broadcast_size(size, rank, root, communicator);
-    if (rank != root)
-    {
-        density.resize(size);
-    }
-    if (size != 0)
-    {
-        broadcast_chunks(density.data(),
-                         size,
-                         MPI_DOUBLE,
-                         root,
-                         communicator,
-                         "broadcasting artifact density");
-    }
-}
-
-void broadcast_density_artifact(FrozenDensityArtifact& artifact,
-                                const int rank,
-                                const int root,
-                                MPI_Comm communicator)
+void broadcast_density_artifact_metadata(FrozenDensityArtifact& artifact,
+                                         const int rank,
+                                         const int root,
+                                         MPI_Comm communicator)
 {
     int integer_fields[6];
     double floating_fields[4];
@@ -231,8 +209,6 @@ void broadcast_density_artifact(FrozenDensityArtifact& artifact,
     broadcast_string(artifact.core_density_fingerprint, rank, root, communicator);
     broadcast_string(artifact.xc_functional, rank, root, communicator);
     broadcast_string(artifact.kinetic_functional, rank, root, communicator);
-    broadcast_density(artifact.rho_alpha_bohr3, rank, root, communicator);
-    broadcast_density(artifact.rho_beta_bohr3, rank, root, communicator);
 }
 
 #endif
@@ -282,16 +258,83 @@ FrozenDensityArtifact read_density_file(const std::string& path,
     {
         throw std::runtime_error(error);
     }
-    broadcast_density_artifact(artifact, rank, root, communicator);
-    if (rank != root)
-    {
-        DensityArtifactIO::validate(artifact, electron_tolerance);
-    }
+    broadcast_density_artifact_metadata(artifact, rank, root, communicator);
     return artifact;
 #else
     (void)orbitals;
     return read_density_file_serial(path, electron_tolerance);
 #endif
+}
+
+void validate_artifact_set(const FrozenDensityArtifact& active,
+                           const std::vector<FrozenDensityArtifact>& frozen,
+                           const double electron_tolerance,
+                           const Parallel_Orbitals& orbitals)
+{
+#ifdef __MPI
+    MPI_Comm communicator = orbitals.comm();
+    if (communicator == MPI_COMM_NULL)
+    {
+        throw std::runtime_error(
+            "FDE density validation requires an initialized AO communicator");
+    }
+    int rank = 0;
+    require_mpi_success(MPI_Comm_rank(communicator, &rank),
+                        "querying the artifact-validation rank");
+    const int root = 0;
+    int success = 1;
+    std::string error;
+    if (rank == root)
+    {
+        try
+        {
+            if (frozen.empty())
+            {
+                throw std::invalid_argument(
+                    "FDE compatible artifact set requires at least two fragments");
+            }
+            DensityArtifactIO::validate(active, electron_tolerance);
+            for (std::size_t index = 0; index < frozen.size(); ++index)
+            {
+                DensityArtifactIO::validate_compatible_pair(active,
+                                                            frozen[index],
+                                                            electron_tolerance);
+            }
+        }
+        catch (const std::exception& exception)
+        {
+            success = 0;
+            error = exception.what();
+        }
+    }
+    require_mpi_success(MPI_Bcast(&success, 1, MPI_INT, root, communicator),
+                        "broadcasting artifact-validation status");
+    broadcast_string(error, rank, root, communicator);
+    if (success == 0)
+    {
+        throw std::runtime_error(error);
+    }
+#else
+    (void)orbitals;
+    if (frozen.empty())
+    {
+        throw std::invalid_argument(
+            "FDE compatible artifact set requires at least two fragments");
+    }
+    DensityArtifactIO::validate(active, electron_tolerance);
+    for (std::size_t index = 0; index < frozen.size(); ++index)
+    {
+        DensityArtifactIO::validate_compatible_pair(active,
+                                                    frozen[index],
+                                                    electron_tolerance);
+    }
+#endif
+}
+
+void release_density_arrays(FrozenDensityArtifact& artifact)
+{
+    std::vector<double>().swap(artifact.rho_alpha_bohr3);
+    std::vector<double>().swap(artifact.rho_beta_bohr3);
 }
 
 const RuntimeStateDefinition& active_state(const FdeRuntimeConfig& config)
@@ -527,9 +570,10 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         frozen_environment.push_back(artifact);
         seen_labels.push_back(path.label);
     }
-    std::vector<FrozenDensityArtifact> compatible = frozen_environment;
-    compatible.push_back(active_initial);
-    DensityArtifactIO::validate_compatible_set(compatible, config.electron_tolerance);
+    validate_artifact_set(active_initial,
+                          frozen_environment,
+                          config.electron_tolerance,
+                          orbitals);
 
     return std::unique_ptr<FdeLcaoDriver>(
         new FdeLcaoDriver(config,
@@ -621,8 +665,13 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
     const DensityGridPartition partition
         = DensityGridPartition::from_pw_basis(reference, density_basis);
     (void)DensityGridPartition::from_pw_basis(active_initial_, density_basis);
-    active_alpha_local_ = partition.extract(active_initial_.rho_alpha_bohr3);
-    active_beta_local_ = partition.extract(active_initial_.rho_beta_bohr3);
+    active_alpha_local_
+        = DensityGridPartition::scatter_from_root(active_initial_.rho_alpha_bohr3,
+                                                  density_basis);
+    active_beta_local_
+        = DensityGridPartition::scatter_from_root(active_initial_.rho_beta_bohr3,
+                                                  density_basis);
+    release_density_arrays(active_initial_);
     SpinDensity frozen;
     frozen.alpha_bohr3.assign(partition.local_size(), 0.0);
     frozen.beta_bohr3.assign(partition.local_size(), 0.0);
@@ -631,9 +680,14 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
         const DensityGridPartition fragment_partition
             = DensityGridPartition::from_pw_basis(frozen_environment_[fragment], density_basis);
         const std::vector<double> alpha
-            = fragment_partition.extract(frozen_environment_[fragment].rho_alpha_bohr3);
+            = DensityGridPartition::scatter_from_root(
+                frozen_environment_[fragment].rho_alpha_bohr3,
+                density_basis);
         const std::vector<double> beta
-            = fragment_partition.extract(frozen_environment_[fragment].rho_beta_bohr3);
+            = DensityGridPartition::scatter_from_root(
+                frozen_environment_[fragment].rho_beta_bohr3,
+                density_basis);
+        release_density_arrays(frozen_environment_[fragment]);
         for (std::size_t point = 0; point < frozen.alpha_bohr3.size(); ++point)
         {
             frozen.alpha_bohr3[point] += alpha[point];
