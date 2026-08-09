@@ -34,7 +34,8 @@ TEST(base_libm, sincos_random)
     }
 
     for (int i = 0; i < len; ++i) {
-        sincos(da[i], &ds1[i * 2 + 0], &ds1[i * 2 + 1]);
+        ds1[i * 2 + 0] = std::sin(da[i]);
+        ds1[i * 2 + 1] = std::cos(da[i]);
         ModuleBase::libm::sincos(da[i], &ds2[i * 2 + 0], &ds2[i * 2 + 1]);
     }
 
@@ -61,12 +62,26 @@ TEST(base_libm, sincos_spec)
     std::vector<double> ds2(len*2);
 
     for (int i = 0; i < len; ++i) {
-        sincos(da[i], &ds1[i * 2 + 0], &ds1[i * 2 + 1]);
+        ds1[i * 2 + 0] = std::sin(da[i]);
+        ds1[i * 2 + 1] = std::cos(da[i]);
         ModuleBase::libm::sincos(da[i], &ds2[i * 2 + 0], &ds2[i * 2 + 1]);
     }
 
     for (int i = 0; i < len * 2; i++) {
         MY_EXPECT_DOUBLE_EQ(ds1[i], ds2[i]);
+    }
+}
+
+TEST(base_libm, sincos_float)
+{
+    const float values[] = {-1.25F, -0.0F, 0.0F, 0.75F, 100.0F};
+    for (const float value : values)
+    {
+        float sine = 0.0F;
+        float cosine = 0.0F;
+        ModuleBase::libm::sincos(value, &sine, &cosine);
+        EXPECT_FLOAT_EQ(sine, std::sin(value));
+        EXPECT_FLOAT_EQ(cosine, std::cos(value));
     }
 }
 

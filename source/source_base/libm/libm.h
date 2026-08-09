@@ -27,7 +27,11 @@ std::complex<double> __cexp (const std::complex<double> &x);
 inline double __exp (double x) { return std::exp(x); };
 inline double __cos (double x) { return std::cos(x); };
 inline double __sin (double x) { return std::sin(x); };
-inline void __sincos (double x, double *sinx, double *cosx) { sincos(x, sinx, cosx); };
+inline void __sincos (double x, double *sinx, double *cosx)
+{
+    *sinx = std::sin(x);
+    *cosx = std::cos(x);
+}
 inline std::complex<double> __cexp (const std::complex<double> &x) { return std::exp(x); }
 
 #endif
@@ -35,7 +39,11 @@ inline std::complex<double> __cexp (const std::complex<double> &x) { return std:
 inline float __expf (float x) { return std::exp(x); };
 inline float __cosf (float x) { return std::cos(x); };
 inline float __sinf (float x) { return std::sin(x); };
-inline void __sincosf (float x, float *sinx, float *cosx) { sincosf(x, sinx, cosx); };
+inline void __sincosf (float x, float *sinx, float *cosx)
+{
+    *sinx = std::sin(x);
+    *cosx = std::cos(x);
+}
 inline std::complex<float> __cexpf (const std::complex<float> &x) { return std::exp(x); }
 
 template<typename Tp> Tp exp(Tp x);
