@@ -110,6 +110,7 @@ if(ENABLE_MPI)
     fde_pw_pool_collectives_mpi_test.cpp
     ../fde_grid_partition.cpp
     ../fde_pw_pool_collectives.cpp
+    ../fde_spin_density.cpp
   )
   target_link_libraries(MODULE_FDE_pw_pool_collectives_mpi PRIVATE
     MPI::MPI_CXX GTest::gtest planewave device base parameter

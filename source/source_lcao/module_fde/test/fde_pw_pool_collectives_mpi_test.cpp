@@ -1,5 +1,6 @@
 #include "../fde_grid_partition.h"
 #include "../fde_pw_pool_collectives.h"
+#include "../fde_spin_density.h"
 #include "source_base/matrix3.h"
 #include "source_basis/module_pw/pw_basis.h"
 
@@ -74,6 +75,33 @@ TEST(FdePwPoolCollectivesMpi, GathersZSlabsInCanonicalArtifactOrder)
                              100.0 * static_cast<double>(xy) + static_cast<double>(z));
         }
     }
+}
+
+TEST(FdePwPoolCollectivesMpi, NormalizesFixedSpinPopulationsIndependently)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+
+    std::vector<double> alpha(static_cast<std::size_t>(basis.nrxx), static_cast<double>(rank + 1));
+    std::vector<double> beta(static_cast<std::size_t>(basis.nrxx), 5.0 * static_cast<double>(rank + 1));
+    const double volume = 42.0;
+    fde::normalize_spin_density(alpha.data(), beta.data(), alpha.size(), 7, 8, volume, basis);
+
+    double populations[2] = {0.0, 0.0};
+    for (std::size_t point = 0; point < alpha.size(); ++point)
+    {
+        populations[0] += alpha[point];
+        populations[1] += beta[point];
+    }
+    fde::PwPoolCollectives::sum_in_place(populations, 2, basis);
+    const double volume_element = volume / static_cast<double>(basis.nxyz);
+    EXPECT_NEAR(populations[0] * volume_element, 7.0, 1.0e-12);
+    EXPECT_NEAR(populations[1] * volume_element, 8.0, 1.0e-12);
+    EXPECT_NEAR((populations[0] - populations[1]) * volume_element, -1.0, 1.0e-12);
 }
 
 int main(int argc, char** argv)

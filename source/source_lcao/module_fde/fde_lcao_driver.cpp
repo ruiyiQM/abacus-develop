@@ -5,6 +5,7 @@
 #include "fde_projected_hamiltonian.h"
 #include "fde_pw_pool_collectives.h"
 #include "fde_solver_policy.h"
+#include "fde_spin_density.h"
 #include "fde_fragment_artifact.h"
 #include "pot_fde.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
@@ -23,7 +24,6 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -461,56 +461,25 @@ void FdeLcaoDriver::solve_projected(
                  charge,
                  2,
                  false);
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_)
+    {
+        throw std::runtime_error(
+            "FDE spin-density normalization requires the attached PW grid");
+    }
+    // ABACUS' general LCAO path normalizes only the total density.  The
+    // projected alpha and beta quadratures can have different grid errors, so
+    // restore both fixed FDE populations before charge/magnetization mixing.
+    normalize_spin_density(charge.rho[0],
+                           charge.rho[1],
+                           static_cast<std::size_t>(charge.nrxx),
+                           active_alpha_electrons_,
+                           active_beta_electrons_,
+                           active_initial_.cell_volume_bohr3,
+                           *density_basis_);
 }
 
 namespace
 {
-
-void normalize_local_density(std::vector<double>& density,
-                             const int electron_count,
-                             const double cell_volume_bohr3,
-                             const ModulePW::PW_Basis& basis)
-{
-    if (density.size() != static_cast<std::size_t>(basis.nrxx)
-        || basis.nxyz <= 0)
-    {
-        throw std::runtime_error("FDE converged density does not match its PW grid");
-    }
-    double invalid = 0.0;
-    double density_sum = 0.0;
-    for (std::size_t point = 0; point < density.size(); ++point)
-    {
-        if (!std::isfinite(density[point]))
-        {
-            invalid = 1.0;
-            density[point] = 0.0;
-        }
-        density[point] = std::max(0.0, density[point]);
-        density_sum += density[point];
-    }
-    invalid = PwPoolCollectives::maximum(invalid, basis);
-    PwPoolCollectives::sum_in_place(&density_sum, 1, basis);
-    if (invalid != 0.0)
-    {
-        throw std::runtime_error("FDE converged density contains a non-finite value");
-    }
-    if (electron_count == 0)
-    {
-        std::fill(density.begin(), density.end(), 0.0);
-        return;
-    }
-    const double integral
-        = density_sum * cell_volume_bohr3 / static_cast<double>(basis.nxyz);
-    if (!std::isfinite(integral) || integral <= std::numeric_limits<double>::min())
-    {
-        throw std::runtime_error("FDE converged density has zero integrated population");
-    }
-    const double scale = static_cast<double>(electron_count) / integral;
-    for (std::size_t point = 0; point < density.size(); ++point)
-    {
-        density[point] *= scale;
-    }
-}
 
 int ao_rank(const Parallel_Orbitals& orbitals)
 {
@@ -741,14 +710,13 @@ void FdeLcaoDriver::write_scf_artifacts(
                                     alpha_checkpoint + local_grid_size);
     std::vector<double> local_beta(beta_checkpoint,
                                    beta_checkpoint + local_grid_size);
-    normalize_local_density(local_alpha,
-                            active_alpha_electrons_,
-                            active_initial_.cell_volume_bohr3,
-                            *density_basis_);
-    normalize_local_density(local_beta,
-                            active_beta_electrons_,
-                            active_initial_.cell_volume_bohr3,
-                            *density_basis_);
+    normalize_spin_density(local_alpha.data(),
+                           local_beta.data(),
+                           local_grid_size,
+                           active_alpha_electrons_,
+                           active_beta_electrons_,
+                           active_initial_.cell_volume_bohr3,
+                           *density_basis_);
     SpinDensity active_density;
     active_density.alpha_bohr3 = local_alpha;
     active_density.beta_bohr3 = local_beta;
