@@ -106,6 +106,7 @@ add_library(
     OBJECT
     module_parameter/read_input_item_system.cpp
     module_parameter/read_input_item_elec_stru.cpp
+    module_parameter/read_input_item_fde.cpp
     module_parameter/read_input_item_relax.cpp
     module_parameter/read_input_item_md.cpp
     module_parameter/read_input_item_ofdft.cpp

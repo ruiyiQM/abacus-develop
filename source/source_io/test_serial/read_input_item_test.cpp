@@ -35,6 +35,51 @@ class InputTest : public testing::Test
     }
 };
 
+TEST_F(InputTest, NativeFdeInput)
+{
+    ModuleIO::ReadInput readinput(0);
+    readinput.check_ntype_flag = false;
+    Parameter param;
+
+    auto task = find_label("fde_task", readinput.input_lists);
+    auto config = find_label("fde_config", readinput.input_lists);
+    ASSERT_NE(task, readinput.input_lists.end());
+    ASSERT_NE(config, readinput.input_lists.end());
+    EXPECT_EQ(param.input.fde_task, "none");
+    EXPECT_EQ(param.input.fde_config, "FDE_CONFIG");
+
+    task->second.str_values = {"embedded_scf"};
+    task->second.read_value(task->second, param);
+    config->second.str_values = {"fde/reactant_F.cfg"};
+    config->second.read_value(config->second, param);
+    EXPECT_EQ(param.input.fde_task, "embedded_scf");
+    EXPECT_EQ(param.input.fde_config, "fde/reactant_F.cfg");
+
+    param.input.calculation = "scf";
+    param.input.basis_type = "lcao";
+    param.input.gamma_only = true;
+    param.input.nspin = 2;
+    param.input.noncolin = false;
+    param.input.lspinorb = false;
+    param.input.dft_functional = "pbe";
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
+
+    param.input.gamma_only = false;
+    EXPECT_EXIT(task->second.check_value(task->second, param),
+                ::testing::ExitedWithCode(1),
+                "");
+    param.input.gamma_only = true;
+    param.input.dft_functional = "pbe0";
+    EXPECT_EXIT(task->second.check_value(task->second, param),
+                ::testing::ExitedWithCode(1),
+                "");
+
+    param.input.fde_task = "invalid";
+    EXPECT_EXIT(task->second.check_value(task->second, param),
+                ::testing::ExitedWithCode(1),
+                "");
+}
+
 TEST_F(InputTest, RelaxMethod)
 {
     ModuleIO::ReadInput readinput(0);

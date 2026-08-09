@@ -17,6 +17,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_one_way_scf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_pes_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_runtime_config.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_semilocal_functional.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_subspace_solver.cpp

@@ -116,6 +116,8 @@ struct Input_para
     bool mixing_dmr = false;  ///< whether to mix real space density matrix
 
     bool gamma_only = false;   ///< for plane wave.
+    std::string fde_task = "none";          ///< native FDE runtime task
+    std::string fde_config = "FDE_CONFIG"; ///< native FDE sidecar configuration
     int scf_nmax = 100;        ///< number of max elec iter
     double scf_thr = -1.0;     ///< \sum |rhog_out - rhog_in |^2
     double scf_ene_thr = -1.0; ///< energy threshold for scf convergence, in eV

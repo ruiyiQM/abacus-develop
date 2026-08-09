@@ -29,6 +29,11 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_runtime_config
+  SOURCES fde_runtime_config_test.cpp ../fde_runtime_config.cpp ../fde_state.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_density_artifact
   SOURCES fde_density_artifact_test.cpp ../fde_density_artifact.cpp
 )

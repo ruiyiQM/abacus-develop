@@ -165,6 +165,7 @@ ReadInput::ReadInput(const int& rank)
     // add items
     this->item_system();
     this->item_elec_stru();
+    this->item_fde();
     this->item_relax();
     this->item_md();
     this->item_ofdft();

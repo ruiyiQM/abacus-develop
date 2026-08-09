@@ -103,6 +103,46 @@ replacement for `CanonicalEnergy`, which sums the complete named ledger once.
 
 ## Execution and provenance
 
+The user-facing `INPUT` deliberately contains only the runtime selector and a
+sidecar path:
+
+```text
+INPUT_PARAMETERS
+calculation       scf
+basis_type        lcao
+gamma_only        1
+nspin             2
+dft_functional    pbe
+symmetry          0
+fde_task          embedded_scf
+fde_config        FDE_CONFIG
+```
+
+`fde_task` accepts `none`, `embedded_scf`, and `diabatic_postprocess`. The
+versioned, line-oriented `FDE_CONFIG` owns the fragment atom partition,
+neutral valence-electron counts, explicit state charge/spin assignments,
+active state and fragment, artifact paths, freeze-thaw controls, and K/L/M
+postprocessing selections. Atom indices are zero based and refer to the STRU
+supersystem order. For the two target states of `[F-CH3-Cl]-`, the model is
+
+```text
+FDE_CONFIG 1
+ATOM_COUNT 6
+FRAGMENT F 7 1 0
+FRAGMENT CH3Cl 14 5 1 2 3 4 5
+STATE reactant -1 0 2 F -1 0 CH3Cl 0 0
+STATE product  -1 0 2 F  0 1 CH3Cl -1 -1
+ACTIVE_STATE reactant
+ACTIVE_FRAGMENT F
+...
+END_FDE_CONFIG
+```
+
+Thus the reactant branch contains closed-shell `F- + CH3Cl`, while the product
+branch contains the spin-coupled `F(radical) + CH3Cl-` fragment assignment.
+Every state/active-fragment pair is still one independent ABACUS process; an
+external workflow creates those task-local sidecars and alternates them.
+
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,
 one active subsystem, and one freeze-thaw cycle. An external restartable
 workflow alternates A-in-B and B-in-A jobs. A frozen-density artifact records a

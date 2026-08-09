@@ -111,6 +111,8 @@ class ReadInput
     void item_system();
     // items for electronic structure
     void item_elec_stru();
+    // items for frozen-density embedding
+    void item_fde();
     // items for lcao
     void item_lcao();
     // items for relax
