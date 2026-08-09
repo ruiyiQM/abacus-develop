@@ -408,7 +408,6 @@ spinor forces, stress, or periodic k-point forces.
 - RP13: nonorthogonal multi-state diagonalization and root tracking.
 - RP14: explicit `FDE-diab(K,L,M)` multi-state/multi-fragment assembly.
 - RP15: semilocal diagonal-state analytic FDE force correction and Gint bridge.
-- RP14: auditable multi-fragment `FDE-diab(K,L,M)` matrix assembly.
 
 RP10-RP15 extend this serial Γ-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state
@@ -429,6 +428,17 @@ derivatives remain separate follow-up work.
 - Charge-localization diagnostics do not swap labels near a crossing.
 - Each finite-difference displacement reconverges the complete freeze-thaw
   workflow before the derivative is formed.
+
+`MODULE_FDE_workflow_serial` exercises two states, both active-fragment
+updates, complete-sweep checkpointing, canonical energy assembly, automatic
+postprocessing, and PES table output with a deterministic solver fixture.
+`MODULE_FDE_diabatic_postprocess` covers the nonorthogonal solve. When MPI is
+enabled, `MODULE_FDE_electronic_coupling_2rank` independently evaluates the
+determinant overlap, transition densities, and symmetric coupling on two
+ranks and requires identical finite results. This MPI coverage does not widen
+the active embedded-SCF boundary: active-subsystem calculations remain
+serial/replicated Gamma tasks, while production MPI launches are supported for
+artifact postprocessing.
 
 The quasi-diabatic-state construction follows the FDE-diab framework described
 in J. Chem. Phys. 148, 214104 (2018), DOI 10.1063/1.5023290. The first

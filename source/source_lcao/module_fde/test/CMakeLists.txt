@@ -82,6 +82,41 @@ AddTest(
     ../fde_state.cpp
 )
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+  NAME MODULE_FDE_workflow_serial
+  COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/fde/test_fde_workflow_e2e.py -v
+)
+set_tests_properties(MODULE_FDE_workflow_serial PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1"
+)
+
+if(ENABLE_MPI)
+  add_executable(MODULE_FDE_electronic_coupling_mpi
+    fde_electronic_coupling_mpi_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+    ../fde_electronic_coupling.cpp
+  )
+  target_link_libraries(MODULE_FDE_electronic_coupling_mpi PRIVATE
+    MPI::MPI_CXX GTest::gtest_main GTest::gmock_main
+  )
+  install(TARGETS MODULE_FDE_electronic_coupling_mpi
+    DESTINATION ${CMAKE_BINARY_DIR}/tests)
+  add_test(
+    NAME MODULE_FDE_electronic_coupling_2rank
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+      ${MPIEXEC_PREFLAGS}
+      $<TARGET_FILE:MODULE_FDE_electronic_coupling_mpi>
+      ${MPIEXEC_POSTFLAGS}
+  )
+  set_tests_properties(MODULE_FDE_electronic_coupling_2rank PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1"
+    PROCESSORS 2
+  )
+endif()
+
 AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
