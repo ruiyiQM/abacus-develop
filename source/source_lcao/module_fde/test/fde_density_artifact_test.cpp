@@ -73,6 +73,15 @@ TEST(FdeDensityArtifact, RejectsIncorrectElectronIntegrals)
     EXPECT_THROW(fde::DensityArtifactIO::validate(invalid, 1.0e-12), std::invalid_argument);
 }
 
+TEST(FdeDensityArtifact, ValidatesAlphaAndBetaPopulationsIndependently)
+{
+    fde::FrozenDensityArtifact invalid = artifact("A");
+    invalid.rho_alpha_bohr3 = {0.5, 0.5};
+    invalid.rho_beta_bohr3 = {1.0, 1.0};
+    EXPECT_THROW(fde::DensityArtifactIO::validate(invalid, 1.0e-12),
+                 std::invalid_argument);
+}
+
 TEST(FdeDensityArtifact, RoundTripsPartialScfDensityWithoutPromotingIt)
 {
     fde::FrozenDensityArtifact partial = artifact("A");

@@ -706,7 +706,8 @@ void FdeLcaoDriver::write_scf_artifacts(
 {
     if (embedding_potential_ == nullptr || density_basis_ == nullptr
         || charge.nspin != 2
-        || charge.rhopw == nullptr || charge.rho_save == nullptr
+        || charge.rhopw == nullptr || charge.rho == nullptr
+        || charge.rho_save == nullptr
         || charge.rhopw != density_basis_
         || wavefunctions.get_nk() != kpoints.get_nks()
         || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
@@ -727,11 +728,19 @@ void FdeLcaoDriver::write_scf_artifacts(
     const int global_band_count = wavefunctions.get_nbands();
 #endif
 
-    const std::size_t local_grid_size = static_cast<std::size_t>(density_basis_->nrxx);
-    std::vector<double> local_alpha(charge.rho_save[0],
-                                    charge.rho_save[0] + local_grid_size);
-    std::vector<double> local_beta(charge.rho_save[1],
-                                   charge.rho_save[1] + local_grid_size);
+    const std::size_t local_grid_size
+        = static_cast<std::size_t>(density_basis_->nrxx);
+    // rho_save is the density that generated the final converged Hamiltonian.
+    // At nmax, charge.rho instead contains the newly mixed and renormalized
+    // checkpoint that should seed the next inexact freeze--thaw update.
+    const double* const alpha_checkpoint
+        = status.converged ? charge.rho_save[0] : charge.rho[0];
+    const double* const beta_checkpoint
+        = status.converged ? charge.rho_save[1] : charge.rho[1];
+    std::vector<double> local_alpha(alpha_checkpoint,
+                                    alpha_checkpoint + local_grid_size);
+    std::vector<double> local_beta(beta_checkpoint,
+                                   beta_checkpoint + local_grid_size);
     normalize_local_density(local_alpha,
                             active_alpha_electrons_,
                             active_initial_.cell_volume_bohr3,
