@@ -29,7 +29,8 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
     : frozen_density_(frozen_density),
       frozen_hartree_potential_ry_(frozen_hartree_potential_ry),
       config_(config),
-      xc_provider_(xc_provider)
+      xc_provider_(xc_provider),
+      differential_operator_()
 {
     this->rho_basis_ = rho_basis;
     this->dynamic_mode = true;
@@ -38,14 +39,21 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
     {
         throw std::invalid_argument("FDE potential requires a density basis and XC provider");
     }
-    const std::size_t size = config_.grid.x * config_.grid.y * config_.grid.z;
+    if (config_.grid.x != static_cast<std::size_t>(rho_basis->nx)
+        || config_.grid.y != static_cast<std::size_t>(rho_basis->ny)
+        || config_.grid.z != static_cast<std::size_t>(rho_basis->nz))
+    {
+        throw std::invalid_argument("FDE potential grid does not match PW_Basis dimensions");
+    }
+    const std::size_t size = static_cast<std::size_t>(rho_basis->nrxx);
     if (size != frozen_density_.alpha_bohr3.size()
         || size != frozen_density_.beta_bohr3.size()
         || size != frozen_hartree_potential_ry_.size()
         || static_cast<std::size_t>(rho_basis->nrxx) != size)
     {
-        throw std::invalid_argument("FDE potential data must match the replicated ABACUS density grid");
+        throw std::invalid_argument("FDE potential data must match the local ABACUS density slab");
     }
+    differential_operator_.reset(new PwGridDifferential(*rho_basis));
     last_result_.potential.alpha_ry.assign(size, 0.0);
     last_result_.potential.beta_ry.assign(size, 0.0);
     last_result_.hartree_cross_energy_ry = 0.0;
@@ -59,7 +67,8 @@ EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) con
                                                  frozen_density_,
                                                  frozen_hartree_potential_ry_,
                                                  config_,
-                                                 *xc_provider_);
+                                                 *xc_provider_,
+                                                 differential_operator_.get());
 }
 
 void PotFde::cal_v_eff(const Charge* const charge,

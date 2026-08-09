@@ -31,12 +31,20 @@ std::size_t grid_size(const UniformGrid& grid)
     return grid.x * grid.y * grid.z;
 }
 
+std::size_t evaluation_size(const UniformGrid& grid,
+                            const GridDifferentialOperator* differential_operator)
+{
+    const std::size_t global_size = grid_size(grid);
+    return differential_operator == nullptr ? global_size
+                                            : differential_operator->local_size();
+}
+
 std::size_t offset(const std::size_t x,
                    const std::size_t y,
                    const std::size_t z,
                    const UniformGrid& grid)
 {
-    return x + grid.x * (y + grid.y * z);
+    return (x * grid.y + y) * grid.z + z;
 }
 
 std::size_t periodic_previous(const std::size_t index, const std::size_t extent)
@@ -77,22 +85,22 @@ std::vector<double> add_density(const std::vector<double>& first,
     return sum;
 }
 
-void gradient(const std::vector<double>& values,
-              const UniformGrid& grid,
-              std::vector<double>& gradient_x,
-              std::vector<double>& gradient_y,
-              std::vector<double>& gradient_z)
+void finite_difference_gradient(const std::vector<double>& values,
+                                const UniformGrid& grid,
+                                std::vector<double>& gradient_x,
+                                std::vector<double>& gradient_y,
+                                std::vector<double>& gradient_z)
 {
     const std::size_t size = values.size();
     gradient_x.assign(size, 0.0);
     gradient_y.assign(size, 0.0);
     gradient_z.assign(size, 0.0);
 #pragma omp parallel for collapse(3) schedule(static)
-    for (std::size_t z = 0; z < grid.z; ++z)
+    for (std::size_t x = 0; x < grid.x; ++x)
     {
         for (std::size_t y = 0; y < grid.y; ++y)
         {
-            for (std::size_t x = 0; x < grid.x; ++x)
+            for (std::size_t z = 0; z < grid.z; ++z)
             {
                 const std::size_t center = offset(x, y, z, grid);
                 gradient_x[center]
@@ -112,18 +120,19 @@ void gradient(const std::vector<double>& values,
     }
 }
 
-std::vector<double> divergence(const std::vector<double>& vector_x,
-                               const std::vector<double>& vector_y,
-                               const std::vector<double>& vector_z,
-                               const UniformGrid& grid)
+std::vector<double> finite_difference_divergence(
+    const std::vector<double>& vector_x,
+    const std::vector<double>& vector_y,
+    const std::vector<double>& vector_z,
+    const UniformGrid& grid)
 {
     std::vector<double> result(vector_x.size(), 0.0);
 #pragma omp parallel for collapse(3) schedule(static)
-    for (std::size_t z = 0; z < grid.z; ++z)
+    for (std::size_t x = 0; x < grid.x; ++x)
     {
         for (std::size_t y = 0; y < grid.y; ++y)
         {
-            for (std::size_t x = 0; x < grid.x; ++x)
+            for (std::size_t z = 0; z < grid.z; ++z)
             {
                 const std::size_t center = offset(x, y, z, grid);
                 result[center]
@@ -140,6 +149,37 @@ std::vector<double> divergence(const std::vector<double>& vector_x,
         }
     }
     return result;
+}
+
+void apply_gradient(const std::vector<double>& values,
+                    const UniformGrid& grid,
+                    const GridDifferentialOperator* differential_operator,
+                    std::vector<double>& gradient_x,
+                    std::vector<double>& gradient_y,
+                    std::vector<double>& gradient_z)
+{
+    if (differential_operator == nullptr)
+    {
+        finite_difference_gradient(values,
+                                   grid,
+                                   gradient_x,
+                                   gradient_y,
+                                   gradient_z);
+        return;
+    }
+    differential_operator->gradient(values, gradient_x, gradient_y, gradient_z);
+}
+
+std::vector<double> apply_divergence(
+    const std::vector<double>& vector_x,
+    const std::vector<double>& vector_y,
+    const std::vector<double>& vector_z,
+    const UniformGrid& grid,
+    const GridDifferentialOperator* differential_operator)
+{
+    return differential_operator == nullptr
+               ? finite_difference_divergence(vector_x, vector_y, vector_z, grid)
+               : differential_operator->divergence(vector_x, vector_y, vector_z);
 }
 
 void kinetic_enhancement(const KineticFunctional functional,
@@ -183,9 +223,11 @@ void kinetic_enhancement(const KineticFunctional functional,
 ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& density,
                                                      const UniformGrid& grid,
                                                      const KineticFunctional functional,
-                                                     const double density_floor)
+                                                     const double density_floor,
+                                                     const GridDifferentialOperator*
+                                                         differential_operator)
 {
-    const std::size_t size = grid_size(grid);
+    const std::size_t size = evaluation_size(grid, differential_operator);
     std::vector<double> regularized(size, density_floor);
     std::vector<unsigned char> active(size, 0);
 #pragma omp parallel for schedule(static)
@@ -198,7 +240,12 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
     std::vector<double> gradient_x;
     std::vector<double> gradient_y;
     std::vector<double> gradient_z;
-    gradient(regularized, grid, gradient_x, gradient_y, gradient_z);
+    apply_gradient(regularized,
+                   grid,
+                   differential_operator,
+                   gradient_x,
+                   gradient_y,
+                   gradient_z);
 
     const double c_tf = 0.3 * std::pow(3.0 * pi * pi, 2.0 / 3.0);
     const double reduced_gradient_scale = 1.0 / (2.0 * std::pow(3.0 * pi * pi, 1.0 / 3.0));
@@ -247,7 +294,12 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
     }
     result.energy_hartree = energy_hartree;
 
-    const std::vector<double> flux_divergence = divergence(flux_x, flux_y, flux_z, grid);
+    const std::vector<double> flux_divergence
+        = apply_divergence(flux_x,
+                           flux_y,
+                           flux_z,
+                           grid,
+                           differential_operator);
 #pragma omp parallel for schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
@@ -259,8 +311,15 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
 
 ScalarFunctionalResult evaluate_unpolarized_dirac_exchange(const std::vector<double>& density,
                                                             const UniformGrid& grid,
-                                                            const double density_floor)
+                                                            const double density_floor,
+                                                            const GridDifferentialOperator*
+                                                                differential_operator)
 {
+    const std::size_t size = evaluation_size(grid, differential_operator);
+    if (density.size() != size)
+    {
+        throw std::invalid_argument("FDE density does not match the local evaluation grid");
+    }
     const double c_x = 0.75 * std::pow(3.0 / pi, 1.0 / 3.0);
     const double reference_energy_density = -c_x * std::pow(density_floor, 4.0 / 3.0);
     const double volume_element
@@ -289,9 +348,11 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
                                                  const SpinDensity& frozen_density,
                                                  const UniformGrid& grid,
                                                  const double density_floor,
+                                                 const GridDifferentialOperator*
+                                                     differential_operator,
                                                  const Evaluator& evaluator)
 {
-    const std::size_t size = grid_size(grid);
+    const std::size_t size = evaluation_size(grid, differential_operator);
     validate_density(active_density, size);
     validate_density(frozen_density, size);
     if (!std::isfinite(density_floor) || density_floor <= 0.0)
@@ -326,9 +387,12 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
             frozen_scaled[index] = 2.0 * (*frozen_channels[spin])[index];
         }
         const std::vector<double> total_scaled = add_density(active_scaled, frozen_scaled);
-        const ScalarFunctionalResult total = evaluator(total_scaled, grid, density_floor);
-        const ScalarFunctionalResult active = evaluator(active_scaled, grid, density_floor);
-        const ScalarFunctionalResult frozen = evaluator(frozen_scaled, grid, density_floor);
+        const ScalarFunctionalResult total
+            = evaluator(total_scaled, grid, density_floor, differential_operator);
+        const ScalarFunctionalResult active
+            = evaluator(active_scaled, grid, density_floor, differential_operator);
+        const ScalarFunctionalResult frozen
+            = evaluator(frozen_scaled, grid, density_floor, differential_operator);
         result.energy_ry += hartree_to_rydberg * 0.5
                             * (total.energy_hartree - active.energy_hartree
                                - frozen.energy_hartree);
@@ -353,26 +417,39 @@ NonadditiveFunctionalResult SemilocalFunctional::nonadditive_kinetic(
     const SpinDensity& frozen,
     const UniformGrid& grid,
     const KineticFunctional functional,
-    const double density_floor_bohr3)
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator)
 {
     const auto evaluator = [functional](const std::vector<double>& density,
                                         const UniformGrid& local_grid,
-                                        const double floor) {
-        return evaluate_unpolarized_kinetic(density, local_grid, functional, floor);
+                                        const double floor,
+                                        const GridDifferentialOperator* local_operator) {
+        return evaluate_unpolarized_kinetic(density,
+                                            local_grid,
+                                            functional,
+                                            floor,
+                                            local_operator);
     };
-    return evaluate_nonadditive(active, frozen, grid, density_floor_bohr3, evaluator);
+    return evaluate_nonadditive(active,
+                                frozen,
+                                grid,
+                                density_floor_bohr3,
+                                differential_operator,
+                                evaluator);
 }
 
 NonadditiveFunctionalResult SemilocalFunctional::nonadditive_dirac_exchange(
     const SpinDensity& active,
     const SpinDensity& frozen,
     const UniformGrid& grid,
-    const double density_floor_bohr3)
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator)
 {
     return evaluate_nonadditive(active,
                                 frozen,
                                 grid,
                                 density_floor_bohr3,
+                                differential_operator,
                                 evaluate_unpolarized_dirac_exchange);
 }
 

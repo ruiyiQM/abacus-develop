@@ -28,6 +28,48 @@ fde::SpinDensity frozen_density()
     return {{0.2, 0.3, 0.4, 0.3}, {0.1, 0.2, 0.3, 0.2}};
 }
 
+class ZeroLocalDifferential : public fde::GridDifferentialOperator
+{
+  public:
+    explicit ZeroLocalDifferential(const std::size_t size)
+        : size_(size), gradient_calls_(0), divergence_calls_(0)
+    {
+    }
+
+    std::size_t local_size() const override { return size_; }
+
+    void gradient(const std::vector<double>& values,
+                  std::vector<double>& gradient_x,
+                  std::vector<double>& gradient_y,
+                  std::vector<double>& gradient_z) const override
+    {
+        EXPECT_EQ(values.size(), size_);
+        gradient_x.assign(size_, 0.0);
+        gradient_y.assign(size_, 0.0);
+        gradient_z.assign(size_, 0.0);
+        ++gradient_calls_;
+    }
+
+    std::vector<double> divergence(const std::vector<double>& vector_x,
+                                   const std::vector<double>& vector_y,
+                                   const std::vector<double>& vector_z) const override
+    {
+        EXPECT_EQ(vector_x.size(), size_);
+        EXPECT_EQ(vector_y.size(), size_);
+        EXPECT_EQ(vector_z.size(), size_);
+        ++divergence_calls_;
+        return std::vector<double>(size_, 0.0);
+    }
+
+    int gradient_calls() const { return gradient_calls_; }
+    int divergence_calls() const { return divergence_calls_; }
+
+  private:
+    std::size_t size_;
+    mutable int gradient_calls_;
+    mutable int divergence_calls_;
+};
+
 } // namespace
 
 TEST(FdeSemilocalFunctional, ZeroFrozenDensityHasZeroNonadditiveTerms)
@@ -131,4 +173,26 @@ TEST(FdeSemilocalFunctional, ExchangeIsSymmetricAndRejectsNegativeDensity)
     EXPECT_THROW(fde::SemilocalFunctional::nonadditive_dirac_exchange(
                      invalid, frozen_density(), line_grid(), 1.0e-12),
                  std::invalid_argument);
+}
+
+TEST(FdeSemilocalFunctional, EvaluatesAProcessorLocalSlabThroughInjectedDerivatives)
+{
+    const fde::SpinDensity active{{0.5, 0.5}, {0.25, 0.25}};
+    const fde::SpinDensity frozen{{0.2, 0.2}, {0.1, 0.1}};
+    const fde::UniformGrid global_grid{4, 1, 1, 0.5, 1.0, 1.0};
+    ZeroLocalDifferential differential(2);
+
+    const fde::NonadditiveFunctionalResult result
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            &differential);
+
+    EXPECT_EQ(result.active_potential.alpha_ry.size(), 2U);
+    EXPECT_TRUE(std::isfinite(result.energy_ry));
+    EXPECT_EQ(differential.gradient_calls(), 6);
+    EXPECT_EQ(differential.divergence_calls(), 6);
 }

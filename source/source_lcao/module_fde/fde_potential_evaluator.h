@@ -15,7 +15,9 @@ class NonadditiveXcProvider
     virtual NonadditiveFunctionalResult evaluate(const SpinDensity& active,
                                                  const SpinDensity& frozen,
                                                  const UniformGrid& grid,
-                                                 const double density_floor_bohr3) const = 0;
+                                                 const double density_floor_bohr3,
+                                                 const GridDifferentialOperator*
+                                                     differential_operator = nullptr) const = 0;
 };
 
 class DiracExchangeProvider : public NonadditiveXcProvider
@@ -24,7 +26,9 @@ class DiracExchangeProvider : public NonadditiveXcProvider
     NonadditiveFunctionalResult evaluate(const SpinDensity& active,
                                          const SpinDensity& frozen,
                                          const UniformGrid& grid,
-                                         const double density_floor_bohr3) const override;
+                                         const double density_floor_bohr3,
+                                         const GridDifferentialOperator*
+                                             differential_operator = nullptr) const override;
 };
 
 /** Spin-polarized PBE exchange-correlation evaluated by Libxc. */
@@ -36,7 +40,9 @@ class LibxcPbeProvider : public NonadditiveXcProvider
     NonadditiveFunctionalResult evaluate(const SpinDensity& active,
                                          const SpinDensity& frozen,
                                          const UniformGrid& grid,
-                                         const double density_floor_bohr3) const override;
+                                         const double density_floor_bohr3,
+                                         const GridDifferentialOperator*
+                                             differential_operator = nullptr) const override;
 };
 
 struct PotFdeConfig
@@ -62,7 +68,8 @@ class EmbeddingPotentialEvaluator
         const SpinDensity& frozen_density,
         const std::vector<double>& frozen_hartree_potential_ry,
         const PotFdeConfig& config,
-        const NonadditiveXcProvider& xc_provider);
+        const NonadditiveXcProvider& xc_provider,
+        const GridDifferentialOperator* differential_operator = nullptr);
 };
 
 } // namespace fde

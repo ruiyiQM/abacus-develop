@@ -1,0 +1,90 @@
+#include "fde_pw_grid_differential.h"
+
+#include "source_basis/module_pw/pw_basis.h"
+
+#include <complex>
+#include <stdexcept>
+
+namespace fde
+{
+
+PwGridDifferential::PwGridDifferential(const ModulePW::PW_Basis& basis)
+    : basis_(basis)
+{
+    if (basis_.nrxx < 0 || basis_.npw < 0 || basis_.nmaxgr < basis_.npw
+        || (basis_.npw != 0 && basis_.gcar == nullptr))
+    {
+        throw std::invalid_argument("FDE PW grid derivatives require an initialized PW_Basis");
+    }
+}
+
+std::size_t PwGridDifferential::local_size() const
+{
+    return static_cast<std::size_t>(basis_.nrxx);
+}
+
+void PwGridDifferential::gradient(const std::vector<double>& values,
+                                  std::vector<double>& gradient_x,
+                                  std::vector<double>& gradient_y,
+                                  std::vector<double>& gradient_z) const
+{
+    if (values.size() != this->local_size())
+    {
+        throw std::invalid_argument("FDE PW gradient input does not match local nrxx");
+    }
+    const std::complex<double> imaginary_unit(0.0, 1.0);
+    std::vector<std::complex<double>> reciprocal(static_cast<std::size_t>(basis_.npw));
+    std::vector<std::complex<double>> derivative(static_cast<std::size_t>(basis_.npw));
+    basis_.real2recip(values.data(), reciprocal.data());
+
+    std::vector<double>* components[3] = {&gradient_x, &gradient_y, &gradient_z};
+    for (int direction = 0; direction < 3; ++direction)
+    {
+        components[direction]->assign(this->local_size(), 0.0);
+#pragma omp parallel for schedule(static)
+        for (int reciprocal_index = 0; reciprocal_index < basis_.npw; ++reciprocal_index)
+        {
+            derivative[static_cast<std::size_t>(reciprocal_index)]
+                = imaginary_unit * reciprocal[static_cast<std::size_t>(reciprocal_index)]
+                  * basis_.gcar[reciprocal_index][direction] * basis_.tpiba;
+        }
+        basis_.recip2real(derivative.data(), components[direction]->data());
+    }
+}
+
+std::vector<double> PwGridDifferential::divergence(
+    const std::vector<double>& vector_x,
+    const std::vector<double>& vector_y,
+    const std::vector<double>& vector_z) const
+{
+    if (vector_x.size() != this->local_size()
+        || vector_y.size() != this->local_size()
+        || vector_z.size() != this->local_size())
+    {
+        throw std::invalid_argument("FDE PW divergence input does not match local nrxx");
+    }
+    const std::complex<double> imaginary_unit(0.0, 1.0);
+    std::vector<std::complex<double>> component_reciprocal(
+        static_cast<std::size_t>(basis_.npw));
+    std::vector<std::complex<double>> divergence_reciprocal(
+        static_cast<std::size_t>(basis_.npw),
+        std::complex<double>(0.0, 0.0));
+    const std::vector<double>* components[3] = {&vector_x, &vector_y, &vector_z};
+    for (int direction = 0; direction < 3; ++direction)
+    {
+        basis_.real2recip(components[direction]->data(), component_reciprocal.data());
+#pragma omp parallel for schedule(static)
+        for (int reciprocal_index = 0; reciprocal_index < basis_.npw; ++reciprocal_index)
+        {
+            divergence_reciprocal[static_cast<std::size_t>(reciprocal_index)]
+                += imaginary_unit
+                   * component_reciprocal[static_cast<std::size_t>(reciprocal_index)]
+                   * basis_.gcar[reciprocal_index][direction] * basis_.tpiba;
+        }
+    }
+    std::vector<double> result(this->local_size(), 0.0);
+    basis_.recip2real(divergence_reciprocal.data(), result.data());
+    return result;
+}
+
+} // namespace fde

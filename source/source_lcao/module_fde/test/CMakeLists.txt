@@ -100,6 +100,28 @@ set_tests_properties(MODULE_FDE_workflow_serial PROPERTIES
 )
 
 if(ENABLE_MPI)
+  add_executable(MODULE_FDE_pw_grid_differential_mpi
+    fde_pw_grid_differential_mpi_test.cpp
+    ../fde_pw_grid_differential.cpp
+  )
+  target_link_libraries(MODULE_FDE_pw_grid_differential_mpi PRIVATE
+    MPI::MPI_CXX GTest::gtest planewave device base parameter
+    abacus::linalg_libs
+  )
+  install(TARGETS MODULE_FDE_pw_grid_differential_mpi
+    DESTINATION ${CMAKE_BINARY_DIR}/tests)
+  add_test(
+    NAME MODULE_FDE_pw_grid_differential_2rank
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+      ${MPIEXEC_PREFLAGS}
+      $<TARGET_FILE:MODULE_FDE_pw_grid_differential_mpi>
+      ${MPIEXEC_POSTFLAGS}
+  )
+  set_tests_properties(MODULE_FDE_pw_grid_differential_2rank PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1"
+    PROCESSORS 2
+  )
+
   add_executable(MODULE_FDE_electronic_coupling_mpi
     fde_electronic_coupling_mpi_test.cpp
     ../fde_ao_projection.cpp

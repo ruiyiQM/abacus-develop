@@ -183,7 +183,7 @@ std::size_t offset(const std::size_t x,
                    const std::size_t z,
                    const UniformGrid& grid)
 {
-    return x + grid.x * (y + grid.y * z);
+    return (x * grid.y + y) * grid.z + z;
 }
 
 std::size_t previous(const std::size_t index, const std::size_t extent)
@@ -196,21 +196,21 @@ std::size_t next(const std::size_t index, const std::size_t extent)
     return index + 1 == extent ? 0 : index + 1;
 }
 
-void gradient(const std::vector<double>& values,
-              const UniformGrid& grid,
-              std::vector<double>& dx,
-              std::vector<double>& dy,
-              std::vector<double>& dz)
+void finite_difference_gradient(const std::vector<double>& values,
+                                const UniformGrid& grid,
+                                std::vector<double>& dx,
+                                std::vector<double>& dy,
+                                std::vector<double>& dz)
 {
     dx.assign(values.size(), 0.0);
     dy.assign(values.size(), 0.0);
     dz.assign(values.size(), 0.0);
 #pragma omp parallel for collapse(3) schedule(static)
-    for (std::size_t iz = 0; iz < grid.z; ++iz)
+    for (std::size_t ix = 0; ix < grid.x; ++ix)
     {
         for (std::size_t iy = 0; iy < grid.y; ++iy)
         {
-            for (std::size_t ix = 0; ix < grid.x; ++ix)
+            for (std::size_t iz = 0; iz < grid.z; ++iz)
             {
                 const std::size_t center = offset(ix, iy, iz, grid);
                 dx[center] = (values[offset(next(ix, grid.x), iy, iz, grid)]
@@ -227,18 +227,18 @@ void gradient(const std::vector<double>& values,
     }
 }
 
-std::vector<double> divergence(const std::vector<double>& vx,
-                               const std::vector<double>& vy,
-                               const std::vector<double>& vz,
-                               const UniformGrid& grid)
+std::vector<double> finite_difference_divergence(const std::vector<double>& vx,
+                                                 const std::vector<double>& vy,
+                                                 const std::vector<double>& vz,
+                                                 const UniformGrid& grid)
 {
     std::vector<double> result(vx.size(), 0.0);
 #pragma omp parallel for collapse(3) schedule(static)
-    for (std::size_t iz = 0; iz < grid.z; ++iz)
+    for (std::size_t ix = 0; ix < grid.x; ++ix)
     {
         for (std::size_t iy = 0; iy < grid.y; ++iy)
         {
-            for (std::size_t ix = 0; ix < grid.x; ++ix)
+            for (std::size_t iz = 0; iz < grid.z; ++iz)
             {
                 const std::size_t center = offset(ix, iy, iz, grid);
                 result[center]
@@ -255,6 +255,33 @@ std::vector<double> divergence(const std::vector<double>& vx,
         }
     }
     return result;
+}
+
+void apply_gradient(const std::vector<double>& values,
+                    const UniformGrid& grid,
+                    const GridDifferentialOperator* differential_operator,
+                    std::vector<double>& dx,
+                    std::vector<double>& dy,
+                    std::vector<double>& dz)
+{
+    if (differential_operator == nullptr)
+    {
+        finite_difference_gradient(values, grid, dx, dy, dz);
+        return;
+    }
+    differential_operator->gradient(values, dx, dy, dz);
+}
+
+std::vector<double> apply_divergence(
+    const std::vector<double>& vx,
+    const std::vector<double>& vy,
+    const std::vector<double>& vz,
+    const UniformGrid& grid,
+    const GridDifferentialOperator* differential_operator)
+{
+    return differential_operator == nullptr
+               ? finite_difference_divergence(vx, vy, vz, grid)
+               : differential_operator->divergence(vx, vy, vz);
 }
 
 void validate_density(const SpinDensity& density, const std::size_t size)
@@ -275,9 +302,13 @@ void validate_density(const SpinDensity& density, const std::size_t size)
 
 GridFunctionalResult evaluate_pbe(const SpinDensity& density,
                                   const UniformGrid& grid,
-                                  const double density_floor)
+                                  const double density_floor,
+                                  const GridDifferentialOperator* differential_operator)
 {
-    const std::size_t size = checked_grid_size(grid);
+    const std::size_t global_size = checked_grid_size(grid);
+    const std::size_t size = differential_operator == nullptr
+                                 ? global_size
+                                 : differential_operator->local_size();
     validate_density(density, size);
 
     std::vector<double> alpha(size, density_floor);
@@ -295,8 +326,8 @@ GridFunctionalResult evaluate_pbe(const SpinDensity& density,
     std::vector<double> dbx;
     std::vector<double> dby;
     std::vector<double> dbz;
-    gradient(alpha, grid, dax, day, daz);
-    gradient(beta, grid, dbx, dby, dbz);
+    apply_gradient(alpha, grid, differential_operator, dax, day, daz);
+    apply_gradient(beta, grid, differential_operator, dbx, dby, dbz);
 
     std::vector<double> rho(2 * size, 0.0);
     std::vector<double> sigma(3 * size, 0.0);
@@ -360,8 +391,10 @@ GridFunctionalResult evaluate_pbe(const SpinDensity& density,
         fbz[index] = ab * daz[index] + bb * dbz[index];
     }
     result.energy_hartree = energy_hartree;
-    const std::vector<double> divergence_alpha = divergence(fax, fay, faz, grid);
-    const std::vector<double> divergence_beta = divergence(fbx, fby, fbz, grid);
+    const std::vector<double> divergence_alpha
+        = apply_divergence(fax, fay, faz, grid, differential_operator);
+    const std::vector<double> divergence_beta
+        = apply_divergence(fbx, fby, fbz, grid, differential_operator);
 #pragma omp parallel for schedule(static)
     for (std::size_t index = 0; index < size; ++index)
     {
@@ -407,21 +440,28 @@ NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
     const SpinDensity& active,
     const SpinDensity& frozen,
     const UniformGrid& grid,
-    const double density_floor_bohr3) const
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator) const
 {
 #ifdef __LIBXC
     if (!std::isfinite(density_floor_bohr3) || density_floor_bohr3 <= 0.0)
     {
         throw std::invalid_argument("Libxc PBE density floor must be finite and positive");
     }
-    const std::size_t size = checked_grid_size(grid);
+    const std::size_t global_size = checked_grid_size(grid);
+    const std::size_t size = differential_operator == nullptr
+                                 ? global_size
+                                 : differential_operator->local_size();
     validate_density(active, size);
     validate_density(frozen, size);
     const GridFunctionalResult total = evaluate_pbe(sum_density(active, frozen),
                                                     grid,
-                                                    density_floor_bohr3);
-    const GridFunctionalResult active_only = evaluate_pbe(active, grid, density_floor_bohr3);
-    const GridFunctionalResult frozen_only = evaluate_pbe(frozen, grid, density_floor_bohr3);
+                                                    density_floor_bohr3,
+                                                    differential_operator);
+    const GridFunctionalResult active_only
+        = evaluate_pbe(active, grid, density_floor_bohr3, differential_operator);
+    const GridFunctionalResult frozen_only
+        = evaluate_pbe(frozen, grid, density_floor_bohr3, differential_operator);
 
     const double hartree_to_rydberg = 2.0;
     NonadditiveFunctionalResult result;
@@ -458,6 +498,7 @@ NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
     (void)frozen;
     (void)grid;
     (void)density_floor_bohr3;
+    (void)differential_operator;
     throw std::runtime_error("Libxc PBE support is unavailable in this ABACUS build");
 #endif
 }

@@ -2,6 +2,7 @@
 #define POT_FDE_H
 
 #include "fde_potential_evaluator.h"
+#include "fde_pw_grid_differential.h"
 #include "source_estate/module_pot/pot_base.h"
 
 #include <memory>
@@ -33,6 +34,7 @@ class PotFde : public elecstate::PotBase
     std::vector<double> frozen_hartree_potential_ry_;
     PotFdeConfig config_;
     std::shared_ptr<const NonadditiveXcProvider> xc_provider_;
+    std::unique_ptr<PwGridDifferential> differential_operator_;
     EmbeddingPotentialResult last_result_;
 };
 

@@ -9,12 +9,14 @@ NonadditiveFunctionalResult DiracExchangeProvider::evaluate(
     const SpinDensity& active,
     const SpinDensity& frozen,
     const UniformGrid& grid,
-    const double density_floor_bohr3) const
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator) const
 {
     return SemilocalFunctional::nonadditive_dirac_exchange(active,
                                                            frozen,
                                                            grid,
-                                                           density_floor_bohr3);
+                                                           density_floor_bohr3,
+                                                           differential_operator);
 }
 
 EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
@@ -22,19 +24,22 @@ EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
     const SpinDensity& frozen_density,
     const std::vector<double>& frozen_hartree_potential_ry,
     const PotFdeConfig& config,
-    const NonadditiveXcProvider& xc_provider)
+    const NonadditiveXcProvider& xc_provider,
+    const GridDifferentialOperator* differential_operator)
 {
     const NonadditiveFunctionalResult kinetic
         = SemilocalFunctional::nonadditive_kinetic(active_density,
                                                    frozen_density,
                                                    config.grid,
                                                    config.kinetic_functional,
-                                                   config.density_floor_bohr3);
+                                                   config.density_floor_bohr3,
+                                                   differential_operator);
     const NonadditiveFunctionalResult xc
         = xc_provider.evaluate(active_density,
                                frozen_density,
                                config.grid,
-                               config.density_floor_bohr3);
+                               config.density_floor_bohr3,
+                               differential_operator);
     const std::size_t size = frozen_hartree_potential_ry.size();
     if (active_density.alpha_bohr3.size() != size || active_density.beta_bohr3.size() != size)
     {

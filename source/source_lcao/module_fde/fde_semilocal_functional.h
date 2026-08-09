@@ -42,6 +42,22 @@ struct NonadditiveFunctionalResult
     SpinPotential frozen_potential;
 };
 
+/** Derivatives on the local part of a real-space grid. */
+class GridDifferentialOperator
+{
+  public:
+    virtual ~GridDifferentialOperator() {}
+
+    virtual std::size_t local_size() const = 0;
+    virtual void gradient(const std::vector<double>& values,
+                          std::vector<double>& gradient_x,
+                          std::vector<double>& gradient_y,
+                          std::vector<double>& gradient_z) const = 0;
+    virtual std::vector<double> divergence(const std::vector<double>& vector_x,
+                                           const std::vector<double>& vector_y,
+                                           const std::vector<double>& vector_z) const = 0;
+};
+
 class SemilocalFunctional
 {
   public:
@@ -50,13 +66,15 @@ class SemilocalFunctional
         const SpinDensity& frozen,
         const UniformGrid& grid,
         const KineticFunctional functional,
-        const double density_floor_bohr3);
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator = nullptr);
 
     static NonadditiveFunctionalResult nonadditive_dirac_exchange(
         const SpinDensity& active,
         const SpinDensity& frozen,
         const UniformGrid& grid,
-        const double density_floor_bohr3);
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator = nullptr);
 };
 
 } // namespace fde
