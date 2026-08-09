@@ -78,13 +78,14 @@ class FdeLcaoDriver
                          Charge& charge,
                          const Parallel_Orbitals& orbitals) const;
 
-    void write_converged_artifacts(
+    void write_scf_artifacts(
         Charge& charge,
         psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
         elecstate::ElecState& electronic_state,
         hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
         const K_Vectors& kpoints,
-        const Parallel_Orbitals& orbitals);
+        const Parallel_Orbitals& orbitals,
+        bool scf_converged);
 
   private:
     FdeLcaoDriver(const FdeRuntimeConfig& config,

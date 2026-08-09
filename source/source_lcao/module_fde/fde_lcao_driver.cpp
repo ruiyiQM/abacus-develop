@@ -695,13 +695,14 @@ void close_artifact(std::ofstream& output,
 
 } // namespace
 
-void FdeLcaoDriver::write_converged_artifacts(
+void FdeLcaoDriver::write_scf_artifacts(
     Charge& charge,
     psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
     hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
     const K_Vectors& kpoints,
-    const Parallel_Orbitals& orbitals)
+    const Parallel_Orbitals& orbitals,
+    const bool scf_converged)
 {
     if (embedding_potential_ == nullptr || density_basis_ == nullptr
         || charge.nspin != 2
@@ -711,7 +712,7 @@ void FdeLcaoDriver::write_converged_artifacts(
         || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
         || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
     {
-        throw std::runtime_error("FDE converged artifact output contract is incomplete");
+        throw std::runtime_error("FDE SCF artifact output contract is incomplete");
     }
     validate_parallel_layout(*density_basis_, orbitals);
     const int rank = ao_rank(orbitals);
@@ -799,10 +800,12 @@ void FdeLcaoDriver::write_converged_artifacts(
 
     FrozenDensityArtifact density = active_initial_;
     density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-    density.scf_converged = true;
+    density.scf_converged = scf_converged;
     density.rho_alpha_bohr3.swap(global_alpha);
     density.rho_beta_bohr3.swap(global_beta);
-    const std::string density_path = config_.output_prefix + ".fde_density";
+    const std::string density_path
+        = config_.output_prefix
+          + (scf_converged ? ".fde_density" : ".partial.fde_density");
     std::ofstream density_output(density_path.c_str());
     if (!density_output)
     {
@@ -810,6 +813,14 @@ void FdeLcaoDriver::write_converged_artifacts(
     }
     DensityArtifactIO::write(density_output, density);
     close_artifact(density_output, density_path, "density");
+
+    // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
+    // valid inputs to diabatic postprocessing.  Persist only the normalized
+    // density checkpoint until the embedded SCF has genuinely converged.
+    if (!scf_converged)
+    {
+        return;
+    }
 
     FragmentScfArtifact fragment;
     fragment.schema_version = 1;

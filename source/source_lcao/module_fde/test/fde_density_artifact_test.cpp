@@ -73,6 +73,19 @@ TEST(FdeDensityArtifact, RejectsIncorrectElectronIntegrals)
     EXPECT_THROW(fde::DensityArtifactIO::validate(invalid, 1.0e-12), std::invalid_argument);
 }
 
+TEST(FdeDensityArtifact, RoundTripsPartialScfDensityWithoutPromotingIt)
+{
+    fde::FrozenDensityArtifact partial = artifact("A");
+    partial.scf_converged = false;
+    std::ostringstream output;
+    fde::DensityArtifactIO::write(output, partial);
+
+    std::istringstream input(output.str());
+    const fde::FrozenDensityArtifact restored
+        = fde::DensityArtifactIO::read(input, 1.0e-12);
+    EXPECT_FALSE(restored.scf_converged);
+}
+
 TEST(FdeDensityArtifact, ExpandsCompactUniformRuntimeSeed)
 {
     std::istringstream input(R"(FDE_UNIFORM_DENSITY_SEED 1

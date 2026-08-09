@@ -87,7 +87,8 @@ void write_native_fde(
     elecstate::ElecState* electronic_state,
     hamilt::Hamilt<TK>* full_hamiltonian,
     const K_Vectors& kpoints,
-    const Parallel_Orbitals& orbitals)
+    const Parallel_Orbitals& orbitals,
+    const bool scf_converged)
 {
     (void)charge;
     (void)wavefunctions;
@@ -95,6 +96,7 @@ void write_native_fde(
     (void)full_hamiltonian;
     (void)kpoints;
     (void)orbitals;
+    (void)scf_converged;
     if (driver != nullptr)
     {
         throw std::runtime_error("FDE artifact output requires real Gamma LCAO data");
@@ -109,16 +111,18 @@ void write_native_fde<double>(
     elecstate::ElecState* electronic_state,
     hamilt::Hamilt<double>* full_hamiltonian,
     const K_Vectors& kpoints,
-    const Parallel_Orbitals& orbitals)
+    const Parallel_Orbitals& orbitals,
+    const bool scf_converged)
 {
     if (driver != nullptr)
     {
-        driver->write_converged_artifacts(charge,
-                                          wavefunctions,
-                                          *electronic_state,
-                                          *full_hamiltonian,
-                                          kpoints,
-                                          orbitals);
+        driver->write_scf_artifacts(charge,
+                                    wavefunctions,
+                                    *electronic_state,
+                                    *full_hamiltonian,
+                                    kpoints,
+                                    orbitals,
+                                    scf_converged);
     }
 }
 
@@ -690,7 +694,7 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
     //! 1) call after_scf() of ESolver_KS
     ESolver_KS::after_scf(ucell, istep, conv_esolver);
 
-    if (conv_esolver)
+    if (conv_esolver || this->scf_nmax_flag)
     {
         write_native_fde<TK>(this->fde_driver_.get(),
                              this->chr,
@@ -698,7 +702,8 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
                              this->pelec,
                              static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt),
                              this->kv,
-                             this->pv);
+                             this->pv,
+                             conv_esolver);
     }
 
     //! 2) output of lcao every few ionic steps

@@ -60,3 +60,11 @@ TEST(FdeFragmentArtifact, RejectsAsymmetricHamiltonian)
     EXPECT_THROW(fde::FragmentScfArtifactIO::validate(value, 1.0e-12),
                  std::invalid_argument);
 }
+
+TEST(FdeFragmentArtifact, RejectsPartialScfResults)
+{
+    fde::FragmentScfArtifact value = artifact();
+    value.scf_converged = false;
+    EXPECT_THROW(fde::FragmentScfArtifactIO::validate(value, 1.0e-12),
+                 std::invalid_argument);
+}
