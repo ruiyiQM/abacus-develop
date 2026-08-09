@@ -52,8 +52,15 @@ class DensityArtifactIO
 
     static void write(std::ostream& output, const FrozenDensityArtifact& artifact);
 
+    /** Write metadata plus canonical little-endian binary density arrays. */
+    static void write_binary(std::ostream& output,
+                             const FrozenDensityArtifact& artifact);
+
     static FrozenDensityArtifact read(std::istream& input,
                                       const double electron_tolerance);
+
+    static FrozenDensityArtifact read_binary(std::istream& input,
+                                             double electron_tolerance);
 
     /** Read a full artifact or expand a compact uniform initialization seed. */
     static FrozenDensityArtifact read_runtime(std::istream& input,

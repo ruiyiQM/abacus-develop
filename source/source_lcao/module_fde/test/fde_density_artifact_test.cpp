@@ -55,6 +55,32 @@ TEST(FdeDensityArtifact, RoundTripsDeterministically)
     EXPECT_EQ(restored.rho_alpha_bohr3, original.rho_alpha_bohr3);
 }
 
+TEST(FdeDensityArtifact, RoundTripsVersionedBinaryWithoutTextExpansion)
+{
+    fde::FrozenDensityArtifact original = artifact("A");
+    original.grid_x = 4096;
+    original.cell_volume_bohr3 = 4096.0;
+    original.rho_alpha_bohr3.assign(4096, 2.0 / 4096.0);
+    original.rho_beta_bohr3.assign(4096, 1.0 / 4096.0);
+
+    std::ostringstream binary(std::ios::out | std::ios::binary);
+    fde::DensityArtifactIO::write_binary(binary, original);
+    std::ostringstream text;
+    fde::DensityArtifactIO::write(text, original);
+    EXPECT_EQ(binary.str().find("FDE_DENSITY_BINARY 1 1\n"), 0U);
+    EXPECT_LT(binary.str().size(), text.str().size());
+
+    std::istringstream input(binary.str(), std::ios::in | std::ios::binary);
+    const fde::FrozenDensityArtifact restored
+        = fde::DensityArtifactIO::read_runtime(input, 1.0e-12);
+    EXPECT_EQ(restored.rho_alpha_bohr3, original.rho_alpha_bohr3);
+    EXPECT_EQ(restored.rho_beta_bohr3, original.rho_beta_bohr3);
+
+    std::ostringstream second(std::ios::out | std::ios::binary);
+    fde::DensityArtifactIO::write_binary(second, restored);
+    EXPECT_EQ(second.str(), binary.str());
+}
+
 TEST(FdeDensityArtifact, ValidatesCompatibleFragmentPairs)
 {
     const fde::FrozenDensityArtifact first = artifact("A");

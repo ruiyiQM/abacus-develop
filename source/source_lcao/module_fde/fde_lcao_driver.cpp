@@ -40,7 +40,7 @@ namespace
 
 FdeRuntimeConfig read_config_file(const std::string& path)
 {
-    std::ifstream input(path.c_str());
+    std::ifstream input(path.c_str(), std::ios::binary);
     if (!input)
     {
         throw std::runtime_error("Cannot open FDE_CONFIG file: " + path);
@@ -1100,12 +1100,12 @@ void FdeLcaoDriver::write_scf_artifacts(
     const std::string density_path
         = config_.output_prefix
           + (status.converged ? ".fde_density" : ".partial.fde_density");
-    std::ofstream density_output(density_path.c_str());
+    std::ofstream density_output(density_path.c_str(), std::ios::binary);
     if (!density_output)
     {
         throw std::runtime_error("Cannot create FDE density artifact: " + density_path);
     }
-    DensityArtifactIO::write(density_output, density);
+    DensityArtifactIO::write_binary(density_output, density);
     close_artifact(density_output, density_path, "density");
 
     // A non-self-consistent Hamiltonian, energy, and occupied subspace are not

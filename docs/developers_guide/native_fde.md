@@ -180,9 +180,20 @@ supersystem AO order. These versioned artifacts are sufficient to restart the
 outer loop and to construct a two-state determinant and a linearized
 transition-energy model without scraping human-readable ABACUS logs.
 
+New density checkpoints use the versioned `FDE_DENSITY_BINARY 1` container.
+Its fingerprints, populations, convergence status, and energy metadata remain
+ASCII records, while the two full grid arrays are canonical little-endian
+binary double blocks. Both the native reader and `tools/fde/fde_workflow.py`
+detect this container automatically. Legacy `FDE_DENSITY_ARTIFACT` text files
+and compact uniform seeds remain valid restart inputs, so existing scans do not
+need conversion.
+
 The converged density is distributed with the same z slabs as
 `ModulePW::PW_Basis`. Frozen and active artifact grids are checked against that
-layout and sliced to `nrxx` before entering the potential path. Gradient and
+layout. AO communicator rank zero alone opens and validates each checkpoint;
+it broadcasts the small metadata and scatters the two arrays directly into the
+PW `nrxx` z slabs. Non-root ranks therefore never hold a full global density,
+and rank zero releases each global array after its scatter. Gradient and
 divergence operations for semilocal nonadditive functionals use the native
 distributed PW FFT, while grid integrals and embedding energies are reduced
 over the PW pool. At output, the density slabs are gathered back into the

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from array import array
 import json
 import math
 import os
@@ -183,7 +184,109 @@ def _records(path: Path) -> Dict[str, List[List[str]]]:
     return records
 
 
+def _binary_record(stream, expected: str) -> List[str]:
+    raw_line = stream.readline()
+    try:
+        fields = raw_line.decode("ascii").split()
+    except UnicodeDecodeError as error:
+        raise WorkflowError("binary density metadata is not ASCII") from error
+    if not fields or fields[0] != expected:
+        raise WorkflowError(f"binary density expected {expected}")
+    return fields[1:]
+
+
+def _binary_values(stream, count: int, label: str) -> array:
+    if count < 0:
+        raise WorkflowError(f"binary {label} density has a negative size")
+    values = array("d")
+    if values.itemsize != 8:
+        raise WorkflowError("binary density requires an 8-byte Python double")
+    try:
+        values.fromfile(stream, count)
+    except EOFError as error:
+        raise WorkflowError(f"binary {label} density is truncated") from error
+    if sys.byteorder != "little":
+        values.byteswap()
+    if stream.read(1) != b"\n":
+        raise WorkflowError(f"binary {label} density has an invalid terminator")
+    return values
+
+
+def _read_binary_density(path: Path) -> Dict[str, object]:
+    try:
+        with path.open("rb") as stream:
+            header = _binary_record(stream, "FDE_DENSITY_BINARY")
+            if len(header) != 2 or int(header[0]) != 1:
+                raise WorkflowError("unsupported binary density format version")
+            schema_version = int(header[1])
+            fragment = _binary_record(stream, "FRAGMENT")[0]
+            state = _binary_record(stream, "STATE")[0]
+            geometry = _binary_record(stream, "GEOMETRY")[0]
+            _binary_record(stream, "GRID_FINGERPRINT")
+            _binary_record(stream, "PSEUDOPOTENTIALS")
+            _binary_record(stream, "ORBITALS")
+            _binary_record(stream, "CORE_DENSITY")
+            _binary_record(stream, "FUNCTIONALS")
+            grid = _binary_record(stream, "GRID")
+            if len(grid) != 4:
+                raise WorkflowError("binary density GRID metadata is malformed")
+            grid_size = int(grid[0]) * int(grid[1]) * int(grid[2])
+            _binary_record(stream, "POPULATIONS")
+            scf = _binary_record(stream, "SCF")
+            cycle = int(scf[0])
+            convergence_flag = int(scf[1])
+            if convergence_flag not in (0, 1):
+                raise WorkflowError("density SCF convergence flag must be zero or one")
+            scf_converged = convergence_flag == 1
+            if schema_version >= 2:
+                scf_iterations = int(scf[2])
+                scf_density_residual = float(scf[3])
+            else:
+                scf_iterations = 0
+                scf_density_residual = None
+            _binary_record(stream, "ENERGIES_RY")
+            byte_order = _binary_record(stream, "BYTE_ORDER")
+            if byte_order != ["LITTLE_ENDIAN"]:
+                raise WorkflowError("unsupported binary density byte order")
+            alpha_header = _binary_record(stream, "RHO_ALPHA_BINARY")
+            alpha_size = int(alpha_header[0])
+            if alpha_size != grid_size:
+                raise WorkflowError("binary alpha density size does not match GRID")
+            alpha = _binary_values(stream, alpha_size, "alpha")
+            beta_header = _binary_record(stream, "RHO_BETA_BINARY")
+            beta_size = int(beta_header[0])
+            if beta_size != grid_size:
+                raise WorkflowError("binary beta density size does not match GRID")
+            beta = _binary_values(stream, beta_size, "beta")
+            if _binary_record(stream, "END"):
+                raise WorkflowError("binary density END record is malformed")
+            if stream.read().strip():
+                raise WorkflowError("binary density contains trailing content")
+    except (IndexError, ValueError) as error:
+        raise WorkflowError(f"malformed binary density artifact {path}: {error}") from error
+    if grid_size <= 0 or len(alpha) != grid_size or len(beta) != grid_size:
+        raise WorkflowError("binary density vector length is inconsistent")
+    return {
+        "fragment": fragment,
+        "state": state,
+        "geometry": geometry,
+        "schema_version": schema_version,
+        "cycle": cycle,
+        "scf_converged": scf_converged,
+        "scf_iterations": scf_iterations,
+        "scf_density_residual": scf_density_residual,
+        "initialization_seed": False,
+        "grid_size": grid_size,
+        "cell_volume": float(grid[3]),
+        "alpha": alpha,
+        "beta": beta,
+    }
+
+
 def read_density(path: Path) -> Dict[str, object]:
+    with path.open("rb") as stream:
+        if stream.readline().split()[:1] == [b"FDE_DENSITY_BINARY"]:
+            return _read_binary_density(path)
     records = _records(path)
     try:
         if "FDE_UNIFORM_DENSITY_SEED" in records:
@@ -273,10 +376,17 @@ def density_rms(first: Mapping[str, object], second: Mapping[str, object]) -> fl
             or first["geometry"] != second["geometry"]
             or first["grid_size"] != second["grid_size"]):
         raise WorkflowError("density residual requires compatible artifacts")
-    values = list(first["alpha"]) + list(first["beta"])
-    reference = list(second["alpha"]) + list(second["beta"])
-    return math.sqrt(sum((left - right) ** 2 for left, right in zip(values, reference))
-                     / len(values))
+    squared_difference = 0.0
+    value_count = 0
+    for channel in ("alpha", "beta"):
+        values = first[channel]
+        reference = second[channel]
+        if len(values) != len(reference):
+            raise WorkflowError("density residual requires equal spin-grid sizes")
+        squared_difference += math.fsum(
+            (left - right) ** 2 for left, right in zip(values, reference))
+        value_count += len(values)
+    return math.sqrt(squared_difference / value_count)
 
 
 def read_fragment(path: Path) -> Dict[str, object]:

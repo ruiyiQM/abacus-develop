@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 
@@ -165,6 +166,29 @@ class FdeWorkflowTest(unittest.TestCase):
             self.assertEqual(density["cycle"], 0)
             self.assertEqual(density["alpha"], [1.0, 1.0])
             self.assertEqual(density["beta"], [1.0, 1.0])
+
+    def test_reads_versioned_binary_density(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "binary.fde_density"
+            prefix = (
+                b"FDE_DENSITY_BINARY 1 2\n"
+                b"FRAGMENT F\nSTATE reactant\nGEOMETRY g0\n"
+                b"GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS pp\nORBITALS nao\n"
+                b"CORE_DENSITY none\nFUNCTIONALS pbe lc94\n"
+                b"GRID 2 1 1 2\nPOPULATIONS 1 1\nSCF 3 0 50 0.04\n"
+                b"ENERGIES_RY 0 0\nBYTE_ORDER LITTLE_ENDIAN\n"
+                b"RHO_ALPHA_BINARY 2\n")
+            middle = b"\nRHO_BETA_BINARY 2\n"
+            path.write_bytes(prefix + struct.pack("<2d", 0.75, 0.25)
+                             + middle + struct.pack("<2d", 0.5, 0.5)
+                             + b"\nEND\n")
+
+            density = fde_workflow.read_density(path)
+            self.assertEqual(density["schema_version"], 2)
+            self.assertEqual(density["cycle"], 3)
+            self.assertFalse(density["scf_converged"])
+            self.assertEqual(list(density["alpha"]), [0.75, 0.25])
+            self.assertEqual(list(density["beta"]), [0.5, 0.5])
 
     def test_selects_only_opted_in_schema_two_partial_density(self):
         with tempfile.TemporaryDirectory() as directory:
