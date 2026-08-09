@@ -469,15 +469,17 @@ void FdeLcaoDriver::solve_projected(
     // ABACUS' general LCAO path normalizes only the total density.  The
     // projected alpha and beta quadratures can have different grid errors, so
     // restore both fixed FDE populations before charge/magnetization mixing.
-    // Ignore a correct grid magnetization even if both channels share a small
-    // common integration offset; rescaling that offset creates an SCF floor.
+    // Treat this as a spin-branch guard, not an integration-accuracy target.
+    // Rescaling small real-space quadrature errors competes with Broyden and
+    // creates an SCF floor, while a wrong UKS branch differs by whole
+    // electrons.  Final artifacts are still normalized exactly below.
     normalize_spin_density(charge.rho[0],
                            charge.rho[1],
                            static_cast<std::size_t>(charge.nrxx),
                            active_alpha_electrons_,
                            active_beta_electrons_,
                            active_initial_.cell_volume_bohr3,
-                           1.0e-3,
+                           5.0e-2,
                            *density_basis_);
 }
 
