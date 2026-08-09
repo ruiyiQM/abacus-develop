@@ -1,6 +1,7 @@
 #include "fde_lcao_driver.h"
 
 #include "fde_grid_partition.h"
+#include "fde_kpoint_band_artifact.h"
 #include "fde_potential_evaluator.h"
 #include "fde_projected_hamiltonian.h"
 #include "fde_pw_pool_collectives.h"
@@ -761,14 +762,34 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
 
 std::unique_ptr<FdeProjectedHamiltonian> FdeLcaoDriver::projected_hamiltonian(
     hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
-    const Parallel_Orbitals& orbitals) const
+    const Parallel_Orbitals& orbitals,
+    const std::size_t spin_kpoint_count) const
 {
+    const std::vector<std::size_t> shared_gamma_overlap(spin_kpoint_count, 0);
     return std::unique_ptr<FdeProjectedHamiltonian>(
         new FdeProjectedHamiltonian(full_hamiltonian,
                                     orbitals,
                                     full_ao_dimension_,
                                     active_orbitals_,
-                                    1.0e6));
+                                    1.0e6,
+                                    spin_kpoint_count,
+                                    shared_gamma_overlap));
+}
+
+std::unique_ptr<FdeProjectedHamiltonianComplex>
+FdeLcaoDriver::projected_hamiltonian(
+    hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+        full_hamiltonian,
+    const Parallel_Orbitals& orbitals,
+    const std::size_t spin_kpoint_count) const
+{
+    return std::unique_ptr<FdeProjectedHamiltonianComplex>(
+        new FdeProjectedHamiltonianComplex(full_hamiltonian,
+                                           orbitals,
+                                           full_ao_dimension_,
+                                           active_orbitals_,
+                                           1.0e6,
+                                           spin_kpoint_count));
 }
 
 void FdeLcaoDriver::solve_projected(
@@ -780,7 +801,10 @@ void FdeLcaoDriver::solve_projected(
     const Parallel_Orbitals& orbitals) const
 {
     std::unique_ptr<FdeProjectedHamiltonian> projected
-        = this->projected_hamiltonian(full_hamiltonian, orbitals);
+        = this->projected_hamiltonian(
+            full_hamiltonian,
+            orbitals,
+            static_cast<std::size_t>(wavefunctions.get_nk()));
     // Both legacy and native ELPA cache the factorized overlap in static
     // solver state.  That optimization is valid for ABACUS' persistent full
     // AO overlap, but FDE creates a new projected overlap object here on every
@@ -813,6 +837,53 @@ void FdeLcaoDriver::solve_projected(
     // Rescaling small real-space quadrature errors competes with Broyden and
     // creates an SCF floor, while a wrong UKS branch differs by whole
     // electrons.  Final artifacts are still normalized exactly below.
+    normalize_spin_density(charge.rho[0],
+                           charge.rho[1],
+                           static_cast<std::size_t>(charge.nrxx),
+                           active_alpha_electrons_,
+                           active_beta_electrons_,
+                           active_initial_.cell_volume_bohr3,
+                           5.0e-2,
+                           *density_basis_);
+}
+
+void FdeLcaoDriver::solve_projected(
+    hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+        full_hamiltonian,
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+    elecstate::ElecState& electronic_state,
+    elecstate::DensityMatrix<std::complex<double>, double>& density_matrix,
+    Charge& charge,
+    const Parallel_Orbitals& orbitals) const
+{
+    std::unique_ptr<FdeProjectedHamiltonianComplex> projected
+        = this->projected_hamiltonian(
+            full_hamiltonian,
+            orbitals,
+            static_cast<std::size_t>(wavefunctions.get_nk()));
+    // Complex LCAO solvers handle S(k) independently and reset any ELPA
+    // factorization state for every k point.  The projected wrapper therefore
+    // keeps an independent overlap buffer for each spin-k index.
+    hsolver::HSolverLCAO<std::complex<double>> solver(
+        &orbitals,
+        ks_solver_,
+        kpar_,
+        static_cast<int>(full_ao_dimension_),
+        nbands_,
+        electron_count_,
+        false);
+    solver.solve(projected.get(),
+                 wavefunctions,
+                 &electronic_state,
+                 density_matrix,
+                 charge,
+                 2,
+                 false);
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_)
+    {
+        throw std::runtime_error(
+            "FDE spin-density normalization requires the attached PW grid");
+    }
     normalize_spin_density(charge.rho[0],
                            charge.rho[1],
                            static_cast<std::size_t>(charge.nrxx),
@@ -987,6 +1058,58 @@ void append_occupied_spin(const std::vector<double>& global_wavefunctions,
                 = global_wavefunctions[ao + static_cast<std::size_t>(band) * dimension];
         }
     }
+}
+
+FdeKPointBandArtifact make_kpoint_band_artifact(
+    const elecstate::ElecState& electronic_state,
+    const K_Vectors& kpoints,
+    const FrozenDensityArtifact& density,
+    const std::string& state_label,
+    const std::string& fragment_label,
+    const std::size_t ao_dimension,
+    const int solved_band_count)
+{
+    const int spin_kpoint_count = kpoints.get_nks();
+    if (spin_kpoint_count <= 0 || solved_band_count <= 0
+        || static_cast<std::size_t>(solved_band_count) > ao_dimension
+        || kpoints.isk.size() < static_cast<std::size_t>(spin_kpoint_count)
+        || kpoints.wk.size() < static_cast<std::size_t>(spin_kpoint_count)
+        || kpoints.kvec_d.size() < static_cast<std::size_t>(spin_kpoint_count))
+    {
+        throw std::runtime_error("FDE k-point band output contract is incomplete");
+    }
+    FdeKPointBandArtifact artifact;
+    artifact.schema_version = 1;
+    artifact.state_label = state_label;
+    artifact.fragment_label = fragment_label;
+    artifact.geometry_fingerprint = density.geometry_fingerprint;
+    artifact.orbital_fingerprint = density.orbital_fingerprint;
+    artifact.ao_dimension = ao_dimension;
+    artifact.band_count = static_cast<std::size_t>(solved_band_count);
+    std::size_t physical_index[2] = {0, 0};
+    for (int kpoint = 0; kpoint < spin_kpoint_count; ++kpoint)
+    {
+        const int spin = kpoints.isk[kpoint];
+        if (spin < 0 || spin > 1)
+        {
+            throw std::runtime_error("FDE k-point band output has an invalid spin index");
+        }
+        FdeKPointBand point;
+        point.spin = spin;
+        point.physical_kpoint = physical_index[spin]++;
+        point.kx_direct = kpoints.kvec_d[kpoint].x;
+        point.ky_direct = kpoints.kvec_d[kpoint].y;
+        point.kz_direct = kpoints.kvec_d[kpoint].z;
+        point.weight = kpoints.wk[kpoint];
+        point.eigenvalues_ry.resize(artifact.band_count);
+        for (int band = 0; band < solved_band_count; ++band)
+        {
+            point.eigenvalues_ry[static_cast<std::size_t>(band)]
+                = electronic_state.ekb(kpoint, band);
+        }
+        artifact.points.push_back(point);
+    }
+    return artifact;
 }
 
 void close_artifact(std::ofstream& output,
@@ -1173,6 +1296,30 @@ void FdeLcaoDriver::write_scf_artifacts(
     }
 
     {
+        const ScopedFdeTimer timer("write_kpoint_bands");
+        const FdeKPointBandArtifact bands
+            = make_kpoint_band_artifact(electronic_state,
+                                        kpoints,
+                                        density,
+                                        config_.active_state,
+                                        config_.active_fragment,
+                                        full_ao_dimension_,
+                                        global_band_count);
+        const std::string band_path = config_.output_prefix + ".fde_kbands";
+        std::ofstream band_output(band_path.c_str());
+        if (!band_output)
+        {
+            throw std::runtime_error(
+                "Cannot create FDE k-point band artifact: " + band_path);
+        }
+        FdeKPointBandArtifactIO::write(
+            band_output,
+            bands,
+            std::max(config_.symmetry_tolerance, 1.0e-12));
+        close_artifact(band_output, band_path, "k-point band");
+    }
+
+    {
         const ScopedFdeTimer timer("write_fragment_artifact");
         FragmentScfArtifact fragment;
         fragment.schema_version = 1;
@@ -1224,6 +1371,131 @@ void FdeLcaoDriver::write_scf_artifacts(
                                      config_.symmetry_tolerance);
         close_artifact(fragment_output, fragment_path, "fragment SCF");
     }
+}
+
+void FdeLcaoDriver::write_scf_artifacts(
+    Charge& charge,
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+    elecstate::ElecState& electronic_state,
+    hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+        full_hamiltonian,
+    const K_Vectors& kpoints,
+    const Parallel_Orbitals& orbitals,
+    const FdeScfStatus& status)
+{
+    (void)full_hamiltonian;
+    if (embedding_potential_ == nullptr || density_basis_ == nullptr
+        || charge.nspin != 2 || charge.rhopw == nullptr
+        || charge.rho == nullptr || charge.rho_save == nullptr
+        || charge.rhopw != density_basis_
+        || wavefunctions.get_nk() != kpoints.get_nks()
+        || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
+        || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
+    {
+        throw std::runtime_error("FDE k-point SCF artifact output contract is incomplete");
+    }
+    if (status.iterations <= 0 || !std::isfinite(status.density_residual)
+        || status.density_residual < 0.0)
+    {
+        throw std::runtime_error("FDE k-point SCF artifact status is invalid");
+    }
+    validate_parallel_layout(*density_basis_, orbitals);
+    const int rank = ao_rank(orbitals);
+#ifdef __MPI
+    const int global_band_count = orbitals.get_wfc_global_nbands();
+#else
+    const int global_band_count = wavefunctions.get_nbands();
+#endif
+
+    const std::size_t local_grid_size
+        = static_cast<std::size_t>(density_basis_->nrxx);
+    const double* const alpha_checkpoint
+        = status.converged ? charge.rho_save[0] : charge.rho[0];
+    const double* const beta_checkpoint
+        = status.converged ? charge.rho_save[1] : charge.rho[1];
+    std::vector<double> local_alpha;
+    std::vector<double> local_beta;
+    {
+        const ScopedFdeTimer timer("evaluate_checkpoint");
+        local_alpha.assign(alpha_checkpoint,
+                           alpha_checkpoint + local_grid_size);
+        local_beta.assign(beta_checkpoint,
+                          beta_checkpoint + local_grid_size);
+        normalize_nonnegative_spin_density(local_alpha.data(),
+                                           local_beta.data(),
+                                           local_grid_size,
+                                           active_alpha_electrons_,
+                                           active_beta_electrons_,
+                                           active_initial_.cell_volume_bohr3,
+                                           *density_basis_);
+        SpinDensity active_density;
+        active_density.alpha_bohr3 = local_alpha;
+        active_density.beta_bohr3 = local_beta;
+        (void)embedding_potential_->evaluate(active_density);
+    }
+    std::vector<double> global_alpha;
+    std::vector<double> global_beta;
+    {
+        const ScopedFdeTimer timer("gather_checkpoint_density");
+        global_alpha = DensityGridPartition::gather_to_root(
+            local_alpha.data(), *density_basis_);
+        global_beta = DensityGridPartition::gather_to_root(
+            local_beta.data(), *density_basis_);
+    }
+    if (rank != 0)
+    {
+        return;
+    }
+
+    FrozenDensityArtifact density;
+    const std::string density_path
+        = config_.output_prefix
+          + (status.converged ? ".fde_density" : ".partial.fde_density");
+    {
+        const ScopedFdeTimer timer("write_density_checkpoint");
+        density = active_initial_;
+        density.schema_version = 2;
+        density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+        density.scf_converged = status.converged;
+        density.scf_iterations = status.iterations;
+        density.scf_density_residual = status.density_residual;
+        density.rho_alpha_bohr3.swap(global_alpha);
+        density.rho_beta_bohr3.swap(global_beta);
+        std::ofstream density_output(density_path.c_str(), std::ios::binary);
+        if (!density_output)
+        {
+            throw std::runtime_error(
+                "Cannot create FDE density artifact: " + density_path);
+        }
+        DensityArtifactIO::write_binary(density_output, density);
+        close_artifact(density_output, density_path, "density");
+    }
+    if (!status.converged)
+    {
+        return;
+    }
+
+    const ScopedFdeTimer timer("write_kpoint_bands");
+    const FdeKPointBandArtifact bands
+        = make_kpoint_band_artifact(electronic_state,
+                                    kpoints,
+                                    density,
+                                    config_.active_state,
+                                    config_.active_fragment,
+                                    full_ao_dimension_,
+                                    global_band_count);
+    const std::string band_path = config_.output_prefix + ".fde_kbands";
+    std::ofstream band_output(band_path.c_str());
+    if (!band_output)
+    {
+        throw std::runtime_error(
+            "Cannot create FDE k-point band artifact: " + band_path);
+    }
+    FdeKPointBandArtifactIO::write(
+        band_output,
+        bands,
+        std::max(config_.symmetry_tolerance, 1.0e-12));
+    close_artifact(band_output, band_path, "k-point band");
 }
 
 } // namespace fde

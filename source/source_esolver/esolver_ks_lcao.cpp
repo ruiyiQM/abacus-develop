@@ -43,29 +43,6 @@ bool solve_native_fde(
     Charge& charge,
     const Parallel_Orbitals* orbitals)
 {
-    (void)full_hamiltonian;
-    (void)wavefunctions;
-    (void)electronic_state;
-    (void)density_matrix;
-    (void)charge;
-    (void)orbitals;
-    if (driver != nullptr)
-    {
-        throw std::runtime_error("FDE embedded_scf requires the real Gamma LCAO solver");
-    }
-    return false;
-}
-
-template <>
-bool solve_native_fde<double>(
-    fde::FdeLcaoDriver* driver,
-    hamilt::Hamilt<double>* full_hamiltonian,
-    psi::Psi<double>& wavefunctions,
-    elecstate::ElecState* electronic_state,
-    elecstate::DensityMatrix<double, double>& density_matrix,
-    Charge& charge,
-    const Parallel_Orbitals* orbitals)
-{
     if (driver == nullptr)
     {
         return false;
@@ -86,30 +63,6 @@ void write_native_fde(
     psi::Psi<TK>& wavefunctions,
     elecstate::ElecState* electronic_state,
     hamilt::Hamilt<TK>* full_hamiltonian,
-    const K_Vectors& kpoints,
-    const Parallel_Orbitals& orbitals,
-    const fde::FdeScfStatus& status)
-{
-    (void)charge;
-    (void)wavefunctions;
-    (void)electronic_state;
-    (void)full_hamiltonian;
-    (void)kpoints;
-    (void)orbitals;
-    (void)status;
-    if (driver != nullptr)
-    {
-        throw std::runtime_error("FDE artifact output requires real Gamma LCAO data");
-    }
-}
-
-template <>
-void write_native_fde<double>(
-    fde::FdeLcaoDriver* driver,
-    Charge& charge,
-    psi::Psi<double>& wavefunctions,
-    elecstate::ElecState* electronic_state,
-    hamilt::Hamilt<double>* full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
     const fde::FdeScfStatus& status)

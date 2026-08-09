@@ -15,11 +15,11 @@ void ReadInput::item_fde()
         item.type = "String";
         item.description = R"(Select the native FDE runtime entry point.
 * none: run an ordinary ABACUS calculation.
-* embedded_scf: run one subsystem-in-environment LCAO Gamma-point SCF job described by fde_config.
+* embedded_scf: run one subsystem-in-environment LCAO SCF job described by fde_config.
 * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
         item.default_value = "none";
         item.unit = "";
-        item.availability = "LCAO Gamma-point, collinear-spin PBE calculations";
+        item.availability = "LCAO collinear-spin PBE calculations";
         read_sync_string(input.fde_task);
         item.reset_value = [](const Input_Item&, Parameter& para) {
             // An embedded subsystem carries a prescribed alpha/beta electron
@@ -50,13 +50,13 @@ void ReadInput::item_fde()
             if (task == "embedded_scf")
             {
                 if (para.input.calculation != "scf" || para.input.basis_type != "lcao"
-                    || !para.input.gamma_only || para.input.nspin != 2 || para.input.noncolin
+                    || para.input.nspin != 2 || para.input.noncolin
                     || para.input.lspinorb)
                 {
                     ModuleBase::WARNING_QUIT(
                         "ReadInput",
                         "fde_task embedded_scf requires calculation scf, basis_type lcao, "
-                        "gamma_only 1, nspin 2, noncolin 0, and lspinorb 0");
+                        "nspin 2, noncolin 0, and lspinorb 0");
                 }
                 if (para.input.dft_functional != "pbe")
                 {

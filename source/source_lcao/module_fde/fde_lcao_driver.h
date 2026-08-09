@@ -2,10 +2,12 @@
 #define FDE_LCAO_DRIVER_H
 
 #include "fde_density_artifact.h"
+#include "fde_projected_hamiltonian.h"
 #include "fde_runtime_config.h"
 #include "source_base/module_device/types.h"
 
 #include <cstddef>
+#include <complex>
 #include <memory>
 #include <string>
 #include <vector>
@@ -44,7 +46,6 @@ class Psi;
 namespace fde
 {
 
-class FdeProjectedHamiltonian;
 class PotFde;
 
 struct FdeScfStatus
@@ -76,7 +77,15 @@ class FdeLcaoDriver
     std::unique_ptr<FdeProjectedHamiltonian>
     projected_hamiltonian(
         hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
-        const Parallel_Orbitals& orbitals) const;
+        const Parallel_Orbitals& orbitals,
+        std::size_t spin_kpoint_count) const;
+
+    std::unique_ptr<FdeProjectedHamiltonianComplex>
+    projected_hamiltonian(
+        hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+            full_hamiltonian,
+        const Parallel_Orbitals& orbitals,
+        std::size_t spin_kpoint_count) const;
 
     void solve_projected(hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
                          psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
@@ -85,11 +94,30 @@ class FdeLcaoDriver
                          Charge& charge,
                          const Parallel_Orbitals& orbitals) const;
 
+    void solve_projected(
+        hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+            full_hamiltonian,
+        psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+        elecstate::ElecState& electronic_state,
+        elecstate::DensityMatrix<std::complex<double>, double>& density_matrix,
+        Charge& charge,
+        const Parallel_Orbitals& orbitals) const;
+
     void write_scf_artifacts(
         Charge& charge,
         psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
         elecstate::ElecState& electronic_state,
         hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+        const K_Vectors& kpoints,
+        const Parallel_Orbitals& orbitals,
+        const FdeScfStatus& status);
+
+    void write_scf_artifacts(
+        Charge& charge,
+        psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+        elecstate::ElecState& electronic_state,
+        hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
+            full_hamiltonian,
         const K_Vectors& kpoints,
         const Parallel_Orbitals& orbitals,
         const FdeScfStatus& status);
