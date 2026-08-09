@@ -47,6 +47,13 @@ namespace fde
 class FdeProjectedHamiltonian;
 class PotFde;
 
+struct FdeScfStatus
+{
+    bool converged;
+    int iterations;
+    double density_residual;
+};
+
 /** Runtime-owned bridge from one task-local FDE_CONFIG to ABACUS LCAO. */
 class FdeLcaoDriver
 {
@@ -85,7 +92,7 @@ class FdeLcaoDriver
         hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
         const K_Vectors& kpoints,
         const Parallel_Orbitals& orbitals,
-        bool scf_converged);
+        const FdeScfStatus& status);
 
   private:
     FdeLcaoDriver(const FdeRuntimeConfig& config,

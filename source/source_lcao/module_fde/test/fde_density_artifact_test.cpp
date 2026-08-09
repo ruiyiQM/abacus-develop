@@ -86,6 +86,35 @@ TEST(FdeDensityArtifact, RoundTripsPartialScfDensityWithoutPromotingIt)
     EXPECT_FALSE(restored.scf_converged);
 }
 
+TEST(FdeDensityArtifact, RoundTripsSchemaTwoScfMetadata)
+{
+    fde::FrozenDensityArtifact partial = artifact("A");
+    partial.schema_version = 2;
+    partial.scf_converged = false;
+    partial.scf_iterations = 50;
+    partial.scf_density_residual = 4.31e-2;
+    std::ostringstream output;
+    fde::DensityArtifactIO::write(output, partial);
+
+    std::istringstream input(output.str());
+    const fde::FrozenDensityArtifact restored
+        = fde::DensityArtifactIO::read(input, 1.0e-12);
+    EXPECT_EQ(restored.schema_version, 2);
+    EXPECT_FALSE(restored.scf_converged);
+    EXPECT_EQ(restored.scf_iterations, 50);
+    EXPECT_DOUBLE_EQ(restored.scf_density_residual, 4.31e-2);
+}
+
+TEST(FdeDensityArtifact, RejectsInvalidSchemaTwoScfMetadata)
+{
+    fde::FrozenDensityArtifact invalid = artifact("A");
+    invalid.schema_version = 2;
+    invalid.scf_iterations = 0;
+    invalid.scf_density_residual = -1.0;
+    EXPECT_THROW(fde::DensityArtifactIO::validate(invalid, 1.0e-12),
+                 std::invalid_argument);
+}
+
 TEST(FdeDensityArtifact, ExpandsCompactUniformRuntimeSeed)
 {
     std::istringstream input(R"(FDE_UNIFORM_DENSITY_SEED 1

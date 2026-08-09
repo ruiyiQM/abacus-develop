@@ -702,7 +702,7 @@ void FdeLcaoDriver::write_scf_artifacts(
     hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
-    const bool scf_converged)
+    const FdeScfStatus& status)
 {
     if (embedding_potential_ == nullptr || density_basis_ == nullptr
         || charge.nspin != 2
@@ -713,6 +713,11 @@ void FdeLcaoDriver::write_scf_artifacts(
         || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
     {
         throw std::runtime_error("FDE SCF artifact output contract is incomplete");
+    }
+    if (status.iterations <= 0 || !std::isfinite(status.density_residual)
+        || status.density_residual < 0.0)
+    {
+        throw std::runtime_error("FDE SCF artifact status is invalid");
     }
     validate_parallel_layout(*density_basis_, orbitals);
     const int rank = ao_rank(orbitals);
@@ -799,13 +804,16 @@ void FdeLcaoDriver::write_scf_artifacts(
     }
 
     FrozenDensityArtifact density = active_initial_;
+    density.schema_version = 2;
     density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-    density.scf_converged = scf_converged;
+    density.scf_converged = status.converged;
+    density.scf_iterations = status.iterations;
+    density.scf_density_residual = status.density_residual;
     density.rho_alpha_bohr3.swap(global_alpha);
     density.rho_beta_bohr3.swap(global_beta);
     const std::string density_path
         = config_.output_prefix
-          + (scf_converged ? ".fde_density" : ".partial.fde_density");
+          + (status.converged ? ".fde_density" : ".partial.fde_density");
     std::ofstream density_output(density_path.c_str());
     if (!density_output)
     {
@@ -817,7 +825,7 @@ void FdeLcaoDriver::write_scf_artifacts(
     // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
     // valid inputs to diabatic postprocessing.  Persist only the normalized
     // density checkpoint until the embedded SCF has genuinely converged.
-    if (!scf_converged)
+    if (!status.converged)
     {
         return;
     }

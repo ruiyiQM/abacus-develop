@@ -29,6 +29,8 @@ struct FrozenDensityArtifact
     int beta_electrons;
     int freeze_thaw_cycle;
     bool scf_converged;
+    int scf_iterations;
+    double scf_density_residual;
     double orbital_kinetic_energy_ry;
     double nonlocal_pseudopotential_energy_ry;
     std::vector<double> rho_alpha_bohr3;

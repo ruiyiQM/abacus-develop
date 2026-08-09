@@ -15,7 +15,7 @@ namespace fde
 namespace
 {
 
-const int artifact_schema_version = 1;
+const int current_artifact_schema_version = 2;
 
 void require_token(std::istream& input, const char* expected)
 {
@@ -65,7 +65,8 @@ void require_equal(const std::string& first,
 void DensityArtifactIO::validate(const FrozenDensityArtifact& artifact,
                                  const double electron_tolerance)
 {
-    if (artifact.schema_version != artifact_schema_version)
+    if (artifact.schema_version < 1
+        || artifact.schema_version > current_artifact_schema_version)
     {
         throw std::invalid_argument("Unsupported FDE density artifact schema version");
     }
@@ -107,6 +108,14 @@ void DensityArtifactIO::validate(const FrozenDensityArtifact& artifact,
         || artifact.freeze_thaw_cycle < 0)
     {
         throw std::invalid_argument("FDE density artifact populations and cycle must be nonnegative");
+    }
+    if (artifact.schema_version >= 2
+        && (artifact.scf_iterations <= 0
+            || !std::isfinite(artifact.scf_density_residual)
+            || artifact.scf_density_residual < 0.0))
+    {
+        throw std::invalid_argument(
+            "FDE density artifact SCF iterations and residual are invalid");
     }
     if (!std::isfinite(artifact.orbital_kinetic_energy_ry)
         || !std::isfinite(artifact.nonlocal_pseudopotential_energy_ry))
@@ -189,7 +198,14 @@ void DensityArtifactIO::write(std::ostream& output, const FrozenDensityArtifact&
     output << "GRID " << artifact.grid_x << ' ' << artifact.grid_y << ' ' << artifact.grid_z
            << ' ' << artifact.cell_volume_bohr3 << '\n';
     output << "POPULATIONS " << artifact.alpha_electrons << ' ' << artifact.beta_electrons << '\n';
-    output << "SCF " << artifact.freeze_thaw_cycle << ' ' << (artifact.scf_converged ? 1 : 0) << '\n';
+    output << "SCF " << artifact.freeze_thaw_cycle << ' '
+           << (artifact.scf_converged ? 1 : 0);
+    if (artifact.schema_version >= 2)
+    {
+        output << ' ' << artifact.scf_iterations << ' '
+               << artifact.scf_density_residual;
+    }
+    output << '\n';
     output << "ENERGIES_RY " << artifact.orbital_kinetic_energy_ry << ' '
            << artifact.nonlocal_pseudopotential_energy_ry << '\n';
     output << "RHO_ALPHA " << artifact.rho_alpha_bohr3.size();
@@ -244,6 +260,12 @@ FrozenDensityArtifact DensityArtifactIO::read(std::istream& input,
         throw std::invalid_argument("FDE density artifact SCF flag must be zero or one");
     }
     artifact.scf_converged = converged == 1;
+    artifact.scf_iterations = 0;
+    artifact.scf_density_residual = 0.0;
+    if (artifact.schema_version >= 2)
+    {
+        input >> artifact.scf_iterations >> artifact.scf_density_residual;
+    }
     require_token(input, "ENERGIES_RY");
     input >> artifact.orbital_kinetic_energy_ry >> artifact.nonlocal_pseudopotential_energy_ry;
 
@@ -345,6 +367,8 @@ FrozenDensityArtifact DensityArtifactIO::read_runtime(std::istream& input,
     const std::size_t size = artifact.grid_x * artifact.grid_y * artifact.grid_z;
     artifact.freeze_thaw_cycle = 0;
     artifact.scf_converged = false;
+    artifact.scf_iterations = 0;
+    artifact.scf_density_residual = 0.0;
     artifact.orbital_kinetic_energy_ry = 0.0;
     artifact.nonlocal_pseudopotential_energy_ry = 0.0;
     artifact.rho_alpha_bohr3.assign(size, alpha);

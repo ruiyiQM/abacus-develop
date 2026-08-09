@@ -88,7 +88,7 @@ void write_native_fde(
     hamilt::Hamilt<TK>* full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
-    const bool scf_converged)
+    const fde::FdeScfStatus& status)
 {
     (void)charge;
     (void)wavefunctions;
@@ -96,7 +96,7 @@ void write_native_fde(
     (void)full_hamiltonian;
     (void)kpoints;
     (void)orbitals;
-    (void)scf_converged;
+    (void)status;
     if (driver != nullptr)
     {
         throw std::runtime_error("FDE artifact output requires real Gamma LCAO data");
@@ -112,7 +112,7 @@ void write_native_fde<double>(
     hamilt::Hamilt<double>* full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
-    const bool scf_converged)
+    const fde::FdeScfStatus& status)
 {
     if (driver != nullptr)
     {
@@ -122,7 +122,7 @@ void write_native_fde<double>(
                                     *full_hamiltonian,
                                     kpoints,
                                     orbitals,
-                                    scf_converged);
+                                    status);
     }
 }
 
@@ -696,6 +696,8 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
 
     if (conv_esolver || this->scf_nmax_flag)
     {
+        const fde::FdeScfStatus status
+            = {conv_esolver, this->niter, this->drho};
         write_native_fde<TK>(this->fde_driver_.get(),
                              this->chr,
                              this->psi[0],
@@ -703,7 +705,7 @@ void ESolver_KS_LCAO<TK, TR>::after_scf(UnitCell& ucell, const int istep, const 
                              static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt),
                              this->kv,
                              this->pv,
-                             conv_esolver);
+                             status);
     }
 
     //! 2) output of lcao every few ionic steps
