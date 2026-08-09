@@ -5001,14 +5001,14 @@
 - **Description**: Select the native FDE runtime entry point.
   - `none`: run an ordinary ABACUS calculation.
   - `embedded_scf`: run one subsystem-in-environment LCAO Gamma-point SCF job described by `fde_config`.
-  - `diabatic_postprocess`: assemble diabatic overlaps and couplings from converged subsystem artifacts described by `fde_config`.
+  - `diabatic_postprocess`: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from `fde_config`. This mode does not require `STRU`.
 - **Default**: none
 
 ### fde_config
 
 - **Type**: String
 - **Availability**: *fde_task is not none*
-- **Description**: Path to the deterministic `FDE_CONFIG` sidecar file. The sidecar defines fragments, diabatic charge/spin states, the active subsystem, frozen-density artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
+- **Description**: Path to the deterministic `FDE_CONFIG` sidecar file. The sidecar defines fragments, diabatic charge/spin states, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
 - **Default**: FDE_CONFIG
 
 [back to top](#full-list-of-input-keywords)

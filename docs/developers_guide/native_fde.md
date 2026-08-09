@@ -212,6 +212,31 @@ linearized-state artifact per state, an AO-overlap artifact, and a postprocess
 external production scheduler deliberately stops at two until the generalized
 runtime energy recomputation is connected.
 
+The generated postprocess sidecar adds one `LINEARIZED_STATE <state> <path>`
+record per determinant. Run it with a minimal `INPUT` containing
+`fde_task diabatic_postprocess` and `fde_config <path>`. This task is intercepted
+before UnitCell construction, so it does not require `STRU`, orbitals, or
+pseudopotentials. Rank zero reads the artifacts and writes
+`<OUTPUT_PREFIX>.fde_diabatic` plus a compact TSV table; an MPI launch produces
+the same single output without per-rank races.
+
+The transition energy is a symmetric first-order FDE-diab approximation. For
+each direction it linearizes the state energy around the corresponding
+diagonal density,
+
+```text
+E_i[P_ij] = E_i[P_ii] + Tr[(P_ij - P_ii) H_i],
+H_ij = 1/2 S_ij (E_i[P_ij] + E_j[P_ji]).
+```
+
+`H_i` is the average of the final unprojected active-fragment Hamiltonians for
+state `i`. The output reports the raw nonorthogonal `H_ij`, determinant overlap,
+and the symmetric two-state orthogonalized coupling
+`(H_ij - S_ij(E_i+E_j)/2)/(1-S_ij^2)`. It also solves the full selected
+`H B = S B E` problem. This model is deliberately identified as linearized;
+a later grid transition-functional provider can replace it without changing
+the determinant algebra or nonorthogonal solver.
+
 `OneWayScf` owns the RP5 embedded-SCF loop. It reads a compatible active/frozen
 artifact pair, evaluates the embedding potential, solves alpha and beta active
 AO subspace problems, mixes the returned real-space density, enforces fixed

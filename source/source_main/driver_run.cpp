@@ -11,9 +11,17 @@
 #include "source_base/module_device/memory_op.h"
 #include "source_base/kernels/math_kernel_op.h"
 #include "source_hsolver/kernels/hegvd_op.h"
+#ifdef __LCAO
+#include "source_lcao/module_fde/fde_diabatic_postprocess.h"
+#endif
 
 #include <ATen/kernels/blas.h>
 #include <ATen/kernels/lapack.h>
+
+#include <iostream>
+#ifdef __MPI
+#include <mpi.h>
+#endif
 
 #ifdef __DSP
 #include "source_base/kernels/dsp/dsp_connector.h"
@@ -37,11 +45,33 @@
 void Driver::driver_run()
 {
     ModuleBase::TITLE("Driver", "driver_run");
+    const Input_para& input = PARAM.inp;
+
+    if (input.fde_task == "diabatic_postprocess")
+    {
+#ifdef __LCAO
+        int world_rank = 0;
+#ifdef __MPI
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+#endif
+        if (world_rank == 0)
+        {
+            const fde::DiabaticPostprocessResult result
+                = fde::DiabaticPostprocessor::run(input.fde_config);
+            std::cout << " FDE diabatic postprocess completed with "
+                      << result.adiabatic_solution.eigenvalues_ry.size()
+                      << " retained adiabatic roots." << std::endl;
+        }
+        return;
+#else
+        ModuleBase::WARNING_QUIT("Driver", "FDE postprocess requires an LCAO-enabled build");
+#endif
+    }
 
     //! 1: setup cell and atom information
     // this warning should not be here, mohan 2024-05-22
 #ifndef __LCAO
-    if (PARAM.inp.basis_type == "lcao_in_pw" || PARAM.inp.basis_type == "lcao") {
+    if (input.basis_type == "lcao_in_pw" || input.basis_type == "lcao") {
         ModuleBase::WARNING_QUIT("driver",
                                  "to use LCAO basis, compile with __LCAO");
     }
@@ -49,33 +79,33 @@ void Driver::driver_run()
 
     // the life of ucell should begin here, mohan 2024-05-12
     UnitCell ucell;
-    ucell.setup_from_input(PARAM.inp.latname,
-                PARAM.inp.ntype,
-                PARAM.inp.lmaxmax,
-                PARAM.inp.init_vel,
-                PARAM.inp.fixed_axes);
+    ucell.setup_from_input(input.latname,
+                input.ntype,
+                input.lmaxmax,
+                input.init_vel,
+                input.fixed_axes);
 
-    ucell.setup_cell(PARAM.globalv.global_in_stru, GlobalV::ofs_running, PARAM.inp.symmetry_prec, PARAM.inp.dfthalf_type, PARAM.inp.pseudo_dir, PARAM.inp.nspin,
-        PARAM.inp.basis_type, PARAM.inp.orbital_dir, PARAM.inp.init_wfc,
-        PARAM.inp.onsite_radius, PARAM.globalv.deepks_setorb, PARAM.inp.rpa,
-        PARAM.inp.fixed_atoms, PARAM.inp.noncolin, PARAM.inp.calculation, PARAM.inp.esolver_type,
-        std::stoi(PARAM.inp.symmetry));
-    unitcell::check_atomic_stru(ucell, PARAM.inp.min_dist_coef);
+    ucell.setup_cell(PARAM.globalv.global_in_stru, GlobalV::ofs_running, input.symmetry_prec, input.dfthalf_type, input.pseudo_dir, input.nspin,
+        input.basis_type, input.orbital_dir, input.init_wfc,
+        input.onsite_radius, PARAM.globalv.deepks_setorb, input.rpa,
+        input.fixed_atoms, input.noncolin, input.calculation, input.esolver_type,
+        std::stoi(input.symmetry));
+    unitcell::check_atomic_stru(ucell, input.min_dist_coef);
 
     //! 2: initialize the ESolver (depends on a set-up ucell after `setup_cell`)
     this->init_hardware();
 
-    ModuleESolver::ESolver* p_esolver = ModuleESolver::init_esolver(PARAM.inp);
+    ModuleESolver::ESolver* p_esolver = ModuleESolver::init_esolver(input);
 
     //! 3: initialize Esolver and fill json-structure
-    p_esolver->before_all_runners(ucell, PARAM.inp);
+    p_esolver->before_all_runners(ucell, input);
 
     // this Json part should be moved to before_all_runners, mohan 2024-05-12
 #ifdef __RAPIDJSON
-    Json::gen_stru_wrapper(&ucell, PARAM.inp);
+    Json::gen_stru_wrapper(&ucell, input);
 #endif
 
-    const std::string cal = PARAM.inp.calculation;
+    const std::string cal = input.calculation;
 
     //! 4: different types of calculations
     if (cal == "md")
@@ -85,7 +115,7 @@ void Driver::driver_run()
     else if (cal == "scf" || cal == "relax" || cal == "cell-relax" || cal == "nscf")
     {
         Relax_Driver rl_driver;
-        rl_driver.relax_driver(p_esolver, ucell, PARAM.inp, GlobalV::ofs_running);
+        rl_driver.relax_driver(p_esolver, ucell, input, GlobalV::ofs_running);
     }
     else if (cal == "get_s")
     {

@@ -23,6 +23,8 @@ ACTIVE_DENSITY artifacts/reactant_F.fde_density
 FROZEN_DENSITY CH3Cl artifacts/reactant_CH3Cl.fde_density
 DETERMINANT reactant artifacts/reactant.fde_determinant
 DETERMINANT product artifacts/product.fde_determinant
+LINEARIZED_STATE reactant artifacts/reactant.fde_linearized_state
+LINEARIZED_STATE product artifacts/product.fde_linearized_state
 DIAGONAL_ENERGY_RY reactant -80.1
 DIAGONAL_ENERGY_RY product -80.0
 AO_OVERLAP artifacts/S_gamma.fde_matrix
@@ -71,6 +73,8 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(config.maximum_scf_iterations, 120);
     EXPECT_DOUBLE_EQ(config.mixing_beta, 0.25);
     EXPECT_TRUE(config.calculate_force);
+    ASSERT_EQ(config.linearized_state_artifacts.size(), 2);
+    EXPECT_EQ(config.linearized_state_artifacts[1].label, "product");
     EXPECT_EQ(fde::FdeRuntimeConfigIO::state_index(config, "product"), 1);
 }
 

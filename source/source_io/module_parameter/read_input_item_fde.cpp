@@ -16,7 +16,7 @@ void ReadInput::item_fde()
         item.description = R"(Select the native FDE runtime entry point.
 * none: run an ordinary ABACUS calculation.
 * embedded_scf: run one subsystem-in-environment LCAO Gamma-point SCF job described by fde_config.
-* diabatic_postprocess: assemble diabatic overlaps and couplings from converged subsystem artifacts described by fde_config.)";
+* diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
         item.default_value = "none";
         item.unit = "";
         item.availability = "LCAO Gamma-point, collinear-spin PBE calculations";
@@ -63,7 +63,7 @@ void ReadInput::item_fde()
         item.annotation = "path to the native FDE sidecar configuration";
         item.category = "Frozen-density embedding";
         item.type = "String";
-        item.description = R"(Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, the active subsystem, frozen-density artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.)";
+        item.description = R"(Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.)";
         item.default_value = "FDE_CONFIG";
         item.unit = "";
         item.availability = "fde_task is not none";

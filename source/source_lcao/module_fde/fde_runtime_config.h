@@ -51,6 +51,7 @@ struct FdeRuntimeConfig
     std::string active_density_path;
     std::vector<RuntimeArtifactPath> frozen_density_artifacts;
     std::vector<RuntimeArtifactPath> determinant_artifacts;
+    std::vector<RuntimeArtifactPath> linearized_state_artifacts;
     std::vector<RuntimeDiagonalEnergy> diagonal_energies;
     std::string ao_overlap_path;
     std::string output_prefix;

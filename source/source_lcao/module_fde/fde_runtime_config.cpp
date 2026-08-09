@@ -198,6 +198,15 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
             throw std::invalid_argument("FDE_CONFIG determinant path must not be empty");
         }
     }
+    for (std::size_t index = 0; index < config.linearized_state_artifacts.size(); ++index)
+    {
+        FdeRuntimeConfigIO::state_index(config,
+                                        config.linearized_state_artifacts[index].label);
+        if (config.linearized_state_artifacts[index].path.empty())
+        {
+            throw std::invalid_argument("FDE_CONFIG linearized-state path must not be empty");
+        }
+    }
     for (std::size_t index = 0; index < config.diagonal_energies.size(); ++index)
     {
         FdeRuntimeConfigIO::state_index(config, config.diagonal_energies[index].state_label);
@@ -360,7 +369,8 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             config.active_density_path
                 = read_value<std::string>(line, line_number, "active-density path");
         }
-        else if (key == "FROZEN_DENSITY" || key == "DETERMINANT")
+        else if (key == "FROZEN_DENSITY" || key == "DETERMINANT"
+                 || key == "LINEARIZED_STATE")
         {
             RuntimeArtifactPath artifact;
             artifact.label = read_value<std::string>(line, line_number, "artifact label");
@@ -369,9 +379,13 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             {
                 config.frozen_density_artifacts.push_back(artifact);
             }
-            else
+            else if (key == "DETERMINANT")
             {
                 config.determinant_artifacts.push_back(artifact);
+            }
+            else
+            {
+                config.linearized_state_artifacts.push_back(artifact);
             }
         }
         else if (key == "DIAGONAL_ENERGY_RY")
@@ -544,6 +558,11 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
     {
         output << "DETERMINANT " << config.determinant_artifacts[index].label << ' '
                << config.determinant_artifacts[index].path << '\n';
+    }
+    for (std::size_t index = 0; index < config.linearized_state_artifacts.size(); ++index)
+    {
+        output << "LINEARIZED_STATE " << config.linearized_state_artifacts[index].label << ' '
+               << config.linearized_state_artifacts[index].path << '\n';
     }
     for (std::size_t index = 0; index < config.diagonal_energies.size(); ++index)
     {

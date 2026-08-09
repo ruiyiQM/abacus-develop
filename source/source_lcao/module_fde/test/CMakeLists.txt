@@ -69,11 +69,34 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_diabatic_postprocess
+  SOURCES fde_diabatic_postprocess_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+    ../fde_diabatic_assembler.cpp
+    ../fde_diabatic_postprocess.cpp
+    ../fde_electronic_coupling.cpp
+    ../fde_linearized_state.cpp
+    ../fde_multistate_solver.cpp
+    ../fde_runtime_config.cpp
+    ../fde_state.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
     ../fde_ao_projection.cpp
     ../fde_determinant_artifact.cpp
     ../fde_electronic_coupling.cpp
+)
+
+AddTest(
+  TARGET MODULE_FDE_linearized_state
+  SOURCES fde_linearized_state_test.cpp
+    ../fde_ao_projection.cpp
+    ../fde_determinant_artifact.cpp
+    ../fde_electronic_coupling.cpp
+    ../fde_linearized_state.cpp
 )
 
 AddTest(
