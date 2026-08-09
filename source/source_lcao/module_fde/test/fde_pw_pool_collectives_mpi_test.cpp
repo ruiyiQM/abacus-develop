@@ -104,6 +104,34 @@ TEST(FdePwPoolCollectivesMpi, NormalizesFixedSpinPopulationsIndependently)
     EXPECT_NEAR((populations[0] - populations[1]) * volume_element, -1.0, 1.0e-12);
 }
 
+TEST(FdePwPoolCollectivesMpi, PreservesScfShapeButClampsArtifactDensity)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+
+    std::vector<double> scf_alpha(static_cast<std::size_t>(basis.nrxx), 1.0);
+    std::vector<double> scf_beta(static_cast<std::size_t>(basis.nrxx), 2.0);
+    scf_alpha.front() = -0.25;
+    std::vector<double> artifact_alpha = scf_alpha;
+    std::vector<double> artifact_beta = scf_beta;
+
+    fde::normalize_spin_density(scf_alpha.data(), scf_beta.data(), scf_alpha.size(), 7, 8, 42.0, basis);
+    fde::normalize_nonnegative_spin_density(artifact_alpha.data(),
+                                            artifact_beta.data(),
+                                            artifact_alpha.size(),
+                                            7,
+                                            8,
+                                            42.0,
+                                            basis);
+
+    EXPECT_LT(scf_alpha.front(), 0.0);
+    EXPECT_DOUBLE_EQ(artifact_alpha.front(), 0.0);
+}
+
 int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);

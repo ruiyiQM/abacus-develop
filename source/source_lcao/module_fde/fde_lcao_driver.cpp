@@ -710,13 +710,13 @@ void FdeLcaoDriver::write_scf_artifacts(
                                     alpha_checkpoint + local_grid_size);
     std::vector<double> local_beta(beta_checkpoint,
                                    beta_checkpoint + local_grid_size);
-    normalize_spin_density(local_alpha.data(),
-                           local_beta.data(),
-                           local_grid_size,
-                           active_alpha_electrons_,
-                           active_beta_electrons_,
-                           active_initial_.cell_volume_bohr3,
-                           *density_basis_);
+    normalize_nonnegative_spin_density(local_alpha.data(),
+                                       local_beta.data(),
+                                       local_grid_size,
+                                       active_alpha_electrons_,
+                                       active_beta_electrons_,
+                                       active_initial_.cell_volume_bohr3,
+                                       *density_basis_);
     SpinDensity active_density;
     active_density.alpha_bohr3 = local_alpha;
     active_density.beta_bohr3 = local_beta;
