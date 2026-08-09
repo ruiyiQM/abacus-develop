@@ -25,7 +25,61 @@
 #include "source_io/module_output/print_info.h"
 #include "source_lcao/rho_tau_lcao.h" // mohan add 20251024
 #include "source_lcao/LCAO_set.h" // mohan add 20251111
+#include "source_lcao/module_fde/fde_lcao_driver.h"
 #include "source_psi/setup_psi.h" // use Setup_Psi for deallocate_psi
+
+#include <stdexcept>
+
+namespace
+{
+
+template <typename TK>
+bool solve_native_fde(
+    fde::FdeLcaoDriver* driver,
+    hamilt::Hamilt<TK>* full_hamiltonian,
+    psi::Psi<TK>& wavefunctions,
+    elecstate::ElecState* electronic_state,
+    elecstate::DensityMatrix<TK, double>& density_matrix,
+    Charge& charge,
+    const Parallel_Orbitals* orbitals)
+{
+    (void)full_hamiltonian;
+    (void)wavefunctions;
+    (void)electronic_state;
+    (void)density_matrix;
+    (void)charge;
+    (void)orbitals;
+    if (driver != nullptr)
+    {
+        throw std::runtime_error("FDE embedded_scf requires the real Gamma LCAO solver");
+    }
+    return false;
+}
+
+template <>
+bool solve_native_fde<double>(
+    fde::FdeLcaoDriver* driver,
+    hamilt::Hamilt<double>* full_hamiltonian,
+    psi::Psi<double>& wavefunctions,
+    elecstate::ElecState* electronic_state,
+    elecstate::DensityMatrix<double, double>& density_matrix,
+    Charge& charge,
+    const Parallel_Orbitals* orbitals)
+{
+    if (driver == nullptr)
+    {
+        return false;
+    }
+    driver->solve_projected(*full_hamiltonian,
+                            wavefunctions,
+                            *electronic_state,
+                            density_matrix,
+                            charge,
+                            *orbitals);
+    return true;
+}
+
+} // namespace
 
 namespace ModuleESolver
 {
@@ -92,6 +146,8 @@ void ESolver_KS_LCAO<TK, TR>::before_all_runners(BaseCell& basecell, const Input
       this->pelec, this->orb_, this->pv, this->locpp, this->dftu,
       this->solvent, this->exx_nao, this->deepks, inp);
 
+    this->fde_driver_ = fde::FdeLcaoDriver::create(inp, ucell, this->pv);
+
     //! if kpar is not divisible by nks, print a warning
     ModuleIO::print_kpar(this->kv.get_nks(), PARAM.globalv.kpar_lcao);
 
@@ -156,6 +212,13 @@ void ESolver_KS_LCAO<TK, TR>::before_scf(UnitCell& ucell, const int istep)
             two_center_bundle_, orb_, this->dmat.dm, &this->dftu, this->deepks, istep, exx_nao);
     }
 
+    if (this->fde_driver_)
+    {
+        this->fde_driver_->attach_embedding_potential(*this->pw_rhod,
+                                                      ucell,
+                                                      *this->pelec->pot);
+    }
+
     // 9) for each ionic step, the overlap <phi|alpha> must be rebuilt
     // since it depends on ionic positions.
     // overlap_orb_alpha is only built when DeePKS is enabled (descriptor
@@ -207,6 +270,10 @@ void ESolver_KS_LCAO<TK, TR>::before_scf(UnitCell& ucell, const int istep)
         this->dmat.dm->cal_DMR();
     }
     // 13.2) init_scf, should be before_scf? mohan add 2025-03-10
+    if (this->fde_driver_)
+    {
+        this->fde_driver_->initialize_active_charge(this->chr);
+    }
     elecstate::init_scf(ucell, this->Pgrid, this->sf.strucFac, this->locpp.numeric,
                           istep, PARAM.globalv.global_out_dir, PARAM.inp, this->pelec);
 
@@ -444,7 +511,15 @@ void ESolver_KS_LCAO<TK, TR>::hamilt2rho_single(UnitCell& ucell, int istep, int 
     }
 
     // 3) run Hsolver
-    if (!skip_solve)
+    const bool fde_solved = !skip_solve
+                            && solve_native_fde<TK>(this->fde_driver_.get(),
+                                                    static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt),
+                                                    this->psi[0],
+                                                    this->pelec,
+                                                    *this->dmat.dm,
+                                                    this->chr,
+                                                    &(this->pv));
+    if (!skip_solve && !fde_solved)
     {
         hsolver::HSolverLCAO<TK> hsolver_lcao_obj(&(this->pv),
                                                   PARAM.inp.ks_solver,
@@ -456,7 +531,7 @@ void ESolver_KS_LCAO<TK, TR>::hamilt2rho_single(UnitCell& ucell, int istep, int 
         hsolver_lcao_obj.solve(static_cast<hamilt::Hamilt<TK>*>(this->p_hamilt), this->psi[0], this->pelec, *this->dmat.dm, 
           this->chr, PARAM.inp.nspin, skip_charge);
     }
-    else
+    else if (skip_solve)
     {
         // Lambda loop updated the density matrix (DM) but not the real-space charge density.
         // HSolver was skipped, so we need to sync rho from DM manually.

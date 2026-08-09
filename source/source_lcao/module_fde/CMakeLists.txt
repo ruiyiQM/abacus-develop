@@ -11,12 +11,14 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_finite_difference.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_freeze_thaw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_lcao_driver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_energy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_freeze_thaw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_multistate_solver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_one_way_scf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_pes_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_projected_hamiltonian.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_runtime_config.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_semilocal_functional.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp

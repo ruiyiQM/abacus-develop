@@ -19,6 +19,7 @@ STATE reactant -1 0 2 F -1 0 CH3Cl 0 0
 STATE product -1 0 2 F 0 1 CH3Cl -1 -1
 ACTIVE_STATE reactant
 ACTIVE_FRAGMENT F
+ACTIVE_DENSITY artifacts/reactant_F.fde_density
 FROZEN_DENSITY CH3Cl artifacts/reactant_CH3Cl.fde_density
 DETERMINANT reactant artifacts/reactant.fde_determinant
 DETERMINANT product artifacts/product.fde_determinant
@@ -66,6 +67,7 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(config.states[1].state.fragments[1].spin_projection, -1);
     EXPECT_EQ(config.active_state, "reactant");
     EXPECT_EQ(config.active_fragment, "F");
+    EXPECT_EQ(config.active_density_path, "artifacts/reactant_F.fde_density");
     EXPECT_EQ(config.maximum_scf_iterations, 120);
     EXPECT_DOUBLE_EQ(config.mixing_beta, 0.25);
     EXPECT_TRUE(config.calculate_force);

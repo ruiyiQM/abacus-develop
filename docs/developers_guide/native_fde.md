@@ -114,6 +114,9 @@ gamma_only        1
 nspin             2
 dft_functional    pbe
 symmetry          0
+ks_solver         lapack
+nelec             <active-fragment electron count>
+nupdown           <active alpha minus beta population>
 fde_task          embedded_scf
 fde_config        FDE_CONFIG
 ```
@@ -134,6 +137,7 @@ STATE reactant -1 0 2 F -1 0 CH3Cl 0 0
 STATE product  -1 0 2 F  0 1 CH3Cl -1 -1
 ACTIVE_STATE reactant
 ACTIVE_FRAGMENT F
+ACTIVE_DENSITY artifacts/reactant_F.fde_density
 ...
 END_FDE_CONFIG
 ```
@@ -142,6 +146,19 @@ Thus the reactant branch contains closed-shell `F- + CH3Cl`, while the product
 branch contains the spin-coupled `F(radical) + CH3Cl-` fragment assignment.
 Every state/active-fragment pair is still one independent ABACUS process; an
 external workflow creates those task-local sidecars and alternates them.
+
+At runtime `FdeLcaoDriver` checks `nelec` and `nupdown` against that explicit
+fragment assignment, loads the active warm-start density and all environment
+density artifacts, and appends `PotFde` only after the ordinary potential
+registry has been constructed. `FdeProjectedHamiltonian` then preserves the
+full supersystem Hamiltonian—including every nuclear local and nonlocal
+pseudopotential operator—but supplies the eigensolver with an exactly decoupled
+low-energy block containing only the active fragment AOs. Inactive AOs receive
+an identity metric and a high dummy eigenvalue; `nbands` is required to fit
+inside the active AO dimension. This first runtime path deliberately requires
+replicated real-Gamma matrices, `ks_solver lapack`, and an orthogonal molecular
+cell. Distributed AO/grid execution is rejected explicitly instead of silently
+using rank-local matrix or density fragments.
 
 One ABACUS calculation solves exactly one geometry, one quasi-diabatic state,
 one active subsystem, and one freeze-thaw cycle. An external restartable

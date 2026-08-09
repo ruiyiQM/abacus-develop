@@ -21,6 +21,11 @@ template <typename T, typename TR>
 class ESolver_LR;
 }
 
+namespace fde
+{
+class FdeLcaoDriver;
+}
+
 //-----------------------------------
 // ESolver for LCAO
 //-----------------------------------
@@ -101,6 +106,9 @@ class ESolver_KS_LCAO : public ESolver_KS
     bool have_force = false;
     
     GintPrecisionController gint_precision_controller_;
+
+    //! Task-local native FDE runtime; null for ordinary LCAO calculations.
+    std::unique_ptr<fde::FdeLcaoDriver> fde_driver_;
 
 
   public:

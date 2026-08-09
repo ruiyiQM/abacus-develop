@@ -355,6 +355,11 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
         {
             config.active_fragment = read_value<std::string>(line, line_number, "active fragment");
         }
+        else if (key == "ACTIVE_DENSITY")
+        {
+            config.active_density_path
+                = read_value<std::string>(line, line_number, "active-density path");
+        }
         else if (key == "FROZEN_DENSITY" || key == "DETERMINANT")
         {
             RuntimeArtifactPath artifact;
@@ -525,6 +530,10 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
     {
         output << "ACTIVE_STATE " << config.active_state << '\n';
         output << "ACTIVE_FRAGMENT " << config.active_fragment << '\n';
+    }
+    if (!config.active_density_path.empty())
+    {
+        output << "ACTIVE_DENSITY " << config.active_density_path << '\n';
     }
     for (std::size_t index = 0; index < config.frozen_density_artifacts.size(); ++index)
     {

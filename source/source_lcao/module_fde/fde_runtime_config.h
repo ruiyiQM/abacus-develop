@@ -48,6 +48,7 @@ struct FdeRuntimeConfig
     std::vector<RuntimeStateDefinition> states;
     std::string active_state;
     std::string active_fragment;
+    std::string active_density_path;
     std::vector<RuntimeArtifactPath> frozen_density_artifacts;
     std::vector<RuntimeArtifactPath> determinant_artifacts;
     std::vector<RuntimeDiagonalEnergy> diagonal_energies;

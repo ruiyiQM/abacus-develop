@@ -34,6 +34,12 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_projected_hamiltonian
+  SOURCES fde_projected_hamiltonian_test.cpp
+    ../fde_projected_hamiltonian.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_density_artifact
   SOURCES fde_density_artifact_test.cpp ../fde_density_artifact.cpp
 )
