@@ -13,6 +13,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_fragment_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_freeze_thaw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_grid_partition.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_kpoint_band_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_linearized_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_lcao_driver.cpp

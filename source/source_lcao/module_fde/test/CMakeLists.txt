@@ -51,6 +51,11 @@ AddTest(
 )
 
 AddTest(
+  TARGET MODULE_FDE_kpoint_band_artifact
+  SOURCES fde_kpoint_band_artifact_test.cpp ../fde_kpoint_band_artifact.cpp
+)
+
+AddTest(
   TARGET MODULE_FDE_grid_partition
   SOURCES fde_grid_partition_test.cpp
     ../fde_grid_partition.cpp
