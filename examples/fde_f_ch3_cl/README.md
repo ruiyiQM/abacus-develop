@@ -16,7 +16,12 @@ structures.
 ## Requirements and scientific boundary
 
 - Build ABACUS with LCAO and Libxc enabled.
-- Use PBE norm-conserving pseudopotentials **without nonlinear core correction**.
+- The reproducible default is PBE with the official SG15-v1.0
+  norm-conserving pseudopotentials and matching StandardOrbitals-v2.0 DZP
+  numerical atomic orbitals at 100 Ry. ABACUS calls this basis level `DZP`;
+  it is the double-zeta-plus-polarization level often called DZVP by other
+  codes.
+- The selected H, C, F, and Cl SG15 files have no nonlinear core correction.
 - Use the same pseudopotentials, numerical orbitals, cell, `ecutwfc`, and grid
   for the grid-probe calculation and every FDE job.
 - The active scientific runtime is serial/replicated Gamma LCAO with
@@ -31,22 +36,44 @@ transition-density approximation. The result table reports determinant
 overlap, raw nonorthogonal `H12`, symmetric-orthogonalized coupling, and the
 two generalized eigenvalues.
 
-## Prepare
+## Default PBE/DZP resources
 
-1. Copy or symlink your no-NLCC UPF and orbital files to names used in
-   `template/STRU`, or edit those filenames.
-2. Run one ordinary calculation with the same 24-Angstrom cell and cutoff and
-   request a charge-density cube. Only its grid header is used below.
-3. Generate the five templates, exact-population uniform seed artifacts, and
-   an absolute-path workflow file:
+The defaults are pinned by commit and SHA-256 in `default_resources.json` and
+come from the official
+[ABACUS-orbitals repository](https://github.com/abacusmodeling/ABACUS-orbitals).
+They are downloaded into the ignored `resources/` directory, not committed to
+this repository. The standard cutoff radii selected by the official set are
+8 Bohr for H, C, and Cl and 7 Bohr for F.
 
 ```bash
-python3 prepare_example.py \
-  --abacus /absolute/path/to/abacus \
-  --pseudo-dir /absolute/path/to/pseudopotentials \
-  --orbital-dir /absolute/path/to/orbitals \
-  --grid-cube /absolute/path/to/grid_probe.cube
+python3 fetch_default_resources.py
 ```
+
+The downloader refuses to overwrite a file with a wrong checksum unless
+`--force` is explicitly supplied. An offline checkout of the official resource
+repository can be used with `--source-root /path/to/ABACUS-orbitals`.
+
+## Prepare
+
+Generate the five geometry templates, exact-population uniform seed artifacts,
+and an absolute-path workflow file:
+
+```bash
+python3 prepare_example.py --abacus /absolute/path/to/abacus
+```
+
+By default, the script verifies all eight downloaded resources and runs a
+one-iteration, 22-electron spin-unpolarized ABACUS probe with 12 bands and
+`out_chg 2 10`. The probe cube supplies the exact FFT grid used by the FDE seed
+artifacts. Its cube
+is removed after the header is read; the calculation log is retained as
+`grid_probe.log`.
+
+To reuse an existing cube made with the same `STRU`, 100 Ry cutoff, PP, and
+orbitals, add `--grid-cube /absolute/path/to/grid_probe.cube`. Custom resource
+directories may be supplied with `--pseudo-dir` and `--orbital-dir`; they must
+use the filenames in `template/STRU`. The explicit
+`--allow-unverified-resources` option skips only the pinned checksum check.
 
 Uniform seeds are intentionally state-local but physically uninformative; the
 active AO projection establishes localization during the first sweep. They are
