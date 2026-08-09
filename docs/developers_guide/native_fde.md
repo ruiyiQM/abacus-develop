@@ -123,6 +123,11 @@ fde_task          embedded_scf
 fde_config        FDE_CONFIG
 ```
 
+Set `gamma_only 0` and provide the ordinary ABACUS `KPT` mesh for a periodic
+embedded calculation.  The solver still uses `kpar 1`: all physical k points
+are handled by one AO communicator, while the AO matrices themselves may be
+MPI distributed.
+
 `fde_task` accepts `none`, `embedded_scf`, and `diabatic_postprocess`. The
 versioned, line-oriented `FDE_CONFIG` owns the fragment atom partition,
 neutral valence-electron counts, explicit state charge/spin assignments,
@@ -161,8 +166,12 @@ inside the active AO dimension. The projection is performed in the local
 `Parallel_Orbitals` row/column block and retains the original ScaLAPACK
 descriptor. `lapack` remains valid for a replicated serial matrix;
 `genelpa`, `elpa`, and `scalapack_gvx` are accepted for a distributed matrix.
-The native runtime remains restricted to `kpar 1`, real Gamma-point LCAO,
-`nspin 2`, and an orthogonal molecular cell.
+The native runtime remains restricted to `kpar 1`, LCAO, `nspin 2`, and an
+orthogonal cell.  Gamma-only jobs use the real projected Hamiltonian and share
+one overlap factorization between the alpha and beta spin entries.  General
+k-point jobs use the complex projected Hamiltonian and retain an independent
+`S(k)` buffer for every spin-k entry.  Both paths preserve ABACUS' distributed
+AO descriptor and accept `genelpa`, `elpa`, or `scalapack_gvx`.
 
 The first executable runtime also rejects pseudopotentials with a nonzero
 nonlinear core correction. The RP0 equations describe fragment-owned core
@@ -171,14 +180,30 @@ driver. Rejecting NLCC avoids evaluating PBE nonadditivity with the complete
 supersystem core density in both subsystem jobs. Use norm-conserving
 pseudopotentials without NLCC for the current molecular path.
 
-After a converged embedded SCF, the driver writes
-`<OUTPUT_PREFIX>.fde_density` and `<OUTPUT_PREFIX>.fde_fragment`. The latter
+After every converged embedded SCF, the driver writes
+`<OUTPUT_PREFIX>.fde_density` and `<OUTPUT_PREFIX>.fde_kbands`.  The band
+artifact records the state and fragment fingerprints, supersystem AO and
+solved-band dimensions, and for both spins the direct coordinates, normalized
+weight, and ordered KS eigenvalues of every physical k point.  It is the
+stable machine-readable interface for primitive/supercell band-folding tests.
+
+A converged Gamma-only job additionally writes
+`<OUTPUT_PREFIX>.fde_fragment`. The latter
 contains the subsystem `etot`, the shared ion-ion term, the three embedding
 energy corrections, occupied alpha/beta AO columns, the AO overlap, and the
 final unprojected spin Hamiltonians. Every matrix remains in the authoritative
 supersystem AO order. These versioned artifacts are sufficient to restart the
 outer loop and to construct a two-state determinant and a linearized
 transition-energy model without scraping human-readable ABACUS logs.
+
+The determinant and FODFT coupling artifact remains deliberately Gamma-only.
+A periodic coupling needs an explicit Born-von-Karman determinant convention
+and k-conserving transition-density contract; the k-resolved SCF path does not
+silently invent either.  Consequently `tools/fde/fde_workflow.py` continues
+to own the Gamma-only freeze-thaw/coupling workflow, while periodic embedded
+SCF jobs are launched directly and consume `.fde_density` plus `.fde_kbands`.
+`tools/fde/compare_band_folding.py` compares the sorted spectra of a primitive
+k mesh and a commensurate Gamma supercell separately for alpha and beta.
 
 New density checkpoints use the versioned `FDE_DENSITY_BINARY 1` container.
 Its fingerprints, populations, convergence status, and energy metadata remain
@@ -515,13 +540,14 @@ python3 tools/fde/euler/summarize_fde_mpi_scaling.py \
 - RP14: explicit `FDE-diab(K,L,M)` multi-state/multi-fragment assembly.
 - RP15: semilocal diagonal-state analytic FDE force correction and Gint bridge.
 
-RP10-RP15 extend the Gamma-point baseline to arbitrary fragment workflows,
+RP10-RP15 extend the original Gamma-point baseline to arbitrary fragment workflows,
 determinant artifacts, electronic coupling, nonorthogonal multi-state
 diagonalization, controlled multi-fragment FDE-diab approximations, and the
 semilocal analytic diagonal-state force ledger. The native embedded-SCF path
-supports MPI-distributed AO and PW layouts; periodic k-point sampling, hybrid
-functionals, spinors, and analytic off-diagonal coupling/overlap derivatives
-remain separate follow-up work.
+supports MPI-distributed AO and PW layouts and periodic complex k-point
+sampling with `kpar 1`; k-point-parallel pools, periodic determinant coupling,
+hybrid functionals, spinors, and analytic off-diagonal coupling/overlap
+derivatives remain separate follow-up work.
 
 ## Acceptance gates
 
@@ -535,6 +561,9 @@ remain separate follow-up work.
 - Charge-localization diagnostics do not swap labels near a crossing.
 - Each finite-difference displacement reconverges the complete freeze-thaw
   workflow before the derivative is formed.
+- For periodic LiH, the union of the primitive-cell Gamma/X embedded KS
+  eigenvalues matches the corresponding `2 x 1 x 1` supercell Gamma spectrum,
+  independently for alpha and beta, within the documented Rydberg tolerance.
 
 `MODULE_FDE_workflow_serial` exercises two states, both active-fragment
 updates, complete-sweep checkpointing, canonical energy assembly, automatic
@@ -545,8 +574,11 @@ exercise the distributed grid, local AO blocks, reductions, and canonical
 density gather on two or four ranks. `MODULE_FDE_electronic_coupling_2rank`
 independently evaluates the determinant overlap, transition densities, and
 symmetric coupling on two ranks and requires identical finite results. The
-Euler 1/4/80/160 test above is the executable production-level MPI acceptance
-gate.
+`MODULE_FDE_band_folding` test validates the artifact parser, spin-resolved
+folding cardinality, sorted-spectrum comparison, and failure threshold.  The
+Euler LiH primitive Gamma/X versus `2 x 1 x 1` Gamma-supercell calculation is
+the executable periodic acceptance gate; the Euler 1/4/80/160 test above
+remains the production-level Gamma/FODFT MPI acceptance gate.
 
 The quasi-diabatic-state construction follows the FDE-diab framework described
 in J. Chem. Phys. 148, 214104 (2018), DOI 10.1063/1.5023290. The first

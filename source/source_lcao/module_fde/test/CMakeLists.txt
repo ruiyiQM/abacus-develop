@@ -110,6 +110,15 @@ set_tests_properties(MODULE_FDE_workflow_serial PROPERTIES
   ENVIRONMENT "OMP_NUM_THREADS=1"
 )
 
+add_test(
+  NAME MODULE_FDE_band_folding
+  COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/fde/test_compare_band_folding.py -v
+)
+set_tests_properties(MODULE_FDE_band_folding PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1"
+)
+
 if(ENABLE_MPI)
   add_executable(MODULE_FDE_pw_pool_collectives_mpi
     fde_pw_pool_collectives_mpi_test.cpp
