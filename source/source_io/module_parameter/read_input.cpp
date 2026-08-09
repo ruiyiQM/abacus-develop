@@ -196,7 +196,10 @@ void ReadInput::read_parameters(Parameter& param, const std::string& filename_in
     // 2. check the number of atom types from STRU file
     // set the global directories
     this->set_global_dir(param.inp, param.sys); 
-    if (this->check_ntype_flag && this->rank == 0)
+    // Diabatic postprocessing consumes self-contained FDE artifacts and exits
+    // before UnitCell setup, so it must not require a dummy STRU file.
+    if (this->check_ntype_flag && this->rank == 0
+        && param.input.fde_task != "diabatic_postprocess")
     {
         check_ntype(param.globalv.global_in_stru, param.input.ntype);
     }
