@@ -71,6 +71,32 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     allow_partial_scf = controls.get("allow_partial_scf", False)
     if not isinstance(allow_partial_scf, bool):
         raise WorkflowError("allow_partial_scf must be a boolean")
+    integer_controls = {
+        "maximum_freeze_thaw_cycles": (20, 1),
+        "maximum_scf_iterations": (100, 1),
+        "inexact_freeze_thaw_cycles": (0, 0),
+        "inexact_scf_iterations": (50, 1),
+        "strict_confirmation_cycles": (2, 2),
+    }
+    validated_integers: Dict[str, int] = {}
+    for name, (default, minimum) in integer_controls.items():
+        value = controls.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise WorkflowError(f"{name} must be an integer not smaller than {minimum}")
+        validated_integers[name] = value
+    inexact_cycles = validated_integers["inexact_freeze_thaw_cycles"]
+    if inexact_cycles > 0 and not allow_partial_scf:
+        raise WorkflowError("inexact freeze-thaw cycles require allow_partial_scf=true")
+    required_cycles = inexact_cycles + validated_integers["strict_confirmation_cycles"]
+    if validated_integers["maximum_freeze_thaw_cycles"] < required_cycles:
+        raise WorkflowError(
+            "maximum_freeze_thaw_cycles cannot fit the inexact and strict-confirmation stages")
+    for name, default in (("scf_density_tolerance", 1e-8),
+                          ("inexact_scf_density_tolerance", 1e-3)):
+        value = controls.get(name, default)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(float(value)) or float(value) <= 0.0):
+            raise WorkflowError(f"{name} must be finite and positive")
     fragments = spec.get("fragments")
     states = spec.get("states")
     if not isinstance(fragments, list) or len(fragments) != 2:
@@ -303,12 +329,35 @@ def patch_input(path: Path, values: Mapping[str, object]) -> None:
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
+def scf_schedule(controls: Mapping[str, object], cycle: int) -> Dict[str, object]:
+    if cycle <= 0:
+        raise WorkflowError("freeze-thaw cycle must be positive")
+    inexact_cycles = int(controls.get("inexact_freeze_thaw_cycles", 0))
+    strict = cycle > inexact_cycles
+    if strict:
+        return {
+            "mode": "strict",
+            "strict": True,
+            "maximum_iterations": int(controls.get("maximum_scf_iterations", 100)),
+            "density_tolerance": float(controls.get("scf_density_tolerance", 1e-8)),
+        }
+    return {
+        "mode": "inexact",
+        "strict": False,
+        "maximum_iterations": int(controls.get("inexact_scf_iterations", 50)),
+        "density_tolerance": float(
+            controls.get("inexact_scf_density_tolerance", 1e-3)),
+    }
+
+
 def write_runtime_config(path: Path,
                          spec: Mapping[str, object],
                          state: Mapping[str, object],
                          active_label: str,
                          densities: Mapping[str, Path],
-                         output_prefix: str) -> None:
+                         output_prefix: str,
+                         maximum_scf_iterations: int,
+                         scf_density_tolerance: float) -> None:
     fragments = list(spec["fragments"])
     lines = ["FDE_CONFIG 1", f"ATOM_COUNT {sum(len(f['atom_indices']) for f in fragments)}"]
     for fragment in fragments:
@@ -336,8 +385,8 @@ def write_runtime_config(path: Path,
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
                   f"KEDF {controls.get('kedf', 'lc94')}",
                   f"DENSITY_FLOOR_BOHR3 {controls.get('density_floor_bohr3', 1e-12)}",
-                  f"MAX_SCF_ITERATIONS {controls.get('maximum_scf_iterations', 100)}",
-                  f"SCF_DENSITY_TOLERANCE {controls.get('scf_density_tolerance', 1e-8)}",
+                  f"MAX_SCF_ITERATIONS {maximum_scf_iterations}",
+                  f"SCF_DENSITY_TOLERANCE {scf_density_tolerance}",
                   f"ELECTRON_TOLERANCE {controls.get('electron_tolerance', 1e-8)}",
                   f"MIXING_BETA {controls.get('mixing_beta', 0.3)}",
                   f"MAX_FREEZE_THAW_CYCLES {controls.get('maximum_freeze_thaw_cycles', 20)}",
@@ -456,6 +505,7 @@ def run_state(spec: Mapping[str, object],
     retain_completed_cycles = int(controls.get("retain_completed_cycles", 0))
     remove_restarts = bool(controls.get("remove_abacus_restart_files", False))
     allow_partial_scf = bool(controls.get("allow_partial_scf", False))
+    required_strict_confirmations = int(controls.get("strict_confirmation_cycles", 2))
     state_directory = output_directory / str(state["label"])
     state_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = state_directory / "checkpoint.json"
@@ -466,6 +516,7 @@ def run_state(spec: Mapping[str, object],
     start_cycle = 1
     previous_complete_energy = None
     previous_cycle_complete = False
+    strict_confirmations = 0
     history: List[Dict[str, object]] = []
     if checkpoint_path.exists():
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -473,14 +524,17 @@ def run_state(spec: Mapping[str, object],
             return checkpoint
         densities = {label: Path(checkpoint["densities"][label]) for label in labels}
         start_cycle = int(checkpoint["cycle"]) + 1
-        previous_cycle_complete = bool(checkpoint.get("all_inner_scf_converged", False))
+        previous_cycle_complete = bool(checkpoint.get("strict_cycle_complete", False))
         if previous_cycle_complete:
             previous_complete_energy = checkpoint.get("energy_ry")
         history = list(checkpoint.get("history", []))
+        strict_confirmations = int(checkpoint.get("strict_confirmations", 0))
 
     neutral = {fragment["label"]: int(fragment["neutral_valence_electrons"])
                for fragment in fragments}
     for cycle in range(start_cycle, maximum_cycles + 1):
+        schedule = scf_schedule(controls, cycle)
+        strict_scf = bool(schedule["strict"])
         old_density_data = {label: read_density(path) for label, path in densities.items()}
         cycle_fragments: List[Mapping[str, object]] = []
         cycle_fragment_paths: Dict[str, Path] = {}
@@ -495,13 +549,22 @@ def run_state(spec: Mapping[str, object],
                 shutil.rmtree(job_directory)
             shutil.copytree(Path(geometry["template_directory"]), job_directory)
             config_path = job_directory / "FDE_CONFIG"
-            write_runtime_config(config_path, spec, state, active_label, densities, "result")
+            write_runtime_config(config_path,
+                                 spec,
+                                 state,
+                                 active_label,
+                                 densities,
+                                 "result",
+                                 int(schedule["maximum_iterations"]),
+                                 float(schedule["density_tolerance"]))
             patch_input(job_directory / "INPUT", {
                 "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
                 "nspin": 2, "noncolin": 0, "lspinorb": 0, "symmetry": 0,
                 "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
                 "nelec": alpha + beta, "nupdown": alpha - beta,
                 "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
+                "scf_nmax": int(schedule["maximum_iterations"]),
+                "scf_thr": float(schedule["density_tolerance"]),
             })
             log_path = job_directory / "fde_abacus.log"
             environment = dict(os.environ)
@@ -536,23 +599,34 @@ def run_state(spec: Mapping[str, object],
         residual = max(density_rms(old_density_data[label], read_density(densities[label]))
                        for label in labels)
         all_inner_converged = len(cycle_fragment_paths) == len(labels)
+        strict_cycle_complete = strict_scf and all_inner_converged
         energy = (canonical_two_fragment_energy(cycle_fragments, symmetry_tolerance)
-                  if all_inner_converged else None)
+                  if strict_cycle_complete else None)
         energy_change = (abs(float(energy) - float(previous_complete_energy))
                          if (energy is not None and previous_cycle_complete
                              and previous_complete_energy is not None) else None)
-        converged = (all_inner_converged and residual <= density_tolerance
+        strict_confirmations = (strict_confirmations + 1
+                                if strict_cycle_complete else 0)
+        converged = (strict_cycle_complete
+                     and strict_confirmations >= required_strict_confirmations
+                     and residual <= density_tolerance
                      and energy_change is not None
                      and energy_change <= energy_tolerance)
         history.append({"cycle": cycle, "density_rms": residual, "energy_ry": energy,
                         "energy_change_ry": energy_change,
+                        "scf_mode": schedule["mode"],
                         "all_inner_scf_converged": all_inner_converged,
+                        "strict_cycle_complete": strict_cycle_complete,
+                        "strict_confirmations": strict_confirmations,
                         "inner_scf": cycle_scf})
         checkpoint: Dict[str, object] = {
             "schema_version": 1, "geometry": geometry["label"], "state": state["label"],
             "cycle": cycle, "converged": converged, "density_rms": residual,
             "energy_ry": energy, "energy_change_ry": energy_change,
+            "scf_mode": schedule["mode"],
             "all_inner_scf_converged": all_inner_converged,
+            "strict_cycle_complete": strict_cycle_complete,
+            "strict_confirmations": strict_confirmations,
             "inner_scf": cycle_scf,
             "densities": {label: str(densities[label]) for label in labels},
             "fragments": {label: str(path) for label, path in cycle_fragment_paths.items()},
@@ -567,8 +641,8 @@ def run_state(spec: Mapping[str, object],
             checkpoint.update(composed)
             _atomic_json(checkpoint_path, checkpoint)
             return checkpoint
-        previous_cycle_complete = all_inner_converged
-        previous_complete_energy = energy if all_inner_converged else None
+        previous_cycle_complete = strict_cycle_complete
+        previous_complete_energy = energy if strict_cycle_complete else None
     raise WorkflowError(f"state {state['label']} did not converge in {maximum_cycles} cycles")
 
 

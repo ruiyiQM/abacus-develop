@@ -68,6 +68,34 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_builds_inexact_then_strict_scf_schedule(self):
+        controls = {
+            "inexact_freeze_thaw_cycles": 3,
+            "inexact_scf_iterations": 50,
+            "inexact_scf_density_tolerance": 1e-3,
+            "maximum_scf_iterations": 200,
+            "scf_density_tolerance": 1e-8,
+        }
+        early = fde_workflow.scf_schedule(controls, 3)
+        final = fde_workflow.scf_schedule(controls, 4)
+        self.assertEqual(early["mode"], "inexact")
+        self.assertEqual(early["maximum_iterations"], 50)
+        self.assertEqual(early["density_tolerance"], 1e-3)
+        self.assertEqual(final["mode"], "strict")
+        self.assertEqual(final["maximum_iterations"], 200)
+        self.assertEqual(final["density_tolerance"], 1e-8)
+
+    def test_rejects_schedule_without_room_for_strict_confirmation(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "allow_partial_scf": True,
+            "inexact_freeze_thaw_cycles": 3,
+            "maximum_freeze_thaw_cycles": 4,
+            "strict_confirmation_cycles": 2,
+        }
+        with self.assertRaises(fde_workflow.WorkflowError):
+            fde_workflow.validate_spec(spec)
+
     def test_canonical_energy_counts_shared_terms_once(self):
         artifacts = [
             {"scf_converged": True, "subsystem_total_energy_ry": -10.0,

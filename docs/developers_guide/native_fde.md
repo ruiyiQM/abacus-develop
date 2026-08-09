@@ -232,6 +232,15 @@ A sweep containing any partial update has no canonical energy, cannot satisfy
 the outer convergence test, and cannot enter determinant or diabatic-coupling
 postprocessing.
 
+The optional inexact schedule is explicit and deterministic. The first
+`inexact_freeze_thaw_cycles` sweeps use `inexact_scf_iterations` and
+`inexact_scf_density_tolerance`; later sweeps use
+`maximum_scf_iterations` and `scf_density_tolerance`. The workflow patches
+both the task `INPUT` and `FDE_CONFIG`, so the recorded controls match the
+actual embedded calculation. Final artifacts require at least two consecutive
+complete strict sweeps (`strict_confirmation_cycles`) plus the outer density
+and energy-change tolerances. Inexact-sweep energies are never assembled.
+
 For the current two-fragment runtime, the canonical state energy is recovered
 from the last complete sweep as
 

@@ -143,7 +143,13 @@ def prepare_case(root: Path, partial_first_cycle: bool = False):
                 "remove_abacus_restart_files": True,
                 "update_order": ["F", "CH3Cl"]}
     if partial_first_cycle:
-        controls["allow_partial_scf"] = True
+        controls.update({"allow_partial_scf": True,
+                         "inexact_freeze_thaw_cycles": 1,
+                         "inexact_scf_iterations": 50,
+                         "inexact_scf_density_tolerance": 1e-3,
+                         "maximum_scf_iterations": 200,
+                         "scf_density_tolerance": 1e-8,
+                         "strict_confirmation_cycles": 2})
     specification = {
         "schema_version": 1,
         "abacus_command": [sys.executable, str(fake_abacus)],
@@ -226,10 +232,20 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 first = checkpoint["history"][0]
                 self.assertFalse(first["all_inner_scf_converged"])
                 self.assertIsNone(first["energy_ry"])
+                self.assertEqual(first["scf_mode"], "inexact")
                 self.assertEqual(first["inner_scf"]["F"]["iterations"], 50)
                 cycle_two_config = (work / "g0" / state / "cycle-002" / "F"
                                     / "FDE_CONFIG").read_text(encoding="utf-8")
                 self.assertIn("partial.fde_density", cycle_two_config)
+                cycle_one_input = (work / "g0" / state / "cycle-001" / "F"
+                                   / "INPUT").read_text(encoding="utf-8")
+                cycle_two_input = (work / "g0" / state / "cycle-002" / "F"
+                                   / "INPUT").read_text(encoding="utf-8")
+                self.assertRegex(cycle_one_input, r"(?m)^scf_nmax\s+50$")
+                self.assertRegex(cycle_one_input, r"(?m)^scf_thr\s+0\.001$")
+                self.assertRegex(cycle_two_input, r"(?m)^scf_nmax\s+200$")
+                self.assertRegex(cycle_two_input, r"(?m)^scf_thr\s+1e-08$")
+                self.assertEqual(checkpoint["strict_confirmations"], 2)
                 self.assertFalse(list((work / "g0" / state / "cycle-001").glob(
                     "*/result.fde_fragment")))
             self.assertTrue((work / "g0" / "postprocess"
