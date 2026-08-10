@@ -114,7 +114,8 @@ for kedf in thomas_fermi pw91k revapbek; do
         (
             cd "${case_root}"
             /usr/bin/time -f 'WALL_SECONDS %e' \
-                "${SRUN_BIN}" --exclusive --ntasks=1 --cpus-per-task="${TEST_THREADS}" \
+                "${SRUN_BIN}" --export=ALL --exclusive --ntasks=1 \
+                    --cpus-per-task="${TEST_THREADS}" \
                     "${ABACUS_BIN}" > stdout.log 2> stderr.log
         )
         density_path="${case_root}/result.fde_density"
