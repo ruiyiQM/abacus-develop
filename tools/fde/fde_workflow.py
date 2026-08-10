@@ -65,18 +65,91 @@ def embedded_scf_spin_parameters(controls: Mapping[str, object],
     return {"nspin": 2, "nelec": alpha + beta, "nupdown": alpha - beta}
 
 
+MIXING_PARAMETER_NAMES = (
+    "mixing_type", "mixing_beta", "mixing_beta_mag", "mixing_ndim",
+    "mixing_restart", "mixing_dmr", "mixing_gg0", "mixing_gg0_mag",
+    "mixing_gg0_min",
+)
+
+
+def _mixing_settings(value: object, description: str) -> Dict[str, object]:
+    if not isinstance(value, dict):
+        raise WorkflowError(f"{description} must be a JSON object")
+    unknown = set(value) - set(MIXING_PARAMETER_NAMES)
+    if unknown:
+        raise WorkflowError(
+            f"{description} contains unsupported keys: {', '.join(sorted(unknown))}")
+    return {name: value[name] for name in MIXING_PARAMETER_NAMES if name in value}
+
+
+def _validate_mixing_settings(settings: Mapping[str, object], description: str) -> None:
+    if "mixing_type" in settings:
+        mixing_type = _token(settings["mixing_type"], f"mixing_type in {description}")
+        if mixing_type not in ("plain", "pulay", "broyden"):
+            raise WorkflowError(
+                f"mixing_type in {description} must be plain, pulay, or broyden")
+    positive = ("mixing_beta", "mixing_beta_mag")
+    nonnegative = ("mixing_restart", "mixing_gg0", "mixing_gg0_mag",
+                   "mixing_gg0_min")
+    for name in positive + nonnegative:
+        if name not in settings:
+            continue
+        value = settings[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise WorkflowError(f"{name} in {description} must be numeric")
+        minimum_ok = float(value) > 0.0 if name in positive else float(value) >= 0.0
+        if not math.isfinite(float(value)) or not minimum_ok:
+            qualifier = "positive" if name in positive else "nonnegative"
+            raise WorkflowError(f"{name} in {description} must be finite and {qualifier}")
+    if "mixing_ndim" in settings:
+        value = settings["mixing_ndim"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise WorkflowError(f"mixing_ndim in {description} must be a positive integer")
+    if "mixing_dmr" in settings and not isinstance(settings["mixing_dmr"], bool):
+        raise WorkflowError(f"mixing_dmr in {description} must be a boolean")
+
+
 def fragment_mixing_parameters(controls: Mapping[str, object],
-                               fragment_label: str) -> Dict[str, object]:
+                               fragment_label: str,
+                               stage: Mapping[str, object] | None = None,
+                               retry: int = 0) -> Dict[str, object]:
+    settings = {name: controls[name]
+                for name in MIXING_PARAMETER_NAMES if name in controls}
     fragment_mixing = controls.get("fragment_mixing", {})
     if not isinstance(fragment_mixing, dict):
         raise WorkflowError("fragment_mixing must be a JSON object")
-    settings = fragment_mixing.get(fragment_label, {})
-    if not isinstance(settings, dict):
-        raise WorkflowError(
-            f"fragment_mixing entry for {fragment_label} must be a JSON object")
-    return {name: settings[name]
-            for name in ("mixing_type", "mixing_beta", "mixing_beta_mag")
-            if name in settings}
+    fragment_settings = _mixing_settings(
+        fragment_mixing.get(fragment_label, {}),
+        f"fragment_mixing entry for {fragment_label}")
+    settings.update(fragment_settings)
+    if stage is not None:
+        settings.update(_mixing_settings(
+            stage.get("mixing", {}),
+            f"mixing for adaptive SCF stage {stage.get('name', '<unnamed>')}"))
+        stage_fragments = stage.get("fragment_mixing", {})
+        if not isinstance(stage_fragments, dict):
+            raise WorkflowError("adaptive SCF stage fragment_mixing must be a JSON object")
+        settings.update(_mixing_settings(
+            stage_fragments.get(fragment_label, {}),
+            f"adaptive SCF stage mixing for fragment {fragment_label}"))
+    if retry > 0:
+        recovery = controls.get("mixing_recovery", {})
+        fallbacks = recovery.get("fallbacks", []) if isinstance(recovery, dict) else []
+        if retry > len(fallbacks):
+            raise WorkflowError("mixing recovery retry exceeds the fallback list")
+        settings.update(_mixing_settings(
+            fallbacks[retry - 1], f"mixing recovery fallback {retry}"))
+    return settings
+
+
+def adaptive_scf_stages(controls: Mapping[str, object]) -> List[Dict[str, object]]:
+    adaptive = controls.get("adaptive_scf", {})
+    if not isinstance(adaptive, dict):
+        raise WorkflowError("adaptive_scf must be a JSON object")
+    stages = adaptive.get("stages", [])
+    if not isinstance(stages, list):
+        raise WorkflowError("adaptive_scf.stages must be a JSON array")
+    return [dict(stage) if isinstance(stage, dict) else stage for stage in stages]
 
 
 def validate_spec(spec: Mapping[str, object]) -> None:
@@ -122,10 +195,21 @@ def validate_spec(spec: Mapping[str, object]) -> None:
             raise WorkflowError(f"{name} must be an integer not smaller than {minimum}")
         validated_integers[name] = value
     inexact_cycles = validated_integers["inexact_freeze_thaw_cycles"]
-    if inexact_cycles > 0 and not allow_partial_scf:
-        raise WorkflowError("inexact freeze-thaw cycles require allow_partial_scf=true")
+    adaptive = controls.get("adaptive_scf", {})
+    if not isinstance(adaptive, dict):
+        raise WorkflowError("adaptive_scf must be a JSON object")
+    adaptive_enabled = adaptive.get("enabled", False)
+    if not isinstance(adaptive_enabled, bool):
+        raise WorkflowError("adaptive_scf.enabled must be a boolean")
+    if adaptive_enabled and inexact_cycles > 0:
+        raise WorkflowError(
+            "adaptive_scf cannot be combined with inexact_freeze_thaw_cycles")
+    if (inexact_cycles > 0 or adaptive_enabled) and not allow_partial_scf:
+        raise WorkflowError(
+            "inexact or adaptive freeze-thaw stages require allow_partial_scf=true")
     required_cycles = inexact_cycles + validated_integers["strict_confirmation_cycles"]
-    if validated_integers["maximum_freeze_thaw_cycles"] < required_cycles:
+    if (not adaptive_enabled
+            and validated_integers["maximum_freeze_thaw_cycles"] < required_cycles):
         raise WorkflowError(
             "maximum_freeze_thaw_cycles cannot fit the inexact and strict-confirmation stages")
     for name, default in (("scf_density_tolerance", 1e-8),
@@ -148,21 +232,93 @@ def validate_spec(spec: Mapping[str, object]) -> None:
         raise WorkflowError("fragment_mixing must be a JSON object")
     if not set(fragment_mixing).issubset(labels):
         raise WorkflowError("fragment_mixing contains an unknown fragment label")
+    _validate_mixing_settings(
+        {name: controls[name] for name in MIXING_PARAMETER_NAMES if name in controls},
+        "global controls")
     for label in fragment_mixing:
-        settings = fragment_mixing_parameters(controls, label)
-        mixing_type = _token(settings.get("mixing_type", "broyden"),
-                             f"mixing_type for fragment {label}")
-        if mixing_type not in ("plain", "pulay", "broyden"):
-            raise WorkflowError(
-                f"mixing_type for fragment {label} must be plain, pulay, or broyden")
-        for name in ("mixing_beta", "mixing_beta_mag"):
-            if name not in settings:
-                continue
-            value = settings[name]
-            if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(float(value)) or float(value) <= 0.0):
+        settings = _mixing_settings(
+            fragment_mixing[label], f"fragment_mixing entry for {label}")
+        _validate_mixing_settings(settings, f"fragment {label}")
+
+    recovery = controls.get("mixing_recovery", {})
+    if not isinstance(recovery, dict):
+        raise WorkflowError("mixing_recovery must be a JSON object")
+    unknown_recovery = set(recovery) - {"enabled", "fallbacks"}
+    if unknown_recovery:
+        raise WorkflowError("mixing_recovery contains unsupported keys")
+    recovery_enabled = recovery.get("enabled", False)
+    if not isinstance(recovery_enabled, bool):
+        raise WorkflowError("mixing_recovery.enabled must be a boolean")
+    fallbacks = recovery.get("fallbacks", [])
+    if not isinstance(fallbacks, list):
+        raise WorkflowError("mixing_recovery.fallbacks must be a JSON array")
+    if recovery_enabled and not fallbacks:
+        raise WorkflowError("enabled mixing_recovery requires at least one fallback")
+    for index, fallback in enumerate(fallbacks, 1):
+        settings = _mixing_settings(fallback, f"mixing recovery fallback {index}")
+        _validate_mixing_settings(settings, f"mixing recovery fallback {index}")
+
+    if adaptive_enabled:
+        unknown_adaptive = set(adaptive) - {"enabled", "force_strict_cycle", "stages"}
+        if unknown_adaptive:
+            raise WorkflowError("adaptive_scf contains unsupported keys")
+        stages = adaptive_scf_stages(controls)
+        if len(stages) < 2:
+            raise WorkflowError("adaptive_scf requires at least two stages")
+        previous_minimum = math.inf
+        previous_tolerance = math.inf
+        for index, stage in enumerate(stages):
+            if not isinstance(stage, dict):
+                raise WorkflowError("every adaptive SCF stage must be a JSON object")
+            unknown_stage = set(stage) - {
+                "name", "minimum_density_rms", "maximum_iterations",
+                "density_tolerance", "strict", "mixing", "fragment_mixing",
+            }
+            if unknown_stage:
+                raise WorkflowError("adaptive SCF stage contains unsupported keys")
+            _label(stage.get("name", ""), "adaptive SCF stage name")
+            minimum = stage.get("minimum_density_rms")
+            tolerance = stage.get("density_tolerance")
+            iterations = stage.get("maximum_iterations")
+            strict = stage.get("strict", False)
+            if (isinstance(minimum, bool) or not isinstance(minimum, (int, float))
+                    or not math.isfinite(float(minimum)) or float(minimum) < 0.0
+                    or float(minimum) >= previous_minimum):
                 raise WorkflowError(
-                    f"{name} for fragment {label} must be finite and positive")
+                    "adaptive SCF minimum_density_rms values must decrease")
+            if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
+                    or not math.isfinite(float(tolerance)) or float(tolerance) <= 0.0
+                    or float(tolerance) > previous_tolerance):
+                raise WorkflowError(
+                    "adaptive SCF density tolerances must be positive and nonincreasing")
+            if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+                raise WorkflowError(
+                    "adaptive SCF maximum_iterations must be a positive integer")
+            if not isinstance(strict, bool) or strict != (index == len(stages) - 1):
+                raise WorkflowError("only the final adaptive SCF stage must be strict")
+            stage_fragments = stage.get("fragment_mixing", {})
+            if not isinstance(stage_fragments, dict) or not set(stage_fragments).issubset(labels):
+                raise WorkflowError(
+                    "adaptive SCF fragment_mixing contains an unknown fragment label")
+            stage_settings = _mixing_settings(
+                stage.get("mixing", {}), f"adaptive SCF stage {stage['name']}")
+            _validate_mixing_settings(stage_settings, f"adaptive SCF stage {stage['name']}")
+            for label, value in stage_fragments.items():
+                fragment_settings = _mixing_settings(
+                    value, f"adaptive SCF stage {stage['name']} fragment {label}")
+                _validate_mixing_settings(
+                    fragment_settings, f"adaptive SCF stage {stage['name']} fragment {label}")
+            previous_minimum = float(minimum)
+            previous_tolerance = float(tolerance)
+        if float(stages[-1]["minimum_density_rms"]) != 0.0:
+            raise WorkflowError("the final adaptive SCF minimum_density_rms must be zero")
+        default_force = (validated_integers["maximum_freeze_thaw_cycles"]
+                         - validated_integers["strict_confirmation_cycles"] + 1)
+        force_strict = adaptive.get("force_strict_cycle", default_force)
+        if (isinstance(force_strict, bool) or not isinstance(force_strict, int)
+                or force_strict < 1 or force_strict > default_force):
+            raise WorkflowError(
+                "adaptive_scf.force_strict_cycle leaves too few strict confirmation cycles")
     atoms: List[int] = []
     for fragment in fragments:
         indices = fragment.get("atom_indices")
@@ -479,7 +635,9 @@ def canonical_two_fragment_energy(artifacts: Sequence[Mapping[str, object]],
 
 def patch_input(path: Path, values: Mapping[str, object]) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
-    remaining = {key.lower(): str(value) for key, value in values.items()}
+    remaining = {key.lower(): (str(value).lower() if isinstance(value, bool)
+                               else str(value))
+                 for key, value in values.items()}
     output: List[str] = []
     for line in lines:
         stripped = line.strip()
@@ -495,9 +653,36 @@ def patch_input(path: Path, values: Mapping[str, object]) -> None:
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
-def scf_schedule(controls: Mapping[str, object], cycle: int) -> Dict[str, object]:
+def scf_schedule(controls: Mapping[str, object],
+                 cycle: int,
+                 previous_density_rms: float | None = None) -> Dict[str, object]:
     if cycle <= 0:
         raise WorkflowError("freeze-thaw cycle must be positive")
+    adaptive = controls.get("adaptive_scf", {})
+    if isinstance(adaptive, dict) and adaptive.get("enabled", False):
+        stages = adaptive_scf_stages(controls)
+        maximum_cycles = int(controls.get("maximum_freeze_thaw_cycles", 20))
+        confirmations = int(controls.get("strict_confirmation_cycles", 2))
+        force_strict = int(adaptive.get(
+            "force_strict_cycle", maximum_cycles - confirmations + 1))
+        if cycle >= force_strict:
+            stage = stages[-1]
+        elif previous_density_rms is None:
+            stage = stages[0]
+        else:
+            stage = stages[-1]
+            for candidate in stages:
+                if previous_density_rms >= float(candidate["minimum_density_rms"]):
+                    stage = candidate
+                    break
+        return {
+            "mode": str(stage["name"]),
+            "strict": bool(stage["strict"]),
+            "maximum_iterations": int(stage["maximum_iterations"]),
+            "density_tolerance": float(stage["density_tolerance"]),
+            "stage": stage,
+            "previous_density_rms": previous_density_rms,
+        }
     inexact_cycles = int(controls.get("inexact_freeze_thaw_cycles", 0))
     strict = cycle > inexact_cycles
     if strict:
@@ -506,6 +691,8 @@ def scf_schedule(controls: Mapping[str, object], cycle: int) -> Dict[str, object
             "strict": True,
             "maximum_iterations": int(controls.get("maximum_scf_iterations", 100)),
             "density_tolerance": float(controls.get("scf_density_tolerance", 1e-8)),
+            "stage": None,
+            "previous_density_rms": previous_density_rms,
         }
     return {
         "mode": "inexact",
@@ -513,6 +700,8 @@ def scf_schedule(controls: Mapping[str, object], cycle: int) -> Dict[str, object
         "maximum_iterations": int(controls.get("inexact_scf_iterations", 50)),
         "density_tolerance": float(
             controls.get("inexact_scf_density_tolerance", 1e-3)),
+        "stage": None,
+        "previous_density_rms": previous_density_rms,
     }
 
 
@@ -827,11 +1016,12 @@ def run_state(spec: Mapping[str, object],
             previous_complete_energy = checkpoint.get("energy_ry")
         history = list(checkpoint.get("history", []))
         strict_confirmations = int(checkpoint.get("strict_confirmations", 0))
+    previous_density_rms = (float(history[-1]["density_rms"]) if history else None)
 
     neutral = {fragment["label"]: int(fragment["neutral_valence_electrons"])
                for fragment in fragments}
     for cycle in range(start_cycle, maximum_cycles + 1):
-        schedule = scf_schedule(controls, cycle)
+        schedule = scf_schedule(controls, cycle, previous_density_rms)
         strict_scf = bool(schedule["strict"])
         old_density_data = {label: read_density(path) for label, path in densities.items()}
         cycle_fragments: List[Mapping[str, object]] = []
@@ -844,77 +1034,116 @@ def run_state(spec: Mapping[str, object],
                 neutral[active_label],
                 int(assignment["charge"]),
                 int(assignment["spin"]))
-            job_directory = state_directory / f"cycle-{cycle:03d}" / active_label
-            if job_directory.exists():
-                shutil.rmtree(job_directory)
-            shutil.copytree(Path(geometry["template_directory"]), job_directory)
-            config_path = job_directory / "FDE_CONFIG"
-            write_runtime_config(config_path,
-                                 spec,
-                                 state,
-                                 active_label,
-                                 densities,
-                                 "result",
-                                 int(schedule["maximum_iterations"]),
-                                 float(schedule["density_tolerance"]))
-            input_parameters: Dict[str, object] = {
-                "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
-                "nspin": spin_parameters["nspin"],
-                "noncolin": 0, "lspinorb": 0, "symmetry": 0,
-                "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
-                "nelec": spin_parameters["nelec"],
-                "nupdown": spin_parameters["nupdown"],
-                "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
-                "scf_nmax": int(schedule["maximum_iterations"]),
-                "scf_thr": float(schedule["density_tolerance"]),
-            }
-            input_parameters.update(
-                fragment_mixing_parameters(controls, active_label))
-            patch_input(job_directory / "INPUT", input_parameters)
-            log_path = job_directory / "fde_abacus.log"
-            environment = dict(os.environ)
-            environment.setdefault("OMP_NUM_THREADS", "1")
-            launch_started = time.monotonic()
-            with log_path.open("w", encoding="utf-8") as log:
-                completed = subprocess.run(list(spec["abacus_command"]), cwd=job_directory,
-                                           env=environment, stdout=log,
-                                           stderr=subprocess.STDOUT, check=False)
-            wall_time_seconds = time.monotonic() - launch_started
-            launch_metrics: Dict[str, object] = {
-                "schema_version": 1,
-                "returncode": completed.returncode,
-                "wall_time_seconds": wall_time_seconds,
-                "maximum_iterations": int(schedule["maximum_iterations"]),
-                "density_tolerance": float(schedule["density_tolerance"]),
-                "mixing": fragment_mixing_parameters(controls, active_label),
-            }
-            launch_metrics.update(read_abacus_scf_metrics(job_directory))
-            _atomic_json(job_directory / "fde_performance.json", launch_metrics)
-            if completed.returncode != 0:
-                raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
-            density_path, density_data = select_scf_density(job_directory,
-                                                            allow_partial_scf)
-            inner_converged = bool(density_data["scf_converged"])
-            fragment_path = job_directory / "result.fde_fragment"
-            if inner_converged and not fragment_path.is_file():
-                raise WorkflowError(
-                    f"converged ABACUS job did not produce an FDE fragment in {job_directory}")
-            if not inner_converged and fragment_path.exists():
-                raise WorkflowError(
-                    f"partial ABACUS job produced a final FDE fragment in {job_directory}")
-            if remove_restarts:
-                remove_abacus_restart_files(job_directory)
-            densities[active_label] = density_path.resolve()
+            recovery = controls.get("mixing_recovery", {})
+            recovery_enabled = bool(
+                isinstance(recovery, dict) and recovery.get("enabled", False))
+            maximum_retries = (len(recovery.get("fallbacks", []))
+                               if recovery_enabled and isinstance(recovery, dict) else 0)
+            attempts: List[Dict[str, object]] = []
+            retry = 0
+            while True:
+                directory_name = (active_label if retry == 0
+                                  else f"{active_label}-retry-{retry:02d}")
+                job_directory = (state_directory / f"cycle-{cycle:03d}"
+                                 / directory_name)
+                if job_directory.exists():
+                    shutil.rmtree(job_directory)
+                shutil.copytree(Path(geometry["template_directory"]), job_directory)
+                config_path = job_directory / "FDE_CONFIG"
+                write_runtime_config(config_path,
+                                     spec,
+                                     state,
+                                     active_label,
+                                     densities,
+                                     "result",
+                                     int(schedule["maximum_iterations"]),
+                                     float(schedule["density_tolerance"]))
+                mixing = fragment_mixing_parameters(
+                    controls, active_label, schedule.get("stage"), retry)
+                input_parameters: Dict[str, object] = {
+                    "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
+                    "nspin": spin_parameters["nspin"],
+                    "noncolin": 0, "lspinorb": 0, "symmetry": 0,
+                    "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
+                    "nelec": spin_parameters["nelec"],
+                    "nupdown": spin_parameters["nupdown"],
+                    "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
+                    "scf_nmax": int(schedule["maximum_iterations"]),
+                    "scf_thr": float(schedule["density_tolerance"]),
+                }
+                input_parameters.update(mixing)
+                patch_input(job_directory / "INPUT", input_parameters)
+                log_path = job_directory / "fde_abacus.log"
+                environment = dict(os.environ)
+                environment.setdefault("OMP_NUM_THREADS", "1")
+                launch_started = time.monotonic()
+                with log_path.open("w", encoding="utf-8") as log:
+                    completed = subprocess.run(
+                        list(spec["abacus_command"]), cwd=job_directory,
+                        env=environment, stdout=log, stderr=subprocess.STDOUT,
+                        check=False)
+                wall_time_seconds = time.monotonic() - launch_started
+                launch_metrics: Dict[str, object] = {
+                    "schema_version": 1,
+                    "retry": retry,
+                    "returncode": completed.returncode,
+                    "wall_time_seconds": wall_time_seconds,
+                    "maximum_iterations": int(schedule["maximum_iterations"]),
+                    "density_tolerance": float(schedule["density_tolerance"]),
+                    "mixing": mixing,
+                }
+                launch_metrics.update(read_abacus_scf_metrics(job_directory))
+                _atomic_json(job_directory / "fde_performance.json", launch_metrics)
+                if completed.returncode != 0:
+                    raise WorkflowError(
+                        f"ABACUS failed in {job_directory}; see {log_path}")
+                density_path, density_data = select_scf_density(
+                    job_directory, allow_partial_scf)
+                inner_converged = bool(density_data["scf_converged"])
+                fragment_path = job_directory / "result.fde_fragment"
+                if inner_converged and not fragment_path.is_file():
+                    raise WorkflowError(
+                        "converged ABACUS job did not produce an FDE fragment "
+                        f"in {job_directory}")
+                if not inner_converged and fragment_path.exists():
+                    raise WorkflowError(
+                        "partial ABACUS job produced a final FDE fragment "
+                        f"in {job_directory}")
+                if remove_restarts:
+                    remove_abacus_restart_files(job_directory)
+                densities[active_label] = density_path.resolve()
+                attempt_metrics = dict(launch_metrics)
+                attempt_metrics.update({
+                    "converged": inner_converged,
+                    "density_artifact_iterations": density_data["scf_iterations"],
+                    "density_residual": density_data["scf_density_residual"],
+                    "job_directory": str(job_directory.resolve()),
+                })
+                attempts.append(attempt_metrics)
+                if (inner_converged or not strict_scf or retry >= maximum_retries):
+                    break
+                retry += 1
+
+            total_iterations = sum(
+                int(item.get("density_artifact_iterations", 0)
+                    or item.get("electronic_steps", 0)) for item in attempts)
             cycle_scf[active_label] = {
                 "converged": inner_converged,
-                "iterations": density_data["scf_iterations"],
+                "iterations": total_iterations,
                 "density_residual": density_data["scf_density_residual"],
-                "wall_time_seconds": wall_time_seconds,
+                "wall_time_seconds": math.fsum(
+                    float(item["wall_time_seconds"]) for item in attempts),
+                "electronic_steps": sum(
+                    int(item.get("electronic_steps", 0)) for item in attempts),
+                "electronic_step_time_seconds": math.fsum(
+                    float(item.get("electronic_step_time_seconds", 0.0))
+                    for item in attempts),
                 "maximum_iterations": int(schedule["maximum_iterations"]),
                 "density_tolerance": float(schedule["density_tolerance"]),
-                "mixing": fragment_mixing_parameters(controls, active_label),
+                "mixing": mixing,
+                "retry_count": retry,
+                "attempts": attempts,
             }
-            cycle_scf[active_label].update(read_abacus_scf_metrics(job_directory))
             if inner_converged:
                 cycle_fragment_paths[active_label] = fragment_path.resolve()
                 cycle_fragments.append(read_fragment(fragment_path))
@@ -937,6 +1166,12 @@ def run_state(spec: Mapping[str, object],
         history.append({"cycle": cycle, "density_rms": residual, "energy_ry": energy,
                         "energy_change_ry": energy_change,
                         "scf_mode": schedule["mode"],
+                        "scf_schedule": {
+                            "strict": strict_scf,
+                            "maximum_iterations": schedule["maximum_iterations"],
+                            "density_tolerance": schedule["density_tolerance"],
+                            "previous_density_rms": schedule["previous_density_rms"],
+                        },
                         "all_inner_scf_converged": all_inner_converged,
                         "strict_cycle_complete": strict_cycle_complete,
                         "strict_confirmations": strict_confirmations,
@@ -946,6 +1181,7 @@ def run_state(spec: Mapping[str, object],
             "cycle": cycle, "converged": converged, "density_rms": residual,
             "energy_ry": energy, "energy_change_ry": energy_change,
             "scf_mode": schedule["mode"],
+            "scf_schedule": history[-1]["scf_schedule"],
             "all_inner_scf_converged": all_inner_converged,
             "strict_cycle_complete": strict_cycle_complete,
             "strict_confirmations": strict_confirmations,
@@ -966,6 +1202,7 @@ def run_state(spec: Mapping[str, object],
             return checkpoint
         previous_cycle_complete = strict_cycle_complete
         previous_complete_energy = energy if strict_cycle_complete else None
+        previous_density_rms = residual
     raise WorkflowError(f"state {state['label']} did not converge in {maximum_cycles} cycles")
 
 

@@ -46,6 +46,82 @@ assembly, and the complete `cal_v_eff` call.  Compare both electronic-step
 counts and wall time when evaluating an SCF policy: reducing FT cycles while
 making every inner solve much tighter is not necessarily a speedup.
 
+## Adaptive inner SCF
+
+`adaptive_scf` selects an inner-SCF stage from the preceding FT density RMS.
+The first cycle uses the first (loosest) stage.  Thresholds must decrease, and
+only the final stage is marked `strict`.  `force_strict_cycle` guarantees enough
+remaining cycles for the requested strict confirmations even if the outer
+residual stalls.
+
+```json
+"adaptive_scf": {
+  "enabled": true,
+  "force_strict_cycle": 45,
+  "stages": [
+    {
+      "name": "loose",
+      "minimum_density_rms": 0.001,
+      "maximum_iterations": 25,
+      "density_tolerance": 0.0001,
+      "strict": false
+    },
+    {
+      "name": "medium",
+      "minimum_density_rms": 0.00001,
+      "maximum_iterations": 60,
+      "density_tolerance": 0.00001,
+      "strict": false
+    },
+    {
+      "name": "strict",
+      "minimum_density_rms": 0.0,
+      "maximum_iterations": 200,
+      "density_tolerance": 0.000003,
+      "strict": true
+    }
+  ]
+}
+```
+
+Set `allow_partial_scf: true` because non-strict stages are deliberately allowed
+to pass a valid partial density to the next subsystem.  Final convergence still
+requires `strict_confirmation_cycles` complete strict cycles, the FT density
+criterion, and the energy criterion.  The legacy fixed
+`inexact_freeze_thaw_cycles` schedule remains supported but cannot be combined
+with `adaptive_scf`.
+
+## Inner mixing and recovery
+
+The following ABACUS INPUT controls can be set globally, per fragment, per
+adaptive stage, or per fragment within a stage.  More specific settings win:
+
+```text
+mixing_type  mixing_beta  mixing_beta_mag  mixing_ndim  mixing_restart
+mixing_dmr   mixing_gg0   mixing_gg0_mag   mixing_gg0_min
+```
+
+An optional recovery list is used only when a strict inner SCF returns a valid
+partial density.  Each retry starts from that partial density in a new process,
+so stale Pulay/Broyden history is discarded:
+
+```json
+"mixing_recovery": {
+  "enabled": true,
+  "fallbacks": [
+    {"mixing_type": "pulay", "mixing_beta": 0.05,
+     "mixing_beta_mag": 0.05, "mixing_ndim": 8},
+    {"mixing_type": "plain", "mixing_beta": 0.03,
+     "mixing_beta_mag": 0.03}
+  ]
+}
+```
+
+The workflow does not retry a crashed ABACUS process and does not retry a
+deliberately partial loose/medium stage.  It also never carries an inner mixing
+history between different embedding potentials.  Retry directories use names
+such as `F-retry-01`, and all attempts are retained in performance metadata.
+
 ## Tests
 
 ```bash

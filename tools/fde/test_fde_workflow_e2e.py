@@ -71,7 +71,9 @@ if assignment is None:
 electrons = neutral[fragment] - assignment[0]
 alpha = (electrons + assignment[1]) // 2
 beta = (electrons - assignment[1]) // 2
-if (cwd / "PARTIAL_ON_FIRST_CYCLE").exists() and cycle == 1:
+partial_first_attempt = ((cwd / "PARTIAL_ON_FIRST_STRICT_ATTEMPT").exists()
+                         and "-retry-" not in cwd.name and cycle > 1)
+if ((cwd / "PARTIAL_ON_FIRST_CYCLE").exists() and cycle == 1) or partial_first_attempt:
     density = cwd / "result.partial.fde_density"
     density.write_text(
         "FDE_DENSITY_ARTIFACT 2\n"
@@ -133,7 +135,7 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
 
 
 def prepare_case(root: Path, partial_first_cycle: bool = False,
-                 rks: bool = False):
+                 rks: bool = False, adaptive: bool = False):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -141,6 +143,9 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
     (template / "INPUT").write_text("INPUT_PARAMETERS\n", encoding="utf-8")
     if partial_first_cycle:
         (template / "PARTIAL_ON_FIRST_CYCLE").write_text("1\n", encoding="utf-8")
+    if adaptive:
+        (template / "PARTIAL_ON_FIRST_STRICT_ATTEMPT").write_text(
+            "1\n", encoding="utf-8")
     seeds = root / "seeds"
     seeds.mkdir()
     state_definitions = [
@@ -184,6 +189,29 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
                          "maximum_scf_iterations": 200,
                          "scf_density_tolerance": 1e-8,
                          "strict_confirmation_cycles": 2})
+    if adaptive:
+        controls.update({
+            "allow_partial_scf": True,
+            "maximum_freeze_thaw_cycles": 4,
+            "strict_confirmation_cycles": 2,
+            "retain_completed_cycles": 3,
+            "adaptive_scf": {
+                "enabled": True,
+                "force_strict_cycle": 3,
+                "stages": [
+                    {"name": "loose", "minimum_density_rms": 1e-3,
+                     "maximum_iterations": 10, "density_tolerance": 1e-4,
+                     "strict": False, "mixing": {"mixing_type": "broyden"}},
+                    {"name": "strict", "minimum_density_rms": 0.0,
+                     "maximum_iterations": 20, "density_tolerance": 1e-8,
+                     "strict": True, "mixing": {"mixing_type": "pulay"}},
+                ],
+            },
+            "mixing_recovery": {
+                "enabled": True,
+                "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+            },
+        })
     specification = {
         "schema_version": 1,
         "abacus_command": [sys.executable, str(fake_abacus)],
@@ -226,7 +254,7 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
             performance = json.loads(
                 (work / "fde_performance.json").read_text(encoding="utf-8"))
             self.assertEqual(performance["total_subsystem_calls"], 8)
-            self.assertEqual(performance["total_scf_iterations"], 0)
+            self.assertEqual(performance["total_scf_iterations"], 16)
             self.assertAlmostEqual(
                 performance["total_electronic_step_time_seconds"], 0.4)
 
@@ -301,6 +329,26 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                     "*/result.fde_fragment")))
             self.assertTrue((work / "g0" / "postprocess"
                              / "fde_diabatic.fde_diabatic").is_file())
+
+    def test_adaptive_schedule_retries_strict_partial_scf_with_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, adaptive=True)
+            fde_workflow.run_workflow(spec_path)
+
+            for state in ("reactant", "product"):
+                state_directory = work / "g0" / state
+                checkpoint = json.loads(
+                    (state_directory / "checkpoint.json").read_text(encoding="utf-8"))
+                self.assertTrue(checkpoint["converged"])
+                self.assertEqual([item["scf_mode"] for item in checkpoint["history"]],
+                                 ["loose", "strict", "strict"])
+                self.assertEqual(
+                    checkpoint["history"][1]["inner_scf"]["F"]["retry_count"], 1)
+                retry_input = (state_directory / "cycle-002" / "F-retry-01"
+                               / "INPUT").read_text(encoding="utf-8")
+                self.assertRegex(retry_input, r"(?m)^mixing_type\s+plain$")
+                self.assertRegex(retry_input, r"(?m)^mixing_beta\s+0\.05$")
 
 
 if __name__ == "__main__":

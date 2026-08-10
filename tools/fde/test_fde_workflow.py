@@ -114,6 +114,83 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_merges_extended_stage_and_recovery_mixing_controls(self):
+        controls = {
+            "mixing_type": "broyden",
+            "mixing_ndim": 12,
+            "fragment_mixing": {"F": {"mixing_beta": 0.2}},
+            "mixing_recovery": {
+                "enabled": True,
+                "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+            },
+        }
+        stage = {
+            "name": "medium",
+            "mixing": {"mixing_gg0": 1.0},
+            "fragment_mixing": {"F": {"mixing_beta_mag": 0.1}},
+        }
+        self.assertEqual(
+            fde_workflow.fragment_mixing_parameters(controls, "F", stage, 1),
+            {"mixing_type": "plain", "mixing_beta": 0.05,
+             "mixing_beta_mag": 0.1, "mixing_ndim": 12,
+             "mixing_gg0": 1.0})
+
+    def test_selects_adaptive_scf_stage_from_previous_outer_residual(self):
+        controls = {
+            "maximum_freeze_thaw_cycles": 12,
+            "strict_confirmation_cycles": 2,
+            "adaptive_scf": {
+                "enabled": True,
+                "force_strict_cycle": 10,
+                "stages": [
+                    {"name": "loose", "minimum_density_rms": 1e-3,
+                     "maximum_iterations": 20, "density_tolerance": 1e-4,
+                     "strict": False},
+                    {"name": "medium", "minimum_density_rms": 1e-5,
+                     "maximum_iterations": 60, "density_tolerance": 1e-6,
+                     "strict": False},
+                    {"name": "strict", "minimum_density_rms": 0.0,
+                     "maximum_iterations": 200, "density_tolerance": 1e-8,
+                     "strict": True},
+                ],
+            },
+        }
+        self.assertEqual(fde_workflow.scf_schedule(controls, 1)["mode"], "loose")
+        self.assertEqual(
+            fde_workflow.scf_schedule(controls, 2, 2e-4)["mode"], "medium")
+        self.assertEqual(
+            fde_workflow.scf_schedule(controls, 3, 2e-7)["mode"], "strict")
+        self.assertEqual(
+            fde_workflow.scf_schedule(controls, 10, 1.0)["mode"], "strict")
+
+    def test_validates_adaptive_scf_and_recovery_policy(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "allow_partial_scf": True,
+            "maximum_freeze_thaw_cycles": 8,
+            "strict_confirmation_cycles": 2,
+            "adaptive_scf": {
+                "enabled": True,
+                "force_strict_cycle": 7,
+                "stages": [
+                    {"name": "loose", "minimum_density_rms": 1e-3,
+                     "maximum_iterations": 20, "density_tolerance": 1e-4,
+                     "strict": False, "mixing": {"mixing_ndim": 8}},
+                    {"name": "strict", "minimum_density_rms": 0.0,
+                     "maximum_iterations": 100, "density_tolerance": 1e-8,
+                     "strict": True},
+                ],
+            },
+            "mixing_recovery": {
+                "enabled": True,
+                "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+            },
+        }
+        fde_workflow.validate_spec(spec)
+        spec["controls"]["adaptive_scf"]["stages"][1]["minimum_density_rms"] = 1e-4
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "must be zero"):
+            fde_workflow.validate_spec(spec)
+
     def test_rejects_invalid_fragment_mixing_values(self):
         spec = self.spec()
         spec["controls"] = {

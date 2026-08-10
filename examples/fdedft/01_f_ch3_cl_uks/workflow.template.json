@@ -24,24 +24,69 @@
     "ks_solver": "genelpa",
     "kpar": 1,
     "allow_partial_scf": true,
-    "inexact_freeze_thaw_cycles": 3,
-    "inexact_scf_iterations": 50,
-    "inexact_scf_density_tolerance": 0.001,
     "maximum_scf_iterations": 200,
     "scf_density_tolerance": 3e-6,
     "electron_tolerance": 1e-8,
+    "mixing_type": "broyden",
     "mixing_beta": 0.1,
     "mixing_beta_mag": 0.1,
+    "mixing_ndim": 8,
+    "adaptive_scf": {
+      "enabled": true,
+      "force_strict_cycle": 45,
+      "stages": [
+        {
+          "name": "loose",
+          "minimum_density_rms": 0.001,
+          "maximum_iterations": 25,
+          "density_tolerance": 0.0001,
+          "strict": false
+        },
+        {
+          "name": "medium",
+          "minimum_density_rms": 0.00001,
+          "maximum_iterations": 60,
+          "density_tolerance": 0.00001,
+          "strict": false,
+          "mixing": {"mixing_ndim": 12}
+        },
+        {
+          "name": "strict",
+          "minimum_density_rms": 0.0,
+          "maximum_iterations": 200,
+          "density_tolerance": 3e-6,
+          "strict": true
+        }
+      ]
+    },
+    "mixing_recovery": {
+      "enabled": true,
+      "fallbacks": [
+        {
+          "mixing_type": "pulay",
+          "mixing_beta": 0.05,
+          "mixing_beta_mag": 0.05,
+          "mixing_ndim": 8
+        },
+        {
+          "mixing_type": "plain",
+          "mixing_beta": 0.03,
+          "mixing_beta_mag": 0.03
+        }
+      ]
+    },
     "fragment_mixing": {
       "F": {
         "mixing_type": "broyden",
         "mixing_beta": 0.1,
-        "mixing_beta_mag": 0.1
+        "mixing_beta_mag": 0.1,
+        "mixing_ndim": 8
       },
       "CH3Cl": {
         "mixing_type": "broyden",
         "mixing_beta": 0.1,
-        "mixing_beta_mag": 0.05
+        "mixing_beta_mag": 0.05,
+        "mixing_ndim": 12
       }
     },
     "maximum_freeze_thaw_cycles": 50,

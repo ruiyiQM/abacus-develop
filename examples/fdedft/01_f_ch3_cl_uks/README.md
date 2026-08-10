@@ -76,6 +76,15 @@ active-fragment job has an `fde_performance.json`.  These files separate ABACUS
 electronic-step time from process/setup overhead and record the exact SCF
 threshold and mixing controls used by each call.
 
+The example uses the residual-driven `adaptive_scf` policy.  Its loose and
+medium stages may pass population-valid partial densities forward instead of
+oversolving an obsolete embedding potential.  The final stage uses the stated
+`3e-6` inner threshold and still requires two complete strict FT cycles.  If a
+strict Broyden solve returns only a partial density, the example retries from
+that density with Pulay and finally guarded plain mixing.  See
+`tools/fde/README.md` for precedence, validation rules, and the complete JSON
+schema used by these controls.
+
 The reference calculation converged the reactant and product states in five
 and six freeze--thaw cycles, respectively.  Its orthogonalized coupling is
 `-0.0006178906742 Ry` (`-8.406830896 meV`).  Compact reference files are under
