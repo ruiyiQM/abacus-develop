@@ -124,6 +124,21 @@ TEST(FdeRuntimeConfig, AcceptsLegacyLc94NameAndWritesPw91k)
     EXPECT_NE(serialized.str().find("KEDF pw91k\n"), std::string::npos);
 }
 
+TEST(FdeRuntimeConfig, RoundTripsRevApbek)
+{
+    std::string text(fluoride_substitution_config());
+    text.replace(text.find("KEDF pw91k"),
+                 std::string("KEDF pw91k").size(),
+                 "KEDF revapbek");
+    std::istringstream input(text);
+    const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_EQ(config.kinetic_functional, fde::KineticFunctional::RevApbek);
+
+    std::ostringstream serialized;
+    fde::FdeRuntimeConfigIO::write(serialized, config);
+    EXPECT_NE(serialized.str().find("KEDF revapbek\n"), std::string::npos);
+}
+
 TEST(FdeRuntimeConfig, RejectsInvalidChargeSpinParity)
 {
     std::string text(fluoride_substitution_config());

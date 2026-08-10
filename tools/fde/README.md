@@ -63,6 +63,24 @@ registered by LibXC as `GGA_K_LC94` and commonly called PW91k in FDE work.
 The legacy input spelling `lc94` remains accepted, but newly generated
 workflow files and deterministic `FDE_CONFIG` output use `pw91k`.
 
+`revapbek` selects the revised APBE kinetic GGA.  Its enhancement factor uses
+the LibXC `GGA_K_REVAPBE` parameters `kappa = 1.245` and `mu = 0.23889`:
+
+```text
+F(s) = 1 + kappa * mu * s^2 / (kappa + mu * s^2)
+s    = |grad rho| / (2 * (3*pi^2)^(1/3) * rho^(4/3))
+```
+
+ABACUS evaluates the corresponding variational derivative, including the
+divergence term, on the same distributed PW grid used by PW91k.  All three
+choices use spin scaling independently for α and β densities.
+
+| `controls.kedf` | Gradient dependence | Intended use |
+|---|---:|---|
+| `thomas_fermi` | no | inexpensive local baseline |
+| `pw91k` | yes | established default for molecular FDE |
+| `revapbek` | yes | alternative bounded PBE-form enhancement |
+
 ## Adaptive inner SCF
 
 `adaptive_scf` selects an inner-SCF stage from the preceding FT density RMS.

@@ -54,6 +54,19 @@ python3 prepare_example.py --abacus /absolute/path/to/abacus --mpi-ranks 2
 python3 ../../../tools/fde/fde_workflow.py validate workflow.json
 ```
 
+To prepare independent comparisons of all three NAKE choices, reuse the same
+ABACUS executable and run:
+
+```bash
+python3 prepare_example.py --abacus /absolute/path/to/abacus --kedf thomas_fermi
+python3 prepare_example.py --abacus /absolute/path/to/abacus --kedf pw91k
+python3 prepare_example.py --abacus /absolute/path/to/abacus --kedf revapbek
+```
+
+The default PW91k case writes `workflow.json`, `generated/`, and `work/`.
+Thomas--Fermi and revAPBEk use suffixed workflow, generated, and work paths so
+their checkpoints and performance reports cannot overwrite one another.
+
 An offline checkout of ABACUS-orbitals can replace the download:
 
 ```bash

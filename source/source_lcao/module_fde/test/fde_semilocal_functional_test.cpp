@@ -194,6 +194,92 @@ TEST(FdeSemilocalFunctional, ThomasFermiPotentialIsTheEnergyDerivative)
                 2.0e-8);
 }
 
+TEST(FdeSemilocalFunctional, RevApbekReducesToThomasFermiForUniformDensity)
+{
+    const fde::SpinDensity active{{0.5, 0.5, 0.5, 0.5}, {0.25, 0.25, 0.25, 0.25}};
+    const fde::SpinDensity frozen{{0.2, 0.2, 0.2, 0.2}, {0.1, 0.1, 0.1, 0.1}};
+    const fde::NonadditiveFunctionalResult tf
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            line_grid(),
+            fde::KineticFunctional::ThomasFermi,
+            1.0e-12);
+    const fde::NonadditiveFunctionalResult revapbek
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            line_grid(),
+            fde::KineticFunctional::RevApbek,
+            1.0e-12);
+
+    EXPECT_NEAR(revapbek.energy_ry, tf.energy_ry, 1.0e-13);
+    EXPECT_NEAR(revapbek.active_potential.alpha_ry[0],
+                tf.active_potential.alpha_ry[0],
+                1.0e-13);
+}
+
+TEST(FdeSemilocalFunctional, RevApbekPotentialIsTheEnergyDerivative)
+{
+    fde::SpinDensity active = active_density();
+    const fde::SpinDensity frozen = frozen_density();
+    const double epsilon = 1.0e-6;
+    const std::size_t varied_index = 1;
+    const fde::NonadditiveFunctionalResult reference
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            line_grid(),
+            fde::KineticFunctional::RevApbek,
+            1.0e-12);
+    active.alpha_bohr3[varied_index] += epsilon;
+    const double energy_plus
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+              active,
+              frozen,
+              line_grid(),
+              fde::KineticFunctional::RevApbek,
+              1.0e-12)
+              .energy_ry;
+    active.alpha_bohr3[varied_index] -= 2.0 * epsilon;
+    const double energy_minus
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+              active,
+              frozen,
+              line_grid(),
+              fde::KineticFunctional::RevApbek,
+              1.0e-12)
+              .energy_ry;
+    const double finite_difference
+        = (energy_plus - energy_minus) / (2.0 * epsilon * 0.5);
+
+    EXPECT_NEAR(reference.active_potential.alpha_ry[varied_index],
+                finite_difference,
+                2.0e-6);
+}
+
+TEST(FdeSemilocalFunctional, RevApbekDiffersFromPw91kForNonuniformDensity)
+{
+    const fde::NonadditiveFunctionalResult pw91k
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active_density(),
+            frozen_density(),
+            line_grid(),
+            fde::KineticFunctional::Pw91k,
+            1.0e-12);
+    const fde::NonadditiveFunctionalResult revapbek
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active_density(),
+            frozen_density(),
+            line_grid(),
+            fde::KineticFunctional::RevApbek,
+            1.0e-12);
+
+    EXPECT_GT(std::fabs(revapbek.energy_ry - pw91k.energy_ry), 1.0e-8);
+    EXPECT_STREQ(fde::kinetic_functional_name(fde::KineticFunctional::RevApbek),
+                 "revapbek");
+}
+
 TEST(FdeSemilocalFunctional, ExchangeIsSymmetricAndRejectsNegativeDensity)
 {
     const fde::NonadditiveFunctionalResult first

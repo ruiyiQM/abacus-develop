@@ -79,18 +79,6 @@ bool contains(const std::vector<std::string>& values, const std::string& value)
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-const char* kinetic_functional_name(const KineticFunctional functional)
-{
-    switch (functional)
-    {
-        case KineticFunctional::ThomasFermi:
-            return "thomas_fermi";
-        case KineticFunctional::Pw91k:
-            return "pw91k";
-    }
-    throw std::invalid_argument("FDE_CONFIG contains an unknown KEDF");
-}
-
 void require_unique(const std::vector<std::string>& labels, const std::string& kind)
 {
     std::vector<std::string> sorted = labels;
@@ -426,11 +414,15 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             {
                 config.kinetic_functional = KineticFunctional::ThomasFermi;
             }
+            else if (value == "revapbek")
+            {
+                config.kinetic_functional = KineticFunctional::RevApbek;
+            }
             else
             {
                 throw parse_error(
                     line_number,
-                    "KEDF must be pw91k, lc94, thomas_fermi, or tf");
+                    "KEDF must be pw91k, lc94, thomas_fermi, tf, or revapbek");
             }
         }
         else if (key == "DENSITY_FLOOR_BOHR3")

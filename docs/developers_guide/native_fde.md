@@ -58,6 +58,13 @@ input alias; deterministic serialization always writes the canonical name.
 Its local enhancement factor is exactly one, so it does not invoke a grid
 gradient or divergence contribution to the kinetic potential.
 
+`KEDF revapbek` selects the revised APBE kinetic GGA defined by LibXC
+`GGA_K_REVAPBE` (functional 55). The native evaluator uses the same
+`kappa = 1.245` and `mu = 0.23889` parameters and evaluates the full
+variational derivative on the injected grid differential operator. Runtime
+density artifacts are relabeled with the selected canonical KEDF instead of
+copying the label from the cycle-zero seed.
+
 ### Exchange-correlation capability boundary
 
 Ordinary ABACUS support for an XC functional does not by itself make that
@@ -134,7 +141,7 @@ recomputable from persisted subsystem artifacts. No SCF iteration may mutate
 `PARAM`, `GlobalV`, or `GlobalC` to select a fragment or state.
 
 `PotFde` is a dynamic LCAO potential component. It accepts the frozen Hartree
-potential as explicit data, evaluates PW91k/TF nonadditive kinetic terms, and
+potential as explicit data, evaluates PW91k/TF/revAPBEk nonadditive kinetic terms, and
 obtains nonadditive XC from an injected provider. It never adds a nuclear
 potential. Its component energy is the cross Hartree plus nonadditive kinetic
 and XC correction used during the active SCF; this is diagnostic and is not a

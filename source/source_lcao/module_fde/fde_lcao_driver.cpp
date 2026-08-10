@@ -468,7 +468,7 @@ UniformGrid make_grid(const FrozenDensityArtifact& artifact,
         || std::fabs(bc) > 1.0e-10 * orthogonality_scale)
     {
         throw std::invalid_argument(
-            "FDE LC94/PBE grid adapter currently requires an orthogonal molecular cell");
+            "FDE semilocal KEDF/PBE grid adapter currently requires an orthogonal molecular cell");
     }
     UniformGrid grid;
     grid.x = artifact.grid_x;
@@ -1415,6 +1415,8 @@ void FdeLcaoDriver::write_scf_artifacts(
         density.scf_converged = status.converged;
         density.scf_iterations = status.iterations;
         density.scf_density_residual = status.density_residual;
+        density.kinetic_functional
+            = kinetic_functional_name(config_.kinetic_functional);
         density.rho_alpha_bohr3.swap(global_alpha);
         density.rho_beta_bohr3.swap(global_beta);
         std::ofstream density_output(density_path.c_str(), std::ios::binary);

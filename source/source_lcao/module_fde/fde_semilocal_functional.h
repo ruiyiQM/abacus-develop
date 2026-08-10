@@ -11,8 +11,11 @@ enum class KineticFunctional
 {
     ThomasFermi,
     Pw91k,
+    RevApbek,
     Lc94Pw91k = Pw91k
 };
+
+const char* kinetic_functional_name(KineticFunctional functional);
 
 struct UniformGrid
 {

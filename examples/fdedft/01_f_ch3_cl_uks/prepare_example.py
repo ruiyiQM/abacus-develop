@@ -144,13 +144,14 @@ def write_seed(path: Path,
                alpha: int,
                beta: int,
                grid: Tuple[int, int, int, float],
-               resource_commit: str) -> None:
+               resource_commit: str,
+               kedf: str) -> None:
     nx, ny, nz, volume = grid
     lines = ["FDE_UNIFORM_DENSITY_SEED 1", f"FRAGMENT {fragment}", f"STATE {state}",
              f"GEOMETRY {geometry}", f"GRID_FINGERPRINT grid-{nx}x{ny}x{nz}",
              f"PSEUDOPOTENTIALS sg15-v1.0-pbe-oncv-no-nlcc-{resource_commit}",
              f"ORBITALS standard-v2.0-dzp-100ry-{resource_commit}",
-             "CORE_DENSITY none", "FUNCTIONALS pbe pw91k",
+             "CORE_DENSITY none", f"FUNCTIONALS pbe {kedf}",
              f"GRID {nx} {ny} {nz} {volume:.17g}", f"POPULATIONS {alpha} {beta}",
              f"RHO_UNIFORM {alpha / volume:.17g} {beta / volume:.17g}", "END"]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -183,6 +184,10 @@ def main() -> int:
     parser.add_argument(
         "--allow-unverified-resources", action="store_true",
         help="allow custom files with the default names without SHA-256 verification")
+    parser.add_argument(
+        "--kedf", choices=("thomas_fermi", "pw91k", "revapbek"),
+        default="pw91k",
+        help="nonadditive kinetic functional (default: pw91k)")
     arguments = parser.parse_args()
 
     if arguments.mpi_ranks < 1:
@@ -231,9 +236,11 @@ def main() -> int:
     spec["abacus_command"] = ([launcher, "-np", str(arguments.mpi_ranks), str(abacus)]
                                if launcher else [str(abacus)])
     spec["postprocess_command"] = [str(abacus)]
-    spec["work_directory"] = str((root / "work").resolve())
+    spec["controls"]["kedf"] = arguments.kedf
+    variant_suffix = "" if arguments.kedf == "pw91k" else f"-{arguments.kedf}"
+    spec["work_directory"] = str((root / f"work{variant_suffix}").resolve())
     spec["geometries"] = []
-    generated = root / "generated"
+    generated = root / f"generated{variant_suffix}"
     generated.mkdir(exist_ok=True)
     stru_template = (root / "STRU").read_text(encoding="utf-8")
 
@@ -269,7 +276,8 @@ def main() -> int:
                                               assignment["charge"], assignment["spin"])
                     seed_path = seed_directory / f"{state_label}_{fragment_label}.fde_seed"
                     write_seed(seed_path, label, state_label, fragment_label,
-                               alpha, beta, grid, manifest["source_commit"])
+                               alpha, beta, grid, manifest["source_commit"],
+                               arguments.kedf)
                     initial[state_label][fragment_label] = str(seed_path.resolve())
             spec["geometries"].append({"label": label,
                                        "coordinate_angstrom": (float(row["c_cl_angstrom"])
@@ -277,10 +285,10 @@ def main() -> int:
                                        "template_directory": str(template_output.resolve()),
                                        "initial_densities": initial})
 
-    (root / "workflow.json").write_text(json.dumps(spec, indent=2) + "\n",
-                                         encoding="utf-8")
+    workflow_path = root / f"workflow{variant_suffix}.json"
+    workflow_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
     print(f"Prepared {len(spec['geometries'])} geometries with grid {grid[:3]}.")
-    print(f"Workflow: {root / 'workflow.json'}")
+    print(f"Workflow: {workflow_path}")
     return 0
 
 

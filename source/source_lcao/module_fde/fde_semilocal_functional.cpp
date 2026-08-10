@@ -210,6 +210,23 @@ void kinetic_enhancement(const KineticFunctional functional,
         return;
     }
 
+    if (functional == KineticFunctional::RevApbek)
+    {
+        const double kappa = 1.245;
+        const double mu = 0.23889;
+        const double s2 = reduced_gradient * reduced_gradient;
+        const double denominator = kappa + mu * s2;
+        enhancement = 1.0 + kappa * mu * s2 / denominator;
+        derivative = 2.0 * kappa * kappa * mu * reduced_gradient
+                     / (denominator * denominator);
+        return;
+    }
+
+    if (functional != KineticFunctional::Pw91k)
+    {
+        throw std::invalid_argument("FDE received an unknown kinetic functional");
+    }
+
     const double a = 0.093907;
     const double b = 76.320;
     const double c = 0.26608;
@@ -488,6 +505,20 @@ NonadditiveFunctionalResult evaluate_nonadditive_cached(
 }
 
 } // namespace
+
+const char* kinetic_functional_name(const KineticFunctional functional)
+{
+    switch (functional)
+    {
+        case KineticFunctional::ThomasFermi:
+            return "thomas_fermi";
+        case KineticFunctional::Pw91k:
+            return "pw91k";
+        case KineticFunctional::RevApbek:
+            return "revapbek";
+    }
+    throw std::invalid_argument("FDE received an unknown kinetic functional");
+}
 
 FrozenSemilocalCache SemilocalFunctional::prepare_frozen_kinetic(
     const SpinDensity& frozen,

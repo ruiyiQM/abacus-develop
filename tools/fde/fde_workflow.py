@@ -22,6 +22,21 @@ class WorkflowError(RuntimeError):
     pass
 
 
+def canonical_kedf_name(value: object) -> str:
+    name = _token(value, "kedf").lower()
+    aliases = {
+        "pw91k": "pw91k",
+        "lc94": "pw91k",
+        "thomas_fermi": "thomas_fermi",
+        "tf": "thomas_fermi",
+        "revapbek": "revapbek",
+    }
+    if name not in aliases:
+        raise WorkflowError(
+            "kedf must be pw91k, lc94, thomas_fermi, tf, or revapbek")
+    return aliases[name]
+
+
 def _token(value: object, description: str) -> str:
     text = str(value)
     if not text or any(character.isspace() for character in text):
@@ -162,9 +177,7 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     controls = spec.get("controls", {})
     if not isinstance(controls, dict):
         raise WorkflowError("controls must be a JSON object")
-    kedf = _token(controls.get("kedf", "pw91k"), "kedf").lower()
-    if kedf not in ("pw91k", "lc94", "thomas_fermi", "tf"):
-        raise WorkflowError("kedf must be pw91k, lc94, thomas_fermi, or tf")
+    canonical_kedf_name(controls.get("kedf", "pw91k"))
     solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
     if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
         raise WorkflowError(
@@ -1043,7 +1056,7 @@ def write_runtime_config(path: Path,
     controls = dict(spec.get("controls", {}))
     update_order = controls.get("update_order", [fragment["label"] for fragment in fragments])
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
-                  f"KEDF {controls.get('kedf', 'pw91k')}",
+                  f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
                   f"DENSITY_FLOOR_BOHR3 {controls.get('density_floor_bohr3', 1e-12)}",
                   f"MAX_SCF_ITERATIONS {maximum_scf_iterations}",
                   f"SCF_DENSITY_TOLERANCE {scf_density_tolerance}",
@@ -1624,7 +1637,8 @@ def write_postprocess_inputs(spec: Mapping[str, object],
     fragment_labels = [fragment["label"] for fragment in fragments]
     lines.extend((f"AO_OVERLAP {_absolute_token(overlap_path, 'AO overlap path')}",
                   "OUTPUT_PREFIX fde_diabatic",
-                  f"KEDF {controls.get('kedf', 'pw91k')}", "DENSITY_FLOOR_BOHR3 1e-12",
+                  f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
+                  "DENSITY_FLOOR_BOHR3 1e-12",
                   "MAX_SCF_ITERATIONS 100", "SCF_DENSITY_TOLERANCE 1e-8",
                   "ELECTRON_TOLERANCE 1e-8", "MIXING_BETA 0.3",
                   "MAX_FREEZE_THAW_CYCLES 20", "FREEZE_THAW_DENSITY_TOLERANCE 1e-7",

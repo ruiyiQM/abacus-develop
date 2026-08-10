@@ -52,6 +52,13 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(fde_workflow.WorkflowError, "kedf"):
             fde_workflow.validate_spec(spec)
 
+    def test_canonicalizes_revapbek_and_legacy_kedf_names(self):
+        self.assertEqual(fde_workflow.canonical_kedf_name("revAPBEk"),
+                         "revapbek")
+        self.assertEqual(fde_workflow.canonical_kedf_name("lc94"), "pw91k")
+        self.assertEqual(fde_workflow.canonical_kedf_name("tf"),
+                         "thomas_fermi")
+
     def test_rks_accepts_only_closed_shell_fragment_assignments(self):
         parameters = fde_workflow.embedded_scf_spin_parameters(
             {"spin_mode": "rks"}, 4, 0, 0)

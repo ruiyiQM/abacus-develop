@@ -25,13 +25,14 @@ class PrepareExampleTest(unittest.TestCase):
             self.assertAlmostEqual(grid[3], 12.0)
             seed = root / "seed.fde"
             prepare.write_seed(seed, "g0", "reactant", "F", 4, 4, grid,
-                               "0123456789abcdef")
+                               "0123456789abcdef", "revapbek")
             text = seed.read_text(encoding="utf-8")
             self.assertIn("FDE_UNIFORM_DENSITY_SEED 1", text)
             self.assertIn("POPULATIONS 4 4", text)
             self.assertIn("RHO_UNIFORM 0.33333333333333331", text)
             self.assertIn("sg15-v1.0-pbe-oncv-no-nlcc-0123456789abcdef", text)
             self.assertIn("standard-v2.0-dzp-100ry-0123456789abcdef", text)
+            self.assertIn("FUNCTIONALS pbe revapbek", text)
 
     def test_renders_reaction_coordinate_without_changing_atom_order(self):
         template = (MODULE_PATH.parent / "STRU").read_text(encoding="utf-8")
