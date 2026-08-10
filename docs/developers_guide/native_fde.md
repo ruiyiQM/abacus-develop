@@ -166,12 +166,22 @@ inside the active AO dimension. The projection is performed in the local
 `Parallel_Orbitals` row/column block and retains the original ScaLAPACK
 descriptor. `lapack` remains valid for a replicated serial matrix;
 `genelpa`, `elpa`, and `scalapack_gvx` are accepted for a distributed matrix.
-The native runtime remains restricted to `kpar 1`, LCAO, `nspin 2`, and an
-orthogonal cell.  Gamma-only jobs use the real projected Hamiltonian and share
-one overlap factorization between the alpha and beta spin entries.  General
-k-point jobs use the complex projected Hamiltonian and retain an independent
-`S(k)` buffer for every spin-k entry.  Both paths preserve ABACUS' distributed
-AO descriptor and accept `genelpa`, `elpa`, or `scalapack_gvx`.
+The native runtime remains restricted to `kpar 1`, LCAO, collinear `nspin 1`
+or `nspin 2`, and an orthogonal cell. Gamma-only jobs use the real projected
+Hamiltonian and, for UKS, share one overlap factorization between the alpha
+and beta spin entries. General k-point jobs use the complex projected
+Hamiltonian and retain an independent `S(k)` buffer for every spin-k entry.
+Both paths preserve ABACUS' distributed AO descriptor and accept `genelpa`,
+`elpa`, or `scalapack_gvx`.
+
+For a closed-shell RKS task, set `nspin 1`, `nupdown 0`, and an even `nelec`.
+The driver evaluates the spin-dependent embedding functional at
+`rho_alpha = rho_beta = rho_total / 2` and applies the derivative with respect
+to the total RKS density. Density, fragment, determinant, and Hamiltonian
+artifacts retain their existing alpha/beta schema: each RKS spatial occupied
+orbital and Hamiltonian is duplicated into the two determinant spin blocks.
+This makes the determinant overlap the expected square of the spatial-orbital
+overlap without changing the postprocessing format.
 
 The first executable runtime also rejects pseudopotentials with a nonzero
 nonlinear core correction. The RP0 equations describe fragment-owned core
@@ -183,8 +193,9 @@ pseudopotentials without NLCC for the current molecular path.
 After every converged embedded SCF, the driver writes
 `<OUTPUT_PREFIX>.fde_density` and `<OUTPUT_PREFIX>.fde_kbands`.  The band
 artifact records the state and fragment fingerprints, supersystem AO and
-solved-band dimensions, and for both spins the direct coordinates, normalized
-weight, and ordered KS eigenvalues of every physical k point.  It is the
+solved-band dimensions, and for every available spin channel the direct
+coordinates, normalized weight, and ordered KS eigenvalues of every physical
+k point. It is the
 stable machine-readable interface for primitive/supercell band-folding tests.
 
 A converged Gamma-only job additionally writes
@@ -270,6 +281,15 @@ one isolated working directory and `FDE_CONFIG` per active-fragment update,
 sets `OMP_NUM_THREADS=1` unless the caller already selected a value, and runs
 the command without a shell. It checkpoints only after a complete A/B sweep.
 Restart never shares a density between state labels.
+
+`controls.spin_mode` selects `"uks"` (the backward-compatible default) or
+`"rks"`. RKS validation requires every fragment assignment in every state to
+have spin zero and an even electron count. It rejects, for example, the
+one-electron-transfer product state `F(radical) + CH3Cl-` in the
+`[F-CH3-Cl]-` model: both fragments are odd-electron species and cannot be
+represented by pure closed-shell determinants. Such states must use UKS;
+the workflow never substitutes a fractional-occupation RKS ensemble for a
+determinant coupling.
 
 `controls.allow_partial_scf` is false by default. When explicitly enabled,
 the workflow may pass a schema-2 partial density to the next fragment update.

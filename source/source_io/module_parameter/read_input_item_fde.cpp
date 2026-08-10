@@ -22,13 +22,15 @@ void ReadInput::item_fde()
         item.availability = "LCAO collinear-spin PBE calculations";
         read_sync_string(input.fde_task);
         item.reset_value = [](const Input_Item&, Parameter& para) {
-            // An embedded subsystem carries a prescribed alpha/beta electron
-            // population.  In particular, nupdown == 0 means N_alpha == N_beta
-            // here, rather than the unconstrained single-Fermi-level behavior
-            // used by an ordinary spin-polarized calculation.
+            // A spin-polarized embedded subsystem carries a prescribed
+            // alpha/beta population.  In particular, nupdown == 0 means
+            // N_alpha == N_beta here, rather than the unconstrained
+            // single-Fermi-level behavior of an ordinary UKS calculation.
+            // Closed-shell RKS has one doubly occupied spatial-orbital channel
+            // and must retain the ordinary single Fermi level.
             if (para.input.fde_task == "embedded_scf")
             {
-                para.sys.two_fermi = true;
+                para.sys.two_fermi = para.input.nspin == 2;
             }
         };
         item.check_value = [](const Input_Item& item, const Parameter& para) {
@@ -50,13 +52,14 @@ void ReadInput::item_fde()
             if (task == "embedded_scf")
             {
                 if (para.input.calculation != "scf" || para.input.basis_type != "lcao"
-                    || para.input.nspin != 2 || para.input.noncolin
+                    || (para.input.nspin != 1 && para.input.nspin != 2)
+                    || para.input.noncolin
                     || para.input.lspinorb)
                 {
                     ModuleBase::WARNING_QUIT(
                         "ReadInput",
                         "fde_task embedded_scf requires calculation scf, basis_type lcao, "
-                        "nspin 2, noncolin 0, and lspinorb 0");
+                        "nspin 1 or 2, noncolin 0, and lspinorb 0");
                 }
                 if (para.input.dft_functional != "pbe")
                 {

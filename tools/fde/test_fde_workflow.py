@@ -36,6 +36,26 @@ class FdeWorkflowTest(unittest.TestCase):
         self.assertEqual(fde_workflow.spin_population(7, -1, 0), (4, 4))
         self.assertEqual(fde_workflow.spin_population(14, -1, -1), (7, 8))
 
+    def test_rks_accepts_only_closed_shell_fragment_assignments(self):
+        parameters = fde_workflow.embedded_scf_spin_parameters(
+            {"spin_mode": "rks"}, 4, 0, 0)
+        self.assertEqual(parameters, {"nspin": 1, "nelec": 4, "nupdown": 0})
+
+        spec = self.spec()
+        spec["controls"] = {"spin_mode": "rks"}
+        with self.assertRaisesRegex(
+                fde_workflow.WorkflowError, "odd-electron fragments"):
+            fde_workflow.validate_spec(spec)
+
+    def test_uks_remains_the_default_spin_mode(self):
+        self.assertEqual(
+            fde_workflow.embedded_scf_spin_parameters({}, 7, 0, 1),
+            {"nspin": 2, "nelec": 7, "nupdown": 1})
+        spec = self.spec()
+        spec["controls"] = {"spin_mode": "invalid"}
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "spin_mode"):
+            fde_workflow.validate_spec(spec)
+
     def test_rejects_cross_state_or_incomplete_assignments(self):
         spec = self.spec()
         del spec["states"][1]["fragments"]["F"]

@@ -368,17 +368,24 @@ const RuntimeStateDefinition& active_state(const FdeRuntimeConfig& config)
     return config.states[FdeRuntimeConfigIO::state_index(config, config.active_state)];
 }
 
-const FragmentChargeSpin& active_assignment(const FdeRuntimeConfig& config)
+const FragmentChargeSpin& state_assignment(const FdeRuntimeConfig& config,
+                                           const std::string& fragment_label)
 {
     const RuntimeStateDefinition& state = active_state(config);
     for (std::size_t index = 0; index < state.state.fragments.size(); ++index)
     {
-        if (state.state.fragments[index].fragment_label == config.active_fragment)
+        if (state.state.fragments[index].fragment_label == fragment_label)
         {
             return state.state.fragments[index];
         }
     }
-    throw std::invalid_argument("FDE active state does not assign the active fragment");
+    throw std::invalid_argument("FDE active state does not assign fragment "
+                                + fragment_label);
+}
+
+const FragmentChargeSpin& active_assignment(const FdeRuntimeConfig& config)
+{
+    return state_assignment(config, config.active_fragment);
 }
 
 std::vector<std::size_t> active_ao_indices(const FdeRuntimeConfig& config,
@@ -482,6 +489,7 @@ FdeLcaoDriver::FdeLcaoDriver(
     const std::string& ks_solver,
     const int kpar,
     const int nbands,
+    const int nspin,
     const double electron_count,
     const int active_alpha_electrons,
     const int active_beta_electrons,
@@ -493,6 +501,7 @@ FdeLcaoDriver::FdeLcaoDriver(
       ks_solver_(ks_solver),
       kpar_(kpar),
       nbands_(nbands),
+      nspin_(nspin),
       electron_count_(electron_count),
       active_alpha_electrons_(active_alpha_electrons),
       active_beta_electrons_(active_beta_electrons),
@@ -535,6 +544,29 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         = config.fragments[FdeRuntimeConfigIO::fragment_index(config, config.active_fragment)];
     const SpinPopulation population
         = StateDefinition::spin_population(fragment, active_assignment(config));
+    if (input.nspin != 1 && input.nspin != 2)
+    {
+        throw std::invalid_argument("FDE embedded_scf requires nspin 1 or 2");
+    }
+    if (input.nspin == 1)
+    {
+        const RuntimeStateDefinition& state = active_state(config);
+        for (std::size_t index = 0; index < state.state.fragments.size(); ++index)
+        {
+            const FragmentChargeSpin& assignment = state.state.fragments[index];
+            const FragmentDefinition& assigned_fragment
+                = config.fragments[FdeRuntimeConfigIO::fragment_index(
+                    config, assignment.fragment_label)];
+            const SpinPopulation assigned_population
+                = StateDefinition::spin_population(assigned_fragment, assignment);
+            if (assigned_population.alpha != assigned_population.beta)
+            {
+                throw std::invalid_argument(
+                    "FDE nspin 1 requires every fragment in the active state "
+                    "to have an even electron count and spin 0");
+            }
+        }
+    }
     const int expected_electrons = population.alpha + population.beta;
     const int expected_spin = population.alpha - population.beta;
     if (std::fabs(input.nelec - expected_electrons) > config.electron_tolerance
@@ -588,10 +620,21 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
             = read_density_file(path.path,
                                 config.electron_tolerance,
                                 orbitals);
+        const FragmentDefinition& environment_fragment
+            = config.fragments[FdeRuntimeConfigIO::fragment_index(config, path.label)];
+        const SpinPopulation environment_population
+            = StateDefinition::spin_population(environment_fragment,
+                                               state_assignment(config, path.label));
         if (artifact.fragment_label != path.label || artifact.state_label != config.active_state)
         {
             throw std::invalid_argument(
                 "FDE frozen-density metadata does not match FDE_CONFIG");
+        }
+        if (artifact.alpha_electrons != environment_population.alpha
+            || artifact.beta_electrons != environment_population.beta)
+        {
+            throw std::invalid_argument(
+                "FDE frozen-density populations do not match the active state assignment");
         }
         frozen_environment.push_back(artifact);
         seen_labels.push_back(path.label);
@@ -608,6 +651,7 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
                           input.ks_solver,
                           input.kpar,
                           input.nbands,
+                          input.nspin,
                           input.nelec,
                           population.alpha,
                           population.beta,
@@ -637,7 +681,7 @@ int FdeLcaoDriver::active_beta_electrons() const
 
 void FdeLcaoDriver::initialize_active_charge(Charge& charge) const
 {
-    if (charge.nspin != 2 || charge.rho == nullptr
+    if (charge.nspin != nspin_ || charge.rho == nullptr
         || charge.rhopw == nullptr
         || active_alpha_local_.size() != static_cast<std::size_t>(charge.rhopw->nrxx)
         || active_beta_local_.size() != active_alpha_local_.size())
@@ -645,12 +689,23 @@ void FdeLcaoDriver::initialize_active_charge(Charge& charge) const
         throw std::invalid_argument(
             "FDE active density has not been partitioned for the ABACUS Charge grid");
     }
-    std::copy(active_alpha_local_.begin(),
-              active_alpha_local_.end(),
-              charge.rho[0]);
-    std::copy(active_beta_local_.begin(),
-              active_beta_local_.end(),
-              charge.rho[1]);
+    if (nspin_ == 1)
+    {
+        for (std::size_t point = 0; point < active_alpha_local_.size(); ++point)
+        {
+            charge.rho[0][point]
+                = active_alpha_local_[point] + active_beta_local_[point];
+        }
+    }
+    else
+    {
+        std::copy(active_alpha_local_.begin(),
+                  active_alpha_local_.end(),
+                  charge.rho[0]);
+        std::copy(active_beta_local_.begin(),
+                  active_beta_local_.end(),
+                  charge.rho[1]);
+    }
 }
 
 void FdeLcaoDriver::validate_core_density(const Charge& charge) const
@@ -699,6 +754,16 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
         active_beta_local_
             = DensityGridPartition::scatter_from_root(active_initial_.rho_beta_bohr3,
                                                       density_basis);
+        if (nspin_ == 1)
+        {
+            for (std::size_t point = 0; point < active_alpha_local_.size(); ++point)
+            {
+                const double half_total
+                    = 0.5 * (active_alpha_local_[point] + active_beta_local_[point]);
+                active_alpha_local_[point] = half_total;
+                active_beta_local_[point] = half_total;
+            }
+        }
         release_density_arrays(active_initial_);
     }
     SpinDensity frozen;
@@ -724,6 +789,16 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
             {
                 frozen.alpha_bohr3[point] += alpha[point];
                 frozen.beta_bohr3[point] += beta[point];
+            }
+        }
+        if (nspin_ == 1)
+        {
+            for (std::size_t point = 0; point < frozen.alpha_bohr3.size(); ++point)
+            {
+                const double half_total
+                    = 0.5 * (frozen.alpha_bohr3[point] + frozen.beta_bohr3[point]);
+                frozen.alpha_bohr3[point] = half_total;
+                frozen.beta_bohr3[point] = half_total;
             }
         }
     }
@@ -823,9 +898,10 @@ void FdeLcaoDriver::solve_projected(
                  &electronic_state,
                  density_matrix,
                  charge,
-                 2,
+                 nspin_,
                  false);
-    if (density_basis_ == nullptr || charge.rhopw != density_basis_)
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_
+        || charge.nspin != nspin_)
     {
         throw std::runtime_error(
             "FDE spin-density normalization requires the attached PW grid");
@@ -837,14 +913,17 @@ void FdeLcaoDriver::solve_projected(
     // Rescaling small real-space quadrature errors competes with Broyden and
     // creates an SCF floor, while a wrong UKS branch differs by whole
     // electrons.  Final artifacts are still normalized exactly below.
-    normalize_spin_density(charge.rho[0],
-                           charge.rho[1],
-                           static_cast<std::size_t>(charge.nrxx),
-                           active_alpha_electrons_,
-                           active_beta_electrons_,
-                           active_initial_.cell_volume_bohr3,
-                           5.0e-2,
-                           *density_basis_);
+    if (nspin_ == 2)
+    {
+        normalize_spin_density(charge.rho[0],
+                               charge.rho[1],
+                               static_cast<std::size_t>(charge.nrxx),
+                               active_alpha_electrons_,
+                               active_beta_electrons_,
+                               active_initial_.cell_volume_bohr3,
+                               5.0e-2,
+                               *density_basis_);
+    }
 }
 
 void FdeLcaoDriver::solve_projected(
@@ -877,21 +956,25 @@ void FdeLcaoDriver::solve_projected(
                  &electronic_state,
                  density_matrix,
                  charge,
-                 2,
+                 nspin_,
                  false);
-    if (density_basis_ == nullptr || charge.rhopw != density_basis_)
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_
+        || charge.nspin != nspin_)
     {
         throw std::runtime_error(
             "FDE spin-density normalization requires the attached PW grid");
     }
-    normalize_spin_density(charge.rho[0],
-                           charge.rho[1],
-                           static_cast<std::size_t>(charge.nrxx),
-                           active_alpha_electrons_,
-                           active_beta_electrons_,
-                           active_initial_.cell_volume_bohr3,
-                           5.0e-2,
-                           *density_basis_);
+    if (nspin_ == 2)
+    {
+        normalize_spin_density(charge.rho[0],
+                               charge.rho[1],
+                               static_cast<std::size_t>(charge.nrxx),
+                               active_alpha_electrons_,
+                               active_beta_electrons_,
+                               active_initial_.cell_volume_bohr3,
+                               5.0e-2,
+                               *density_basis_);
+    }
 }
 
 namespace
@@ -1067,10 +1150,12 @@ FdeKPointBandArtifact make_kpoint_band_artifact(
     const std::string& state_label,
     const std::string& fragment_label,
     const std::size_t ao_dimension,
-    const int solved_band_count)
+    const int solved_band_count,
+    const int nspin)
 {
     const int spin_kpoint_count = kpoints.get_nks();
-    if (spin_kpoint_count <= 0 || solved_band_count <= 0
+    if ((nspin != 1 && nspin != 2) || spin_kpoint_count <= 0
+        || solved_band_count <= 0
         || static_cast<std::size_t>(solved_band_count) > ao_dimension
         || kpoints.isk.size() < static_cast<std::size_t>(spin_kpoint_count)
         || kpoints.wk.size() < static_cast<std::size_t>(spin_kpoint_count)
@@ -1109,6 +1194,38 @@ FdeKPointBandArtifact make_kpoint_band_artifact(
         }
         artifact.points.push_back(point);
     }
+    if (nspin == 1)
+    {
+        // The artifact schema is explicitly spin resolved.  Duplicate the
+        // RKS spatial spectrum so restricted calculations retain the same
+        // paired alpha/beta representation used by determinant artifacts.
+        // Some ABACUS paths include spin degeneracy in RKS k-point weights,
+        // while Gamma-only paths already expose a unit-normalized mesh. Use
+        // the runtime sum instead of assuming either convention.
+        const std::size_t spatial_point_count = artifact.points.size();
+        double spatial_weight_sum = 0.0;
+        for (std::size_t index = 0; index < spatial_point_count; ++index)
+        {
+            spatial_weight_sum += artifact.points[index].weight;
+        }
+        if (!std::isfinite(spatial_weight_sum) || spatial_weight_sum <= 0.0)
+        {
+            throw std::runtime_error(
+                "FDE restricted k-point output has invalid spatial weights");
+        }
+        for (std::size_t index = 0; index < spatial_point_count; ++index)
+        {
+            if (artifact.points[index].spin != 0)
+            {
+                throw std::runtime_error(
+                    "FDE restricted k-point output requires a spatial spin mesh");
+            }
+            artifact.points[index].weight /= spatial_weight_sum;
+            FdeKPointBand beta = artifact.points[index];
+            beta.spin = 1;
+            artifact.points.push_back(beta);
+        }
+    }
     return artifact;
 }
 
@@ -1142,7 +1259,7 @@ void FdeLcaoDriver::write_scf_artifacts(
     const FdeScfStatus& status)
 {
     if (embedding_potential_ == nullptr || density_basis_ == nullptr
-        || charge.nspin != 2
+        || charge.nspin != nspin_
         || charge.rhopw == nullptr || charge.rho == nullptr
         || charge.rho_save == nullptr
         || charge.rhopw != density_basis_
@@ -1170,19 +1287,32 @@ void FdeLcaoDriver::write_scf_artifacts(
     // rho_save is the density that generated the final converged Hamiltonian.
     // At nmax, charge.rho instead contains the newly mixed and renormalized
     // checkpoint that should seed the next inexact freeze--thaw update.
-    const double* const alpha_checkpoint
+    const double* const primary_checkpoint
         = status.converged ? charge.rho_save[0] : charge.rho[0];
-    const double* const beta_checkpoint
-        = status.converged ? charge.rho_save[1] : charge.rho[1];
     std::vector<double> local_alpha;
     std::vector<double> local_beta;
     EmbeddingPotentialResult embedding;
     {
         const ScopedFdeTimer timer("evaluate_checkpoint");
-        local_alpha.assign(alpha_checkpoint,
-                           alpha_checkpoint + local_grid_size);
-        local_beta.assign(beta_checkpoint,
-                          beta_checkpoint + local_grid_size);
+        if (nspin_ == 1)
+        {
+            local_alpha.resize(local_grid_size);
+            local_beta.resize(local_grid_size);
+            for (std::size_t point = 0; point < local_grid_size; ++point)
+            {
+                local_alpha[point] = 0.5 * primary_checkpoint[point];
+                local_beta[point] = local_alpha[point];
+            }
+        }
+        else
+        {
+            const double* const beta_checkpoint
+                = status.converged ? charge.rho_save[1] : charge.rho[1];
+            local_alpha.assign(primary_checkpoint,
+                               primary_checkpoint + local_grid_size);
+            local_beta.assign(beta_checkpoint,
+                              beta_checkpoint + local_grid_size);
+        }
         normalize_nonnegative_spin_density(local_alpha.data(),
                                            local_beta.data(),
                                            local_grid_size,
@@ -1223,11 +1353,12 @@ void FdeLcaoDriver::write_scf_artifacts(
             }
             spin_kpoint[spin] = kpoint;
         }
-        if (spin_kpoint[0] < 0 || spin_kpoint[1] < 0)
+        if (spin_kpoint[0] < 0 || (nspin_ == 2 && spin_kpoint[1] < 0)
+            || kpoints.get_nks() != nspin_)
         {
-            throw std::runtime_error("FDE output is missing a collinear spin channel");
+            throw std::runtime_error("FDE output has an incomplete Gamma spin layout");
         }
-        for (int spin = 0; spin < 2; ++spin)
+        for (int spin = 0; spin < nspin_; ++spin)
         {
             global_wavefunctions[spin]
                 = gather_wavefunctions_to_root(wavefunctions,
@@ -1237,7 +1368,7 @@ void FdeLcaoDriver::write_scf_artifacts(
                                                orbitals,
                                                rank);
         }
-        for (int spin = 0; spin < 2; ++spin)
+        for (int spin = 0; spin < nspin_; ++spin)
         {
             full_hamiltonian.updateHk(spin_kpoint[spin]);
             hamilt::MatrixBlock<double> local_hamiltonian;
@@ -1255,6 +1386,15 @@ void FdeLcaoDriver::write_scf_artifacts(
                                         full_ao_dimension_,
                                         orbitals,
                                         rank);
+        }
+        if (nspin_ == 1)
+        {
+            // Determinant artifacts remain explicitly spin resolved. A
+            // doubly occupied RKS spatial orbital therefore appears once in
+            // each spin block, as required for det(S_alpha) det(S_beta).
+            spin_kpoint[1] = spin_kpoint[0];
+            global_wavefunctions[1] = global_wavefunctions[0];
+            gathered_hamiltonian[1] = gathered_hamiltonian[0];
         }
     }
 
@@ -1304,7 +1444,11 @@ void FdeLcaoDriver::write_scf_artifacts(
                                         config_.active_state,
                                         config_.active_fragment,
                                         full_ao_dimension_,
-                                        global_band_count);
+                                        global_band_count,
+                                        nspin_);
+        FdeKPointBandArtifactIO::validate(
+            bands,
+            std::max(config_.symmetry_tolerance, 1.0e-12));
         const std::string band_path = config_.output_prefix + ".fde_kbands";
         std::ofstream band_output(band_path.c_str());
         if (!band_output)
@@ -1385,7 +1529,7 @@ void FdeLcaoDriver::write_scf_artifacts(
 {
     (void)full_hamiltonian;
     if (embedding_potential_ == nullptr || density_basis_ == nullptr
-        || charge.nspin != 2 || charge.rhopw == nullptr
+        || charge.nspin != nspin_ || charge.rhopw == nullptr
         || charge.rho == nullptr || charge.rho_save == nullptr
         || charge.rhopw != density_basis_
         || wavefunctions.get_nk() != kpoints.get_nks()
@@ -1409,18 +1553,31 @@ void FdeLcaoDriver::write_scf_artifacts(
 
     const std::size_t local_grid_size
         = static_cast<std::size_t>(density_basis_->nrxx);
-    const double* const alpha_checkpoint
+    const double* const primary_checkpoint
         = status.converged ? charge.rho_save[0] : charge.rho[0];
-    const double* const beta_checkpoint
-        = status.converged ? charge.rho_save[1] : charge.rho[1];
     std::vector<double> local_alpha;
     std::vector<double> local_beta;
     {
         const ScopedFdeTimer timer("evaluate_checkpoint");
-        local_alpha.assign(alpha_checkpoint,
-                           alpha_checkpoint + local_grid_size);
-        local_beta.assign(beta_checkpoint,
-                          beta_checkpoint + local_grid_size);
+        if (nspin_ == 1)
+        {
+            local_alpha.resize(local_grid_size);
+            local_beta.resize(local_grid_size);
+            for (std::size_t point = 0; point < local_grid_size; ++point)
+            {
+                local_alpha[point] = 0.5 * primary_checkpoint[point];
+                local_beta[point] = local_alpha[point];
+            }
+        }
+        else
+        {
+            const double* const beta_checkpoint
+                = status.converged ? charge.rho_save[1] : charge.rho[1];
+            local_alpha.assign(primary_checkpoint,
+                               primary_checkpoint + local_grid_size);
+            local_beta.assign(beta_checkpoint,
+                              beta_checkpoint + local_grid_size);
+        }
         normalize_nonnegative_spin_density(local_alpha.data(),
                                            local_beta.data(),
                                            local_grid_size,
@@ -1483,7 +1640,11 @@ void FdeLcaoDriver::write_scf_artifacts(
                                     config_.active_state,
                                     config_.active_fragment,
                                     full_ao_dimension_,
-                                    global_band_count);
+                                    global_band_count,
+                                    nspin_);
+    FdeKPointBandArtifactIO::validate(
+        bands,
+        std::max(config_.symmetry_tolerance, 1.0e-12));
     const std::string band_path = config_.output_prefix + ".fde_kbands";
     std::ofstream band_output(band_path.c_str());
     if (!band_output)

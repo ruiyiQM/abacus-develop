@@ -46,6 +46,24 @@ def spin_population(neutral_electrons: int, charge: int, spin: int) -> Tuple[int
     return (electrons + spin) // 2, (electrons - spin) // 2
 
 
+def embedded_scf_spin_parameters(controls: Mapping[str, object],
+                                 neutral_electrons: int,
+                                 charge: int,
+                                 spin: int) -> Dict[str, int]:
+    """Map a fragment assignment to ABACUS RKS/UKS input parameters."""
+    alpha, beta = spin_population(neutral_electrons, charge, spin)
+    spin_mode = _token(controls.get("spin_mode", "uks"), "spin_mode").lower()
+    if spin_mode not in ("rks", "uks"):
+        raise WorkflowError("spin_mode must be rks or uks")
+    if spin_mode == "rks":
+        if alpha != beta:
+            raise WorkflowError(
+                "RKS FDE requires every fragment to have an even electron count "
+                "and spin 0; use spin_mode=uks for odd-electron fragments")
+        return {"nspin": 1, "nelec": alpha + beta, "nupdown": 0}
+    return {"nspin": 2, "nelec": alpha + beta, "nupdown": alpha - beta}
+
+
 def fragment_mixing_parameters(controls: Mapping[str, object],
                                fragment_label: str) -> Dict[str, object]:
     fragment_mixing = controls.get("fragment_mixing", {})
@@ -73,6 +91,9 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
         raise WorkflowError(
             "ks_solver must be lapack, genelpa, elpa, or scalapack_gvx")
+    spin_mode = _token(controls.get("spin_mode", "uks"), "spin_mode").lower()
+    if spin_mode not in ("rks", "uks"):
+        raise WorkflowError("spin_mode must be rks or uks")
     if int(controls.get("kpar", 1)) != 1:
         raise WorkflowError("the Gamma-point FDE workflow currently requires kpar 1")
     retained_cycles = controls.get("retain_completed_cycles", 0)
@@ -165,7 +186,7 @@ def validate_spec(spec: Mapping[str, object]) -> None:
             assignment = assignments[label]
             charge = int(assignment["charge"])
             spin = int(assignment["spin"])
-            spin_population(neutral[label], charge, spin)
+            embedded_scf_spin_parameters(controls, neutral[label], charge, spin)
             charge_sum += charge
             spin_sum += spin
         if charge_sum != int(state["total_charge"]) or spin_sum != int(state["total_spin"]):
@@ -685,9 +706,11 @@ def run_state(spec: Mapping[str, object],
         cycle_scf: Dict[str, Dict[str, object]] = {}
         for active_label in update_order:
             assignment = state["fragments"][active_label]
-            alpha, beta = spin_population(neutral[active_label],
-                                          int(assignment["charge"]),
-                                          int(assignment["spin"]))
+            spin_parameters = embedded_scf_spin_parameters(
+                controls,
+                neutral[active_label],
+                int(assignment["charge"]),
+                int(assignment["spin"]))
             job_directory = state_directory / f"cycle-{cycle:03d}" / active_label
             if job_directory.exists():
                 shutil.rmtree(job_directory)
@@ -703,9 +726,11 @@ def run_state(spec: Mapping[str, object],
                                  float(schedule["density_tolerance"]))
             input_parameters: Dict[str, object] = {
                 "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
-                "nspin": 2, "noncolin": 0, "lspinorb": 0, "symmetry": 0,
+                "nspin": spin_parameters["nspin"],
+                "noncolin": 0, "lspinorb": 0, "symmetry": 0,
                 "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
-                "nelec": alpha + beta, "nupdown": alpha - beta,
+                "nelec": spin_parameters["nelec"],
+                "nupdown": spin_parameters["nupdown"],
                 "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
                 "scf_nmax": int(schedule["maximum_iterations"]),
                 "scf_thr": float(schedule["density_tolerance"]),

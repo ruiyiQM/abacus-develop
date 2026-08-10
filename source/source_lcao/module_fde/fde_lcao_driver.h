@@ -129,6 +129,7 @@ class FdeLcaoDriver
                   const std::string& ks_solver,
                   int kpar,
                   int nbands,
+                  int nspin,
                   double electron_count,
                   int active_alpha_electrons,
                   int active_beta_electrons,
@@ -141,6 +142,7 @@ class FdeLcaoDriver
     std::string ks_solver_;
     int kpar_;
     int nbands_;
+    int nspin_;
     double electron_count_;
     int active_alpha_electrons_;
     int active_beta_electrons_;

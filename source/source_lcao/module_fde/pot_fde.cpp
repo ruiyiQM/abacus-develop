@@ -87,12 +87,14 @@ void PotFde::cal_v_eff(const Charge* const charge,
                        ModuleBase::matrix& effective_potential)
 {
     (void)unit_cell;
-    if (charge == nullptr || charge->rho == nullptr || charge->nspin != 2
-        || effective_potential.nr != 2
+    if (charge == nullptr || charge->rho == nullptr
+        || (charge->nspin != 1 && charge->nspin != 2)
+        || effective_potential.nr != charge->nspin
         || static_cast<std::size_t>(effective_potential.nc)
                != frozen_hartree_potential_ry_.size())
     {
-        throw std::invalid_argument("FDE potential requires a matching collinear-spin Charge object");
+        throw std::invalid_argument(
+            "FDE potential requires a matching RKS or collinear UKS Charge object");
     }
     SpinDensity active;
     active.alpha_bohr3.resize(static_cast<std::size_t>(effective_potential.nc));
@@ -100,7 +102,7 @@ void PotFde::cal_v_eff(const Charge* const charge,
     for (int index = 0; index < effective_potential.nc; ++index)
     {
         if (!std::isfinite(charge->rho[0][index])
-            || !std::isfinite(charge->rho[1][index]))
+            || (charge->nspin == 2 && !std::isfinite(charge->rho[1][index])))
         {
             throw std::invalid_argument("FDE Charge density contains a non-finite value");
         }
@@ -108,17 +110,38 @@ void PotFde::cal_v_eff(const Charge* const charge,
 #pragma omp parallel for schedule(static)
     for (int index = 0; index < effective_potential.nc; ++index)
     {
-        active.alpha_bohr3[index]
-            = sanitize_charge_density(charge->rho[0][index]);
-        active.beta_bohr3[index]
-            = sanitize_charge_density(charge->rho[1][index]);
+        if (charge->nspin == 1)
+        {
+            const double half_total
+                = 0.5 * sanitize_charge_density(charge->rho[0][index]);
+            active.alpha_bohr3[index] = half_total;
+            active.beta_bohr3[index] = half_total;
+        }
+        else
+        {
+            active.alpha_bohr3[index]
+                = sanitize_charge_density(charge->rho[0][index]);
+            active.beta_bohr3[index]
+                = sanitize_charge_density(charge->rho[1][index]);
+        }
     }
     last_result_ = this->evaluate(active);
 #pragma omp parallel for schedule(static)
     for (int index = 0; index < effective_potential.nc; ++index)
     {
-        effective_potential(0, index) += last_result_.potential.alpha_ry[index];
-        effective_potential(1, index) += last_result_.potential.beta_ry[index];
+        if (charge->nspin == 1)
+        {
+            // Along the closed-shell constraint n_alpha = n_beta = n / 2,
+            // dE/dn is one half of the sum of the two spin derivatives.
+            effective_potential(0, index)
+                += 0.5 * (last_result_.potential.alpha_ry[index]
+                          + last_result_.potential.beta_ry[index]);
+        }
+        else
+        {
+            effective_potential(0, index) += last_result_.potential.alpha_ry[index];
+            effective_potential(1, index) += last_result_.potential.beta_ry[index];
+        }
     }
 }
 

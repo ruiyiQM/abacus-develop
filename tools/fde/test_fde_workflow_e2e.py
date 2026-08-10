@@ -48,11 +48,22 @@ cycle = int(cwd.parent.name.split("-")[1])
 output = cwd / "OUT.fake"
 output.mkdir()
 (output / "fake-CHARGE-DENSITY.restart").write_text("restart", encoding="utf-8")
-populations = {
-    ("reactant", "F"): (4, 4), ("reactant", "CH3Cl"): (7, 7),
-    ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
-}
-alpha, beta = populations[(state, fragment)]
+neutral = {}
+assignment = None
+for line in config.read_text(encoding="utf-8").splitlines():
+    fields = line.split()
+    if fields and fields[0] == "FRAGMENT":
+        neutral[fields[1]] = int(fields[2])
+    if fields and fields[0] == "STATE" and fields[1] == state:
+        for index in range(int(fields[4])):
+            offset = 5 + 3 * index
+            if fields[offset] == fragment:
+                assignment = (int(fields[offset + 1]), int(fields[offset + 2]))
+if assignment is None:
+    raise RuntimeError("missing active fragment state assignment")
+electrons = neutral[fragment] - assignment[0]
+alpha = (electrons + assignment[1]) // 2
+beta = (electrons - assignment[1]) // 2
 if (cwd / "PARTIAL_ON_FIRST_CYCLE").exists() and cycle == 1:
     density = cwd / "result.partial.fde_density"
     density.write_text(
@@ -114,7 +125,8 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
         encoding="utf-8")
 
 
-def prepare_case(root: Path, partial_first_cycle: bool = False):
+def prepare_case(root: Path, partial_first_cycle: bool = False,
+                 rks: bool = False):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -124,10 +136,23 @@ def prepare_case(root: Path, partial_first_cycle: bool = False):
         (template / "PARTIAL_ON_FIRST_CYCLE").write_text("1\n", encoding="utf-8")
     seeds = root / "seeds"
     seeds.mkdir()
-    populations = {
-        ("reactant", "F"): (4, 4), ("reactant", "CH3Cl"): (7, 7),
-        ("product", "F"): (4, 3), ("product", "CH3Cl"): (7, 8),
-    }
+    state_definitions = [
+        {"label": "reactant", "total_charge": -1, "total_spin": 0,
+         "fragments": {"F": {"charge": -1, "spin": 0},
+                       "CH3Cl": {"charge": 0, "spin": 0}}},
+        {"label": "product", "total_charge": -1, "total_spin": 0,
+         "fragments": ({"F": {"charge": 1, "spin": 0},
+                        "CH3Cl": {"charge": -2, "spin": 0}}
+                       if rks else
+                       {"F": {"charge": 0, "spin": 1},
+                        "CH3Cl": {"charge": -1, "spin": -1}})},
+    ]
+    neutral = {"F": 7, "CH3Cl": 14}
+    populations = {}
+    for state in state_definitions:
+        for fragment, assignment in state["fragments"].items():
+            populations[(state["label"], fragment)] = fde_workflow.spin_population(
+                neutral[fragment], assignment["charge"], assignment["spin"])
     initial = {"reactant": {}, "product": {}}
     for (state, fragment), (alpha, beta) in populations.items():
         seed = seeds / f"{state}_{fragment}.fde_seed"
@@ -142,6 +167,8 @@ def prepare_case(root: Path, partial_first_cycle: bool = False):
                 "retain_completed_cycles": 3 if partial_first_cycle else 1,
                 "remove_abacus_restart_files": True,
                 "update_order": ["F", "CH3Cl"]}
+    if rks:
+        controls["spin_mode"] = "rks"
     if partial_first_cycle:
         controls.update({"allow_partial_scf": True,
                          "inexact_freeze_thaw_cycles": 1,
@@ -162,14 +189,7 @@ def prepare_case(root: Path, partial_first_cycle: bool = False):
             {"label": "CH3Cl", "neutral_valence_electrons": 14,
              "atom_indices": [1, 2, 3, 4, 5]},
         ],
-        "states": [
-            {"label": "reactant", "total_charge": -1, "total_spin": 0,
-             "fragments": {"F": {"charge": -1, "spin": 0},
-                           "CH3Cl": {"charge": 0, "spin": 0}}},
-            {"label": "product", "total_charge": -1, "total_spin": 0,
-             "fragments": {"F": {"charge": 0, "spin": 1},
-                           "CH3Cl": {"charge": -1, "spin": -1}}},
-        ],
+        "states": state_definitions,
         "controls": controls,
         "geometries": [{"label": "g0", "coordinate_angstrom": 0.2,
                         "template_directory": str(template),
@@ -181,6 +201,22 @@ def prepare_case(root: Path, partial_first_cycle: bool = False):
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_closed_shell_rks_generates_single_spin_channel_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, rks=True)
+
+            fde_workflow.run_workflow(spec_path)
+
+            inputs = list(work.glob("g0/*/cycle-*/*/INPUT"))
+            self.assertTrue(inputs)
+            for input_path in inputs:
+                text = input_path.read_text(encoding="utf-8")
+                self.assertRegex(text, r"(?m)^nspin\s+1$")
+                self.assertRegex(text, r"(?m)^nupdown\s+0$")
+            pes = json.loads((work / "fde_pes.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(pes["points"][0]["pairs"]), 1)
+
     def test_two_states_freeze_thaw_postprocess_and_pes_table(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -214,7 +250,9 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
             self.assertFalse(list(work.glob("**/*-CHARGE-DENSITY.restart")))
             logs = list(work.glob("g0/*/cycle-*/*/fde_abacus.log"))
             logs.append(work / "g0" / "postprocess" / "fde_postprocess.log")
-            self.assertTrue(all("OMP_NUM_THREADS=1" in path.read_text(encoding="utf-8")
+            expected_threads = os.environ.get("OMP_NUM_THREADS", "1")
+            self.assertTrue(all(f"OMP_NUM_THREADS={expected_threads}"
+                                in path.read_text(encoding="utf-8")
                                 for path in logs))
 
     def test_partial_density_is_passed_without_partial_postprocessing(self):
