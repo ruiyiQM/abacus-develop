@@ -490,6 +490,7 @@ FdeLcaoDriver::FdeLcaoDriver(
     const int kpar,
     const int nbands,
     const int nspin,
+    const bool use_gpu,
     const double electron_count,
     const int active_alpha_electrons,
     const int active_beta_electrons,
@@ -502,6 +503,7 @@ FdeLcaoDriver::FdeLcaoDriver(
       kpar_(kpar),
       nbands_(nbands),
       nspin_(nspin),
+      use_gpu_(use_gpu),
       electron_count_(electron_count),
       active_alpha_electrons_(active_alpha_electrons),
       active_beta_electrons_(active_beta_electrons),
@@ -580,7 +582,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
           || orbitals.get_col_size() != orbitals.get_global_col_size();
     FdeSolverPolicy::validate(input.ks_solver,
                               distributed_ao_matrices,
-                              input.kpar);
+                              input.kpar,
+                              input.device == "gpu");
     if (input.nbands < std::max(population.alpha, population.beta)
         || static_cast<std::size_t>(input.nbands) > active_orbitals.size())
     {
@@ -652,6 +655,7 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
                           input.kpar,
                           input.nbands,
                           input.nspin,
+                          input.device == "gpu",
                           input.nelec,
                           population.alpha,
                           population.beta,
@@ -828,7 +832,8 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
                                                     frozen,
                                                     hartree,
                                                     potential_config,
-                                                    xc_provider));
+                                                    xc_provider,
+                                                    use_gpu_));
         embedding_potential_ = component.get();
         potential.append_component(
             std::unique_ptr<elecstate::PotBase>(component.release()));
@@ -892,7 +897,7 @@ void FdeLcaoDriver::solve_projected(
                                        static_cast<int>(full_ao_dimension_),
                                        nbands_,
                                        electron_count_,
-                                       false);
+                                       use_gpu_);
     solver.solve(projected.get(),
                  wavefunctions,
                  &electronic_state,
@@ -950,7 +955,7 @@ void FdeLcaoDriver::solve_projected(
         static_cast<int>(full_ao_dimension_),
         nbands_,
         electron_count_,
-        false);
+        use_gpu_);
     solver.solve(projected.get(),
                  wavefunctions,
                  &electronic_state,

@@ -60,6 +60,8 @@ class GridDifferentialOperator
     virtual ~GridDifferentialOperator() {}
 
     virtual std::size_t local_size() const = 0;
+    /** True when pointwise semilocal work should use the CUDA backend. */
+    virtual bool uses_gpu() const { return false; }
     virtual void gradient(const std::vector<double>& values,
                           std::vector<double>& gradient_x,
                           std::vector<double>& gradient_y,

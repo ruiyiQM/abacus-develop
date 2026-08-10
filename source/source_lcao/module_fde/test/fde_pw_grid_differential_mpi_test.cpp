@@ -39,7 +39,7 @@ TEST(FdePwGridDifferentialMpi, DifferentiatesPeriodicModesAcrossZSlabs)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     ModulePW::PW_Basis basis("cpu", "double");
     initialize_basis(basis, process_count, rank);
-    const fde::PwGridDifferential differential(basis);
+    const fde::PwGridDifferential differential(basis, false);
 
     std::vector<double> scalar(static_cast<std::size_t>(basis.nrxx), 0.0);
     std::vector<double> vector_x(static_cast<std::size_t>(basis.nrxx), 0.0);

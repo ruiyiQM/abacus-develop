@@ -1,5 +1,9 @@
 #include "fde_semilocal_functional.h"
 
+#ifdef __CUDA
+#include "fde_gpu_kernels.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -270,6 +274,58 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
         active[index] = density[index] > density_floor ? 1 : 0;
     }
 
+    const double c_tf = 0.3 * std::pow(3.0 * pi * pi, 2.0 / 3.0);
+    const double reduced_gradient_scale = 1.0 / (2.0 * std::pow(3.0 * pi * pi, 1.0 / 3.0));
+    const double reference_energy_density = c_tf * std::pow(density_floor, 5.0 / 3.0);
+    const double volume_element
+        = grid.spacing_x_bohr * grid.spacing_y_bohr * grid.spacing_z_bohr;
+    ScalarFunctionalResult result;
+    result.energy_hartree = 0.0;
+    result.potential_hartree.assign(size, 0.0);
+    if (functional == KineticFunctional::ThomasFermi)
+    {
+#ifdef __CUDA
+        if (differential_operator != nullptr
+            && differential_operator->uses_gpu())
+        {
+            const std::vector<double> no_gradient;
+            std::vector<double> no_flux_x;
+            std::vector<double> no_flux_y;
+            std::vector<double> no_flux_z;
+            gpu_kinetic_local_terms(regularized,
+                                    active,
+                                    no_gradient,
+                                    no_gradient,
+                                    no_gradient,
+                                    functional,
+                                    density_floor,
+                                    volume_element,
+                                    result.potential_hartree,
+                                    no_flux_x,
+                                    no_flux_y,
+                                    no_flux_z,
+                                    result.energy_hartree);
+            return result;
+        }
+#endif
+        double energy_hartree = 0.0;
+#pragma omp parallel for reduction(+:energy_hartree) schedule(static)
+        for (std::size_t index = 0; index < size; ++index)
+        {
+            const double rho = regularized[index];
+            energy_hartree
+                += (c_tf * std::pow(rho, 5.0 / 3.0) - reference_energy_density)
+                   * volume_element;
+            if (active[index])
+            {
+                result.potential_hartree[index]
+                    = (5.0 / 3.0) * c_tf * std::pow(rho, 2.0 / 3.0);
+            }
+        }
+        result.energy_hartree = energy_hartree;
+        return result;
+    }
+
     std::vector<double> gradient_x;
     std::vector<double> gradient_y;
     std::vector<double> gradient_z;
@@ -279,50 +335,65 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
                    gradient_x,
                    gradient_y,
                    gradient_z);
-
-    const double c_tf = 0.3 * std::pow(3.0 * pi * pi, 2.0 / 3.0);
-    const double reduced_gradient_scale = 1.0 / (2.0 * std::pow(3.0 * pi * pi, 1.0 / 3.0));
-    const double reference_energy_density = c_tf * std::pow(density_floor, 5.0 / 3.0);
-    const double volume_element
-        = grid.spacing_x_bohr * grid.spacing_y_bohr * grid.spacing_z_bohr;
-    ScalarFunctionalResult result;
-    result.energy_hartree = 0.0;
-    result.potential_hartree.assign(size, 0.0);
     std::vector<double> flux_x(size, 0.0);
     std::vector<double> flux_y(size, 0.0);
     std::vector<double> flux_z(size, 0.0);
 
     double energy_hartree = 0.0;
-#pragma omp parallel for reduction(+:energy_hartree) schedule(static)
-    for (std::size_t index = 0; index < size; ++index)
+#ifdef __CUDA
+    const bool evaluate_on_gpu = differential_operator != nullptr
+                                 && differential_operator->uses_gpu();
+    if (evaluate_on_gpu)
     {
-        const double rho = regularized[index];
-        const double gradient_norm = std::sqrt(gradient_x[index] * gradient_x[index]
-                                               + gradient_y[index] * gradient_y[index]
-                                               + gradient_z[index] * gradient_z[index]);
-        const double reduced_gradient
-            = reduced_gradient_scale * gradient_norm / std::pow(rho, 4.0 / 3.0);
-        double enhancement = 0.0;
-        double enhancement_derivative = 0.0;
-        kinetic_enhancement(functional,
-                            reduced_gradient,
-                            enhancement,
-                            enhancement_derivative);
-        energy_hartree
-            += (c_tf * std::pow(rho, 5.0 / 3.0) * enhancement - reference_energy_density)
-               * volume_element;
-        result.potential_hartree[index]
-            = c_tf * std::pow(rho, 2.0 / 3.0)
-              * (5.0 * enhancement / 3.0
-                 - 4.0 * reduced_gradient * enhancement_derivative / 3.0);
-        if (gradient_norm > 0.0)
+        gpu_kinetic_local_terms(regularized,
+                                active,
+                                gradient_x,
+                                gradient_y,
+                                gradient_z,
+                                functional,
+                                density_floor,
+                                volume_element,
+                                result.potential_hartree,
+                                flux_x,
+                                flux_y,
+                                flux_z,
+                                energy_hartree);
+    }
+    else
+#endif
+    {
+#pragma omp parallel for reduction(+:energy_hartree) schedule(static)
+        for (std::size_t index = 0; index < size; ++index)
         {
-            const double flux_scale
-                = c_tf * reduced_gradient_scale * std::pow(rho, 1.0 / 3.0)
-                  * enhancement_derivative / gradient_norm;
-            flux_x[index] = flux_scale * gradient_x[index];
-            flux_y[index] = flux_scale * gradient_y[index];
-            flux_z[index] = flux_scale * gradient_z[index];
+            const double rho = regularized[index];
+            const double gradient_norm = std::sqrt(gradient_x[index] * gradient_x[index]
+                                                   + gradient_y[index] * gradient_y[index]
+                                                   + gradient_z[index] * gradient_z[index]);
+            const double reduced_gradient
+                = reduced_gradient_scale * gradient_norm / std::pow(rho, 4.0 / 3.0);
+            double enhancement = 0.0;
+            double enhancement_derivative = 0.0;
+            kinetic_enhancement(functional,
+                                reduced_gradient,
+                                enhancement,
+                                enhancement_derivative);
+            energy_hartree
+                += (c_tf * std::pow(rho, 5.0 / 3.0) * enhancement
+                    - reference_energy_density)
+                   * volume_element;
+            result.potential_hartree[index]
+                = c_tf * std::pow(rho, 2.0 / 3.0)
+                  * (5.0 * enhancement / 3.0
+                     - 4.0 * reduced_gradient * enhancement_derivative / 3.0);
+            if (gradient_norm > 0.0)
+            {
+                const double flux_scale
+                    = c_tf * reduced_gradient_scale * std::pow(rho, 1.0 / 3.0)
+                      * enhancement_derivative / gradient_norm;
+                flux_x[index] = flux_scale * gradient_x[index];
+                flux_y[index] = flux_scale * gradient_y[index];
+                flux_z[index] = flux_scale * gradient_z[index];
+            }
         }
     }
     result.energy_hartree = energy_hartree;

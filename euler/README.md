@@ -15,6 +15,23 @@ The scripts currently target the personal checkout
 `/cluster/home/zhourui/abacus-develop` and keep all generated files below
 `build-gcc-openmpi/`.
 
+## CUDA build for FDE
+
+`build_abacus_gcc_openmpi_cuda.sbatch` requests one Euler GPU and builds a
+separate CUDA executable below `build-gcc-openmpi-cuda/`.  It reuses the
+read-only GCC/OpenMPI dependency toolchain from the CPU build, enables
+cuSOLVER, and compiles for Euler's Turing, Ampere, and Ada GPUs.  It does not
+modify or block the CPU build directory.
+
+```bash
+sbatch euler/build_abacus_gcc_openmpi_cuda.sbatch
+```
+
+The FDE workflow should use `device: gpu` with `ks_solver: cusolver`.  Use one
+MPI rank per allocated GPU.  A GPU-enabled ELPA installation may instead use
+`ks_solver: elpa`; the default toolchain ELPA is CPU-only, so cuSOLVER is the
+verified Euler path.
+
 ## First build
 
 Prepare a private toolchain copy once so dependency builds do not modify the

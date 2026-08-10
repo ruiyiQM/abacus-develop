@@ -67,6 +67,19 @@ The default PW91k case writes `workflow.json`, `generated/`, and `work/`.
 Thomas--Fermi and revAPBEk use suffixed workflow, generated, and work paths so
 their checkpoints and performance reports cannot overwrite one another.
 
+The committed reference remains a CPU/GCC/OpenMPI/ELPA calculation.  For a
+CUDA build, copy `workflow.template.json` and change the two controls below;
+all active-fragment jobs then receive the same GPU selection:
+
+```json
+"device": "gpu",
+"ks_solver": "cusolver"
+```
+
+Use one MPI rank per allocated GPU.  With one rank the FDE PW derivatives use
+cuFFT; with multiple ranks ABACUS keeps the distributed PW FFT on CPUs while
+the NAKE point kernels, Gint work, and projected eigensolve use CUDA.
+
 An offline checkout of ABACUS-orbitals can replace the download:
 
 ```bash

@@ -81,6 +81,38 @@ choices use spin scaling independently for α and β densities.
 | `pw91k` | yes | established default for molecular FDE |
 | `revapbek` | yes | alternative bounded PBE-form enhancement |
 
+## GPU execution
+
+Set both `controls.device` and a GPU-capable LCAO solver in the workflow:
+
+```json
+"device": "gpu",
+"ks_solver": "cusolver"
+```
+
+`cusolver` is the recommended portable CUDA path.  `elpa` is also accepted,
+but it offloads only when ABACUS is linked to an ELPA build with NVIDIA GPU
+support.  The workflow rejects combinations such as `device: gpu` with
+`genelpa`, so a request cannot silently run a CPU-only eigensolver.
+
+The GPU path covers more than diagonalization:
+
+- ABACUS' existing CUDA Gint kernels form the LCAO density and integrate the
+  local effective potential;
+- cuSOLVER, or GPU-enabled native ELPA, solves the projected FDE generalized
+  eigenproblem;
+- FDE CUDA kernels evaluate the pointwise Thomas--Fermi, PW91k, and revAPBEk
+  energy, potential, and flux expressions;
+- with one MPI rank, the FDE spectral gradients and divergences use cuFFT.
+
+For multiple MPI ranks, the gradient/divergence remains on ABACUS' distributed
+CPU PW FFT because the current GPU PW transform supports only a single pool
+rank.  Pointwise NAKE work still runs on each rank's GPU.  Libxc PBE evaluation,
+freeze--thaw orchestration, and density-artifact I/O remain on the CPU; moving
+these small or library-owned sections through host/device copies would not be
+a reliable acceleration.  Use one MPI rank per allocated GPU.  The per-call
+`fde_performance.json` records `device` and `ks_solver` for auditability.
+
 ## Adaptive inner SCF
 
 `adaptive_scf` selects an inner-SCF stage from the preceding FT density RMS.

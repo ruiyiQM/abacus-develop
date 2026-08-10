@@ -2,25 +2,74 @@
 
 #include "source_basis/module_pw/pw_basis.h"
 
+#ifdef __CUDA
+#include "fde_gpu_kernels.h"
+#endif
+
 #include <complex>
 #include <stdexcept>
 
 namespace fde
 {
 
-PwGridDifferential::PwGridDifferential(const ModulePW::PW_Basis& basis)
-    : basis_(basis)
+PwGridDifferential::PwGridDifferential(const ModulePW::PW_Basis& basis,
+                                       const bool use_gpu)
+    : basis_(basis),
+      use_gpu_(use_gpu),
+      use_gpu_fft_(false)
 {
     if (basis_.nrxx < 0 || basis_.npw < 0 || basis_.nmaxgr < basis_.npw
         || (basis_.npw != 0 && basis_.gcar == nullptr))
     {
         throw std::invalid_argument("FDE PW grid derivatives require an initialized PW_Basis");
     }
+#ifdef __CUDA
+    // ABACUS' GPU PW transform is currently a full-box, single-pool-rank
+    // implementation. Distributed FDE derivatives retain the MPI FFT path,
+    // while their pointwise NAKE algebra can still run on each rank's GPU.
+    use_gpu_fft_ = use_gpu_ && basis_.poolnproc == 1
+                   && basis_.nrxx == basis_.nxyz;
+    if (use_gpu_fft_)
+    {
+        gpu_box_indices_.resize(static_cast<std::size_t>(basis_.npw));
+        gpu_gx_.resize(gpu_box_indices_.size());
+        gpu_gy_.resize(gpu_box_indices_.size());
+        gpu_gz_.resize(gpu_box_indices_.size());
+        for (int reciprocal_index = 0; reciprocal_index < basis_.npw;
+             ++reciprocal_index)
+        {
+            const int isz = basis_.ig2isz[reciprocal_index];
+            const int iz = isz % basis_.nz;
+            const int stick = isz / basis_.nz;
+            const int ixy = basis_.is2fftixy[stick];
+            const int iy = ixy % basis_.ny;
+            const int ix = ixy / basis_.ny;
+            const std::size_t index
+                = static_cast<std::size_t>(reciprocal_index);
+            gpu_box_indices_[index]
+                = iz + iy * basis_.nz + ix * basis_.ny * basis_.nz;
+            gpu_gx_[index] = basis_.gcar[reciprocal_index][0] * basis_.tpiba;
+            gpu_gy_[index] = basis_.gcar[reciprocal_index][1] * basis_.tpiba;
+            gpu_gz_[index] = basis_.gcar[reciprocal_index][2] * basis_.tpiba;
+        }
+    }
+#else
+    (void)use_gpu_;
+#endif
 }
 
 std::size_t PwGridDifferential::local_size() const
 {
     return static_cast<std::size_t>(basis_.nrxx);
+}
+
+bool PwGridDifferential::uses_gpu() const
+{
+#ifdef __CUDA
+    return use_gpu_;
+#else
+    return false;
+#endif
 }
 
 void PwGridDifferential::gradient(const std::vector<double>& values,
@@ -32,6 +81,23 @@ void PwGridDifferential::gradient(const std::vector<double>& values,
     {
         throw std::invalid_argument("FDE PW gradient input does not match local nrxx");
     }
+#ifdef __CUDA
+    if (use_gpu_fft_)
+    {
+        gpu_spectral_gradient(values,
+                              static_cast<std::size_t>(basis_.nx),
+                              static_cast<std::size_t>(basis_.ny),
+                              static_cast<std::size_t>(basis_.nz),
+                              gpu_box_indices_,
+                              gpu_gx_,
+                              gpu_gy_,
+                              gpu_gz_,
+                              gradient_x,
+                              gradient_y,
+                              gradient_z);
+        return;
+    }
+#endif
     const std::complex<double> imaginary_unit(0.0, 1.0);
     std::vector<std::complex<double>> reciprocal(static_cast<std::size_t>(basis_.npw));
     std::vector<std::complex<double>> derivative(static_cast<std::size_t>(basis_.npw));
@@ -63,6 +129,21 @@ std::vector<double> PwGridDifferential::divergence(
     {
         throw std::invalid_argument("FDE PW divergence input does not match local nrxx");
     }
+#ifdef __CUDA
+    if (use_gpu_fft_)
+    {
+        return gpu_spectral_divergence(vector_x,
+                                       vector_y,
+                                       vector_z,
+                                       static_cast<std::size_t>(basis_.nx),
+                                       static_cast<std::size_t>(basis_.ny),
+                                       static_cast<std::size_t>(basis_.nz),
+                                       gpu_box_indices_,
+                                       gpu_gx_,
+                                       gpu_gy_,
+                                       gpu_gz_);
+    }
+#endif
     const std::complex<double> imaginary_unit(0.0, 1.0);
     std::vector<std::complex<double>> component_reciprocal(
         static_cast<std::size_t>(basis_.npw));

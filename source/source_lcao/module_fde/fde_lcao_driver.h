@@ -130,6 +130,7 @@ class FdeLcaoDriver
                   int kpar,
                   int nbands,
                   int nspin,
+                  bool use_gpu,
                   double electron_count,
                   int active_alpha_electrons,
                   int active_beta_electrons,
@@ -143,6 +144,7 @@ class FdeLcaoDriver
     int kpar_;
     int nbands_;
     int nspin_;
+    bool use_gpu_;
     double electron_count_;
     int active_alpha_electrons_;
     int active_beta_electrons_;

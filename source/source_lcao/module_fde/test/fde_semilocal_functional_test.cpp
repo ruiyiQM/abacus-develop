@@ -323,6 +323,27 @@ TEST(FdeSemilocalFunctional, EvaluatesAProcessorLocalSlabThroughInjectedDerivati
     EXPECT_EQ(differential.divergence_calls(), 6);
 }
 
+TEST(FdeSemilocalFunctional, ThomasFermiSkipsGradientAndDivergenceOperations)
+{
+    const fde::SpinDensity active{{0.5, 0.4}, {0.25, 0.2}};
+    const fde::SpinDensity frozen{{0.2, 0.3}, {0.1, 0.15}};
+    const fde::UniformGrid global_grid{4, 1, 1, 0.5, 1.0, 1.0};
+    ZeroLocalDifferential differential(2);
+
+    const fde::NonadditiveFunctionalResult result
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::ThomasFermi,
+            1.0e-12,
+            &differential);
+
+    EXPECT_TRUE(std::isfinite(result.energy_ry));
+    EXPECT_EQ(differential.gradient_calls(), 0);
+    EXPECT_EQ(differential.divergence_calls(), 0);
+}
+
 TEST(FdeSemilocalFunctional, ReusesFrozenKineticEvaluationWithoutChangingResult)
 {
     const fde::SpinDensity active{{0.5, 0.4}, {0.25, 0.2}};

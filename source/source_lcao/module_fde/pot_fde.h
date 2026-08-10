@@ -18,7 +18,8 @@ class PotFde : public elecstate::PotBase
            const SpinDensity& frozen_density,
            const std::vector<double>& frozen_hartree_potential_ry,
            const PotFdeConfig& config,
-           const std::shared_ptr<const NonadditiveXcProvider>& xc_provider);
+           const std::shared_ptr<const NonadditiveXcProvider>& xc_provider,
+           bool use_gpu);
 
     EmbeddingPotentialResult evaluate(const SpinDensity& active_density) const;
 

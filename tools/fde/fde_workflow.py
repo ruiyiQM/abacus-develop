@@ -179,9 +179,18 @@ def validate_spec(spec: Mapping[str, object]) -> None:
         raise WorkflowError("controls must be a JSON object")
     canonical_kedf_name(controls.get("kedf", "pw91k"))
     solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
-    if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
+    if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx",
+                      "cusolver"):
         raise WorkflowError(
-            "ks_solver must be lapack, genelpa, elpa, or scalapack_gvx")
+            "ks_solver must be lapack, genelpa, elpa, scalapack_gvx, or cusolver")
+    device = _token(controls.get("device", "cpu"), "device").lower()
+    if device not in ("cpu", "gpu"):
+        raise WorkflowError("device must be cpu or gpu")
+    if solver == "cusolver" and device != "gpu":
+        raise WorkflowError("ks_solver cusolver requires device gpu")
+    if device == "gpu" and solver not in ("cusolver", "elpa"):
+        raise WorkflowError(
+            "device gpu requires ks_solver cusolver or GPU-enabled elpa")
     spin_mode = _token(controls.get("spin_mode", "uks"), "spin_mode").lower()
     if spin_mode not in ("rks", "uks"):
         raise WorkflowError("spin_mode must be rks or uks")
@@ -1342,6 +1351,7 @@ def run_fragment_scf(
             "nspin": spin_parameters["nspin"],
             "noncolin": 0, "lspinorb": 0, "symmetry": 0,
             "dft_functional": "pbe",
+            "device": str(controls.get("device", "cpu")).lower(),
             "ks_solver": str(controls.get("ks_solver", "lapack")),
             "kpar": int(controls.get("kpar", 1)),
             "nelec": spin_parameters["nelec"],
@@ -1369,6 +1379,8 @@ def run_fragment_scf(
             "wall_time_seconds": wall_time_seconds,
             "maximum_iterations": int(schedule["maximum_iterations"]),
             "density_tolerance": float(schedule["density_tolerance"]),
+            "device": str(controls.get("device", "cpu")).lower(),
+            "ks_solver": str(controls.get("ks_solver", "lapack")),
             "mixing": mixing,
         }
         launch_metrics.update(read_abacus_scf_metrics(job_directory))

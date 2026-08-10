@@ -12,30 +12,51 @@ namespace fde
 
 bool FdeSolverPolicy::is_distributed_solver(const std::string& solver)
 {
-    return solver == "genelpa" || solver == "elpa" || solver == "scalapack_gvx";
+    return solver == "genelpa" || solver == "elpa" || solver == "scalapack_gvx"
+           || solver == "cusolver";
 }
 
 void FdeSolverPolicy::validate(const std::string& solver,
                                const bool distributed_ao_matrices,
-                               const int kpar)
+                               const int kpar,
+                               const bool use_gpu)
 {
     if (kpar != 1)
     {
         throw std::invalid_argument("FDE embedded_scf currently requires kpar 1");
+    }
+    if (use_gpu && solver != "cusolver" && solver != "elpa")
+    {
+        throw std::invalid_argument(
+            "FDE device gpu requires ks_solver cusolver or GPU-enabled elpa");
+    }
+    if (solver == "cusolver")
+    {
+        if (!use_gpu)
+        {
+            throw std::invalid_argument(
+                "FDE ks_solver cusolver requires device gpu");
+        }
+#ifndef __CUDA
+        throw std::invalid_argument(
+            "FDE requested cuSOLVER but ABACUS was built without CUDA");
+#else
+        return;
+#endif
     }
     if (solver == "lapack")
     {
         if (distributed_ao_matrices)
         {
             throw std::invalid_argument(
-                "FDE distributed AO matrices require genelpa, elpa, or scalapack_gvx");
+                "FDE distributed AO matrices require genelpa, elpa, scalapack_gvx, or cusolver");
         }
         return;
     }
     if (!FdeSolverPolicy::is_distributed_solver(solver))
     {
         throw std::invalid_argument(
-            "FDE embedded_scf supports lapack, genelpa, elpa, or scalapack_gvx");
+            "FDE embedded_scf supports lapack, genelpa, elpa, scalapack_gvx, or cusolver");
     }
 #ifndef __ELPA
     if (solver == "genelpa" || solver == "elpa")

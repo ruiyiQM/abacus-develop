@@ -104,6 +104,21 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_gpu_solver_pair(self):
+        for solver in ("cusolver", "elpa"):
+            spec = self.spec()
+            spec["controls"] = {"device": "gpu", "ks_solver": solver}
+            fde_workflow.validate_spec(spec)
+
+        spec["controls"] = {"device": "gpu", "ks_solver": "genelpa"}
+        with self.assertRaisesRegex(fde_workflow.WorkflowError,
+                                    "device gpu requires"):
+            fde_workflow.validate_spec(spec)
+        spec["controls"] = {"device": "cpu", "ks_solver": "cusolver"}
+        with self.assertRaisesRegex(fde_workflow.WorkflowError,
+                                    "requires device gpu"):
+            fde_workflow.validate_spec(spec)
+
     def test_validates_partial_scf_control(self):
         spec = self.spec()
         spec["controls"] = {"allow_partial_scf": True}

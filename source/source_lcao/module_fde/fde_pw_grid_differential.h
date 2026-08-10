@@ -3,6 +3,8 @@
 
 #include "fde_semilocal_functional.h"
 
+#include <vector>
+
 namespace ModulePW
 {
 class PW_Basis;
@@ -15,9 +17,11 @@ namespace fde
 class PwGridDifferential : public GridDifferentialOperator
 {
   public:
-    explicit PwGridDifferential(const ModulePW::PW_Basis& basis);
+    explicit PwGridDifferential(const ModulePW::PW_Basis& basis,
+                                bool use_gpu);
 
     std::size_t local_size() const override;
+    bool uses_gpu() const override;
     void gradient(const std::vector<double>& values,
                   std::vector<double>& gradient_x,
                   std::vector<double>& gradient_y,
@@ -28,6 +32,12 @@ class PwGridDifferential : public GridDifferentialOperator
 
   private:
     const ModulePW::PW_Basis& basis_;
+    bool use_gpu_;
+    bool use_gpu_fft_;
+    std::vector<int> gpu_box_indices_;
+    std::vector<double> gpu_gx_;
+    std::vector<double> gpu_gy_;
+    std::vector<double> gpu_gz_;
 };
 
 } // namespace fde

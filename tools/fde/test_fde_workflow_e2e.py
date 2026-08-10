@@ -136,7 +136,7 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
 
 def prepare_case(root: Path, partial_first_cycle: bool = False,
                  rks: bool = False, adaptive: bool = False,
-                 jacobi_outer: bool = False):
+                 jacobi_outer: bool = False, gpu: bool = False):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -180,6 +180,8 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
                 "retain_completed_cycles": 3 if partial_first_cycle else 1,
                 "remove_abacus_restart_files": True,
                 "update_order": ["F", "CH3Cl"]}
+    if gpu:
+        controls.update({"device": "gpu", "ks_solver": "cusolver"})
     if rks:
         controls["spin_mode"] = "rks"
     if partial_first_cycle:
@@ -246,6 +248,20 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_gpu_controls_reach_every_fragment_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, gpu=True)
+
+            fde_workflow.run_workflow(spec_path)
+
+            inputs = list(work.glob("g0/*/cycle-*/*/INPUT"))
+            self.assertTrue(inputs)
+            for input_path in inputs:
+                text = input_path.read_text(encoding="utf-8")
+                self.assertRegex(text, r"(?m)^device\s+gpu$")
+                self.assertRegex(text, r"(?m)^ks_solver\s+cusolver$")
+
     def test_closed_shell_rks_generates_single_spin_channel_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

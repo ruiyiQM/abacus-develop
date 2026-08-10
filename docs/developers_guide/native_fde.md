@@ -124,6 +124,17 @@ Electron counts are checked with `Tr(P S)`. The production
 therefore diagonalize the projected matrices with ELPA or ScaLAPACK without
 replicating them.
 
+CUDA builds additionally accept `ks_solver cusolver`.  The FDE driver passes
+the runtime `device gpu` flag to the projected solver instead of replacing it
+with a CPU-only default, so native ELPA can also use its NVIDIA backend when
+ELPA itself was built with GPU support.  CUDA Gint handles the ordinary LCAO
+density and local-potential contractions.  FDE-specific CUDA kernels evaluate
+the pointwise TF/PW91k/revAPBEk terms; a one-rank calculation also uses cuFFT
+for their spectral gradient and divergence.  Multi-rank calculations retain
+the distributed CPU PW FFT, since ABACUS' full-box GPU transform currently
+requires one pool rank, while keeping the pointwise NAKE and LCAO GPU work.
+Libxc PBE remains host-side.
+
 ## Canonical total energy
 
 The total energy is assembled once from named terms, rather than by adding an
@@ -161,6 +172,7 @@ nspin             2
 dft_functional    pbe
 symmetry          0
 ks_solver         genelpa
+device            cpu
 nelec             <active-fragment electron count>
 nupdown           <active alpha minus beta population>
 fde_task          embedded_scf

@@ -12,7 +12,8 @@ class FdeSolverPolicy
     static bool is_distributed_solver(const std::string& solver);
     static void validate(const std::string& solver,
                          bool distributed_ao_matrices,
-                         int kpar);
+                         int kpar,
+                         bool use_gpu);
 
     /**
      * Reset solver state that assumes the AO overlap storage persists between

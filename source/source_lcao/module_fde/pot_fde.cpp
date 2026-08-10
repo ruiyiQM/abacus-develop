@@ -46,7 +46,8 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
                const SpinDensity& frozen_density,
                const std::vector<double>& frozen_hartree_potential_ry,
                const PotFdeConfig& config,
-               const std::shared_ptr<const NonadditiveXcProvider>& xc_provider)
+               const std::shared_ptr<const NonadditiveXcProvider>& xc_provider,
+               const bool use_gpu)
     : frozen_density_(frozen_density),
       frozen_hartree_potential_ry_(frozen_hartree_potential_ry),
       config_(config),
@@ -74,7 +75,7 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
     {
         throw std::invalid_argument("FDE potential data must match the local ABACUS density slab");
     }
-    differential_operator_.reset(new PwGridDifferential(*rho_basis));
+    differential_operator_.reset(new PwGridDifferential(*rho_basis, use_gpu));
     {
         const ScopedPotFdeTimer cache_timer("prepare_frozen_cache");
         frozen_cache_ = EmbeddingPotentialEvaluator::prepare_frozen(
