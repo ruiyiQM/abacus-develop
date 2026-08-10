@@ -19,10 +19,11 @@ readonly TOOLCHAIN_SETUP="${ABACUS_TOOLCHAIN_SETUP:-/cluster/home/zhourui/abacus
 readonly CUDA_MODULE="${ABACUS_CUDA_MODULE:-cuda/13.0.2}"
 readonly TEST_THREADS="${ABACUS_FDE_TEST_THREADS:-${SLURM_CPUS_PER_TASK}}"
 readonly TEST_ROOT="${ABACUS_FDE_CUDA_TEST_ROOT:-/cluster/scratch/${USER}/abacus-fde-cuda-test-${SLURM_JOB_ID}}"
+readonly SRUN_BIN="${ABACUS_SRUN_BIN:-$(command -v srun)}"
 
 for required in "${ABACUS_BIN}" "${TOOLCHAIN_SETUP}" \
                 "${ABACUS_ROOT}/examples/fdedft/01_f_ch3_cl_uks/prepare_example.py" \
-                "${REFERENCE_CASE}/FDE_CONFIG"; do
+                "${REFERENCE_CASE}/FDE_CONFIG" "${SRUN_BIN}"; do
     if [[ ! -e "${required}" ]]; then
         echo "ERROR: required path is missing: ${required}" >&2
         exit 2
@@ -113,7 +114,7 @@ for kedf in thomas_fermi pw91k revapbek; do
         (
             cd "${case_root}"
             /usr/bin/time -f 'WALL_SECONDS %e' \
-                srun --exclusive --ntasks=1 --cpus-per-task="${TEST_THREADS}" \
+                "${SRUN_BIN}" --exclusive --ntasks=1 --cpus-per-task="${TEST_THREADS}" \
                     "${ABACUS_BIN}" > stdout.log 2> stderr.log
         )
         density_path="${case_root}/result.fde_density"
