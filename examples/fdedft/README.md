@@ -6,7 +6,7 @@ usual example layout with committed `INPUT`, `KPT`, and `STRU` files, a
 
 Available case:
 
-- `01_f_ch3_cl_uks`: one PBE/LC94 UKS diabatic-state and coupling calculation
+- `01_f_ch3_cl_uks`: one PBE/PW91k UKS diabatic-state and coupling calculation
   for `[F-CH3-Cl]-`, using fixed alpha/beta fragment populations (the native
   two-Fermi path).
 

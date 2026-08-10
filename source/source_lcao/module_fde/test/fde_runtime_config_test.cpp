@@ -29,7 +29,7 @@ DIAGONAL_ENERGY_RY reactant -80.1
 DIAGONAL_ENERGY_RY product -80.0
 AO_OVERLAP artifacts/S_gamma.fde_matrix
 OUTPUT_PREFIX artifacts/reactant_F
-KEDF lc94
+KEDF pw91k
 DENSITY_FLOOR_BOHR3 1e-12
 MAX_SCF_ITERATIONS 120
 SCF_DENSITY_TOLERANCE 1e-8
@@ -99,7 +99,7 @@ TEST(FdeRuntimeConfig, RoundTripsDeterministically)
 TEST(FdeRuntimeConfig, AcceptsThomasFermiAliasAndWritesCanonicalName)
 {
     std::string text(fluoride_substitution_config());
-    text.replace(text.find("KEDF lc94"), std::string("KEDF lc94").size(), "KEDF tf");
+    text.replace(text.find("KEDF pw91k"), std::string("KEDF pw91k").size(), "KEDF tf");
     std::istringstream input(text);
     const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
     EXPECT_EQ(config.kinetic_functional, fde::KineticFunctional::ThomasFermi);
@@ -107,6 +107,21 @@ TEST(FdeRuntimeConfig, AcceptsThomasFermiAliasAndWritesCanonicalName)
     std::ostringstream serialized;
     fde::FdeRuntimeConfigIO::write(serialized, config);
     EXPECT_NE(serialized.str().find("KEDF thomas_fermi\n"), std::string::npos);
+}
+
+TEST(FdeRuntimeConfig, AcceptsLegacyLc94NameAndWritesPw91k)
+{
+    std::string text(fluoride_substitution_config());
+    text.replace(text.find("KEDF pw91k"),
+                 std::string("KEDF pw91k").size(),
+                 "KEDF lc94");
+    std::istringstream input(text);
+    const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_EQ(config.kinetic_functional, fde::KineticFunctional::Pw91k);
+
+    std::ostringstream serialized;
+    fde::FdeRuntimeConfigIO::write(serialized, config);
+    EXPECT_NE(serialized.str().find("KEDF pw91k\n"), std::string::npos);
 }
 
 TEST(FdeRuntimeConfig, RejectsInvalidChargeSpinParity)

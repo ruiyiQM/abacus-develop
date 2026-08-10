@@ -162,9 +162,9 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     controls = spec.get("controls", {})
     if not isinstance(controls, dict):
         raise WorkflowError("controls must be a JSON object")
-    kedf = _token(controls.get("kedf", "lc94"), "kedf").lower()
-    if kedf not in ("lc94", "thomas_fermi", "tf"):
-        raise WorkflowError("kedf must be lc94, thomas_fermi, or tf")
+    kedf = _token(controls.get("kedf", "pw91k"), "kedf").lower()
+    if kedf not in ("pw91k", "lc94", "thomas_fermi", "tf"):
+        raise WorkflowError("kedf must be pw91k, lc94, thomas_fermi, or tf")
     solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
     if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
         raise WorkflowError(
@@ -1043,7 +1043,7 @@ def write_runtime_config(path: Path,
     controls = dict(spec.get("controls", {}))
     update_order = controls.get("update_order", [fragment["label"] for fragment in fragments])
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
-                  f"KEDF {controls.get('kedf', 'lc94')}",
+                  f"KEDF {controls.get('kedf', 'pw91k')}",
                   f"DENSITY_FLOOR_BOHR3 {controls.get('density_floor_bohr3', 1e-12)}",
                   f"MAX_SCF_ITERATIONS {maximum_scf_iterations}",
                   f"SCF_DENSITY_TOLERANCE {scf_density_tolerance}",
@@ -1624,7 +1624,7 @@ def write_postprocess_inputs(spec: Mapping[str, object],
     fragment_labels = [fragment["label"] for fragment in fragments]
     lines.extend((f"AO_OVERLAP {_absolute_token(overlap_path, 'AO overlap path')}",
                   "OUTPUT_PREFIX fde_diabatic",
-                  f"KEDF {controls.get('kedf', 'lc94')}", "DENSITY_FLOOR_BOHR3 1e-12",
+                  f"KEDF {controls.get('kedf', 'pw91k')}", "DENSITY_FLOOR_BOHR3 1e-12",
                   "MAX_SCF_ITERATIONS 100", "SCF_DENSITY_TOLERANCE 1e-8",
                   "ELECTRON_TOLERANCE 1e-8", "MIXING_BETA 0.3",
                   "MAX_FREEZE_THAW_CYCLES 20", "FREEZE_THAW_DENSITY_TOLERANCE 1e-7",

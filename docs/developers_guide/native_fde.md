@@ -36,7 +36,7 @@ Exc_nad = Exc[rho_A + rho_B + rho_core,A + rho_core,B]
         - Exc[rho_B + rho_core,B].
 ```
 
-`KineticFunctional::Lc94Pw91k` is the Lembarki-Chermette 1994
+`KineticFunctional::Pw91k` is the Lembarki-Chermette 1994
 reparameterization of the PW91 enhancement factor, commonly called PW91k in
 FDE work. The implementation uses the published/Libxc LC94 parameters and the
 spin-scaling identity
@@ -134,7 +134,7 @@ recomputable from persisted subsystem artifacts. No SCF iteration may mutate
 `PARAM`, `GlobalV`, or `GlobalC` to select a fragment or state.
 
 `PotFde` is a dynamic LCAO potential component. It accepts the frozen Hartree
-potential as explicit data, evaluates LC94/TF nonadditive kinetic terms, and
+potential as explicit data, evaluates PW91k/TF nonadditive kinetic terms, and
 obtains nonadditive XC from an injected provider. It never adds a nuclear
 potential. Its component energy is the cross Hartree plus nonadditive kinetic
 and XC correction used during the active SCF; this is diagnostic and is not a

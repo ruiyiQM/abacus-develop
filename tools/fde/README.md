@@ -57,6 +57,12 @@ potential.  Changing the KEDF changes the model and invalidates previous FDE
 density/functional-cache comparisons; use a separate work directory for each
 choice.
 
+`pw91k` is the canonical name of the default GGA NAKE.  It is the
+Lembarki--Chermette 1994 reparameterization of the PW91 enhancement factor,
+registered by LibXC as `GGA_K_LC94` and commonly called PW91k in FDE work.
+The legacy input spelling `lc94` remains accepted, but newly generated
+workflow files and deterministic `FDE_CONFIG` output use `pw91k`.
+
 ## Adaptive inner SCF
 
 `adaptive_scf` selects an inner-SCF stage from the preceding FT density RMS.
@@ -135,7 +141,7 @@ such as `F-retry-01`, and all attempts are retained in performance metadata.
 
 ## Frozen functional cache
 
-For an embedded SCF, ABACUS now prepares the frozen-only LC94 and PBE functional
+For an embedded SCF, ABACUS now prepares the frozen-only PW91k and PBE functional
 values once when `PotFde` is constructed.  Every subsequent electronic step
 reuses those immutable energy/potential arrays and evaluates only the total and
 active densities.  UKS therefore removes one of the three frozen/active/total

@@ -20,7 +20,7 @@
   ],
   "controls": {
     "spin_mode": "uks",
-    "kedf": "lc94",
+    "kedf": "pw91k",
     "ks_solver": "genelpa",
     "kpar": 1,
     "allow_partial_scf": true,

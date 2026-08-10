@@ -42,6 +42,12 @@ class FdeWorkflowTest(unittest.TestCase):
             spec = self.spec()
             spec["controls"] = {"kedf": name}
             fde_workflow.validate_spec(spec)
+
+    def test_validates_pw91k_and_legacy_lc94_names(self):
+        for name in ("pw91k", "lc94"):
+            spec = self.spec()
+            spec["controls"] = {"kedf": name}
+            fde_workflow.validate_spec(spec)
         spec["controls"]["kedf"] = "unknown"
         with self.assertRaisesRegex(fde_workflow.WorkflowError, "kedf"):
             fde_workflow.validate_spec(spec)

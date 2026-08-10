@@ -150,7 +150,7 @@ def write_seed(path: Path,
              f"GEOMETRY {geometry}", f"GRID_FINGERPRINT grid-{nx}x{ny}x{nz}",
              f"PSEUDOPOTENTIALS sg15-v1.0-pbe-oncv-no-nlcc-{resource_commit}",
              f"ORBITALS standard-v2.0-dzp-100ry-{resource_commit}",
-             "CORE_DENSITY none", "FUNCTIONALS pbe lc94",
+             "CORE_DENSITY none", "FUNCTIONALS pbe pw91k",
              f"GRID {nx} {ny} {nz} {volume:.17g}", f"POPULATIONS {alpha} {beta}",
              f"RHO_UNIFORM {alpha / volume:.17g} {beta / volume:.17g}", "END"]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -79,6 +79,18 @@ bool contains(const std::vector<std::string>& values, const std::string& value)
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
+const char* kinetic_functional_name(const KineticFunctional functional)
+{
+    switch (functional)
+    {
+        case KineticFunctional::ThomasFermi:
+            return "thomas_fermi";
+        case KineticFunctional::Pw91k:
+            return "pw91k";
+    }
+    throw std::invalid_argument("FDE_CONFIG contains an unknown KEDF");
+}
+
 void require_unique(const std::vector<std::string>& labels, const std::string& kind)
 {
     std::vector<std::string> sorted = labels;
@@ -94,7 +106,7 @@ void require_unique(const std::vector<std::string>& labels, const std::string& k
 FdeRuntimeConfig::FdeRuntimeConfig()
     : schema_version(1),
       atom_count(0),
-      kinetic_functional(KineticFunctional::Lc94Pw91k),
+      kinetic_functional(KineticFunctional::Pw91k),
       density_floor_bohr3(1.0e-12),
       maximum_scf_iterations(100),
       scf_density_tolerance(1.0e-8),
@@ -406,9 +418,9 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
         else if (key == "KEDF")
         {
             const std::string value = read_value<std::string>(line, line_number, "KEDF");
-            if (value == "lc94")
+            if (value == "pw91k" || value == "lc94")
             {
-                config.kinetic_functional = KineticFunctional::Lc94Pw91k;
+                config.kinetic_functional = KineticFunctional::Pw91k;
             }
             else if (value == "thomas_fermi" || value == "tf")
             {
@@ -416,7 +428,9 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             }
             else
             {
-                throw parse_error(line_number, "KEDF must be lc94, thomas_fermi, or tf");
+                throw parse_error(
+                    line_number,
+                    "KEDF must be pw91k, lc94, thomas_fermi, or tf");
             }
         }
         else if (key == "DENSITY_FLOOR_BOHR3")
@@ -574,9 +588,7 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
         output << "AO_OVERLAP " << config.ao_overlap_path << '\n';
     }
     output << "OUTPUT_PREFIX " << config.output_prefix << '\n';
-    output << "KEDF "
-           << (config.kinetic_functional == KineticFunctional::Lc94Pw91k ? "lc94" : "thomas_fermi")
-           << '\n';
+    output << "KEDF " << kinetic_functional_name(config.kinetic_functional) << '\n';
     output << "DENSITY_FLOOR_BOHR3 " << config.density_floor_bohr3 << '\n';
     output << "MAX_SCF_ITERATIONS " << config.maximum_scf_iterations << '\n';
     output << "SCF_DENSITY_TOLERANCE " << config.scf_density_tolerance << '\n';

@@ -10,7 +10,8 @@ namespace fde
 enum class KineticFunctional
 {
     ThomasFermi,
-    Lc94Pw91k
+    Pw91k,
+    Lc94Pw91k = Pw91k
 };
 
 struct UniformGrid

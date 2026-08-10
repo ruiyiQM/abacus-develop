@@ -30,7 +30,7 @@ path automatically.  Thus `nupdown 0` fixes equal alpha/beta populations for
 a closed-shell fragment instead of reverting to an unconstrained shared Fermi
 level.  Odd-electron fragments retain the requested signed spin population.
 
-The example uses PBE, the LC94 nonadditive kinetic functional, SG15-v1.0 PBE
+The example uses PBE, the PW91k (LibXC LC94) nonadditive kinetic functional, SG15-v1.0 PBE
 pseudopotentials, StandardOrbitals-v2.0 DZP numerical orbitals, and a 40 Ry
 grid cutoff.  The cutoff was chosen for a low-cost functional test; it is not
 a converged production recommendation.
@@ -85,7 +85,7 @@ that density with Pulay and finally guarded plain mixing.  See
 `tools/fde/README.md` for precedence, validation rules, and the complete JSON
 schema used by these controls.
 
-Frozen-only LC94/PBE functional values are prepared once per active-fragment
+Frozen-only PW91k/PBE functional values are prepared once per active-fragment
 SCF and then reused for its electronic steps.  The cache is in memory, is
 invalidated by constructing the next fragment job, and needs no workflow or
 ABACUS INPUT option.
