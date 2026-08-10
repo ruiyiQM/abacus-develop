@@ -138,4 +138,89 @@ for kedf in thomas_fermi pw91k revapbek; do
     done
 done
 
+compare_energies()
+{
+    local cpu_file="$1"
+    local gpu_file="$2"
+    paste "${cpu_file}" "${gpu_file}" \
+        | awk '
+          function abs(value) { return value < 0 ? -value : value }
+          $1 != $3 || abs($2 - $4) > 1.0e-8 {
+              printf "energy mismatch: %s cpu=%s gpu=%s\n", $1, $2, $4 > "/dev/stderr"
+              failed = 1
+          }
+          END { exit failed }
+        '
+}
+
+for kedf in thomas_fermi pw91k revapbek; do
+    compare_energies "${TEST_ROOT}/${kedf}-cpu/energies.txt" \
+                     "${TEST_ROOT}/${kedf}-gpu/energies.txt"
+done
+
+# PW91k and revAPBEk also need a nonzero-gradient check.  Reuse the converged
+# CPU checkpoint from the uniform-seed smoke run as the identical active
+# density input for both backends.  This exercises the CPU PW FFT versus the
+# single-rank CUDA cuFFT path on a physical, nonuniform fragment density.
+for kedf in pw91k revapbek; do
+    active_checkpoint="${TEST_ROOT}/${kedf}-cpu/result.fde_density"
+    if [[ ! -s "${active_checkpoint}" ]]; then
+        echo "ERROR: nonuniform ${kedf} checkpoint is missing" >&2
+        exit 5
+    fi
+    for backend in cpu gpu; do
+        case_root="${TEST_ROOT}/${kedf}-nonuniform-${backend}"
+        mkdir -p "${case_root}"
+        cp "${TEMPLATE_ROOT}/INPUT" "${TEMPLATE_ROOT}/KPT" \
+           "${TEMPLATE_ROOT}/STRU" "${case_root}/"
+        cp "${REFERENCE_CASE}/FDE_CONFIG" "${case_root}/FDE_CONFIG"
+        cp "${FROZEN_SEED}" "${case_root}/frozen.fde_seed"
+        sed -i -E "s|^FUNCTIONALS .*|FUNCTIONALS pbe ${kedf}|" \
+            "${case_root}/frozen.fde_seed"
+        sed -i -E \
+            -e "s|^ACTIVE_DENSITY .*|ACTIVE_DENSITY ${active_checkpoint}|" \
+            -e "s|^FROZEN_DENSITY CH3Cl .*|FROZEN_DENSITY CH3Cl ${case_root}/frozen.fde_seed|" \
+            -e "s|^OUTPUT_PREFIX .*|OUTPUT_PREFIX result|" \
+            -e "s|^KEDF .*|KEDF ${kedf}|" \
+            -e "s|^MAX_SCF_ITERATIONS .*|MAX_SCF_ITERATIONS 1|" \
+            -e "s|^SCF_DENSITY_TOLERANCE .*|SCF_DENSITY_TOLERANCE 5.0|" \
+            "${case_root}/FDE_CONFIG"
+
+        if [[ "${backend}" == gpu ]]; then
+            solver=cusolver
+        else
+            solver=lapack
+        fi
+        sed -i -E \
+            -e "s|^suffix[[:space:]].*|suffix                  fde_${kedf}_nonuniform_${backend}|" \
+            -e "s|^scf_thr[[:space:]].*|scf_thr                 5.0|" \
+            -e "s|^scf_nmax[[:space:]].*|scf_nmax                1|" \
+            -e "s|^ks_solver[[:space:]].*|ks_solver               ${solver}|" \
+            "${case_root}/INPUT"
+        printf 'device                  %s\n' "${backend}" >> "${case_root}/INPUT"
+
+        echo "RUN ${kedf} nonuniform ${backend}"
+        (
+            cd "${case_root}"
+            /usr/bin/time -f 'WALL_SECONDS %e' \
+                "${SRUN_BIN}" --export=ALL --exclusive --ntasks=1 \
+                    --cpus-per-task="${TEST_THREADS}" \
+                    "${ABACUS_BIN}" > stdout.log 2> stderr.log
+        )
+        for artifact in result.fde_density result.fde_fragment; do
+            if [[ ! -s "${case_root}/${artifact}" ]]; then
+                echo "ERROR: ${artifact} is missing for nonuniform ${kedf} ${backend}" >&2
+                exit 6
+            fi
+        done
+        grep -E '^(SUBSYSTEM_TOTAL|NONADDITIVE_KINETIC|NONADDITIVE_XC)_ENERGY_RY' \
+            "${case_root}/result.fde_fragment" \
+            > "${case_root}/energies.txt"
+        cat "${case_root}/energies.txt"
+        cat "${case_root}/stderr.log"
+    done
+    compare_energies "${TEST_ROOT}/${kedf}-nonuniform-cpu/energies.txt" \
+                     "${TEST_ROOT}/${kedf}-nonuniform-gpu/energies.txt"
+done
+
 echo "SUCCESS: ${TEST_ROOT}"

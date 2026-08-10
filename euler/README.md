@@ -43,7 +43,10 @@ grid and executes one deliberately loose electronic step for every
 Thomas--Fermi, PW91k, and revAPBEk CPU/GPU pair.  It checks that each run
 writes a valid FDE density checkpoint and reports the subsystem and
 nonadditive energies when the one-step smoke calculation satisfies the loose
-SCF threshold.  Results remain isolated below
+SCF threshold.  It then reuses a physical nonuniform CPU checkpoint for
+PW91k and revAPBEk, exercises the CPU PW FFT and single-rank cuFFT paths from
+the same density, and requires their reported energies to agree within
+`1e-8` Ry.  Results remain isolated below
 `/cluster/scratch/$USER/abacus-fde-cuda-test-$SLURM_JOB_ID`.
 
 ## First build
