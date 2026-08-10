@@ -35,6 +35,7 @@ class PotFde : public elecstate::PotBase
     PotFdeConfig config_;
     std::shared_ptr<const NonadditiveXcProvider> xc_provider_;
     std::unique_ptr<PwGridDifferential> differential_operator_;
+    FrozenEmbeddingCache frozen_cache_;
     EmbeddingPotentialResult last_result_;
 };
 

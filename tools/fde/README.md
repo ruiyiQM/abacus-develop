@@ -122,6 +122,28 @@ deliberately partial loose/medium stage.  It also never carries an inner mixing
 history between different embedding potentials.  Retry directories use names
 such as `F-retry-01`, and all attempts are retained in performance metadata.
 
+## Frozen functional cache
+
+For an embedded SCF, ABACUS now prepares the frozen-only LC94 and PBE functional
+values once when `PotFde` is constructed.  Every subsequent electronic step
+reuses those immutable energy/potential arrays and evaluates only the total and
+active densities.  UKS therefore removes one of the three frozen/active/total
+functional evaluations per step.  If both active and frozen α/β densities are
+bitwise equal (the native RKS path), the spin-scaled semilocal kinetic evaluator
+also computes one channel and copies it to the other.
+
+The cache is owned by one `PotFde`, so it cannot survive a change of frozen
+density, grid, density floor, KEDF, or XC provider.  A new active-fragment job
+constructs a new cache automatically; there is no user switch and no cache file
+to manage.  ABACUS reports the one-time construction under
+`PotFde prepare_frozen_cache`.  Compare its call count with
+`PotFde evaluate_functionals` and the PW FFT timers when benchmarking.
+
+The implementation intentionally does not replace gradients near the density
+floor with a linear decomposition: `grad(max(rho,floor))` is not generally the
+sum of separately floored gradients.  This preserves the reference functional
+and potential at vacuum-grid points.
+
 ## Tests
 
 ```bash

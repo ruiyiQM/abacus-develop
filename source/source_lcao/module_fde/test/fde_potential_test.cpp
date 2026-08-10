@@ -74,6 +74,35 @@ TEST(FdePotential, CombinesHartreeKineticAndXcWithoutNuclearPotential)
     EXPECT_NE(result.potential.alpha_ry[0], 0.4);
 }
 
+TEST(FdePotential, PreparedFrozenCacheMatchesReferenceEvaluation)
+{
+    const fde::PotFdeConfig config{{2, 1, 1, 0.5, 1.0, 1.0},
+                                   fde::KineticFunctional::ThomasFermi,
+                                   1.0e-12};
+    const fde::DiracExchangeProvider xc;
+    const fde::EmbeddingPotentialResult reference
+        = fde::EmbeddingPotentialEvaluator::evaluate(active_density(),
+                                                     frozen_density(),
+                                                     {0.4, 0.6},
+                                                     config,
+                                                     xc);
+    const fde::FrozenEmbeddingCache cache
+        = fde::EmbeddingPotentialEvaluator::prepare_frozen(
+            frozen_density(), config, xc, nullptr);
+    const fde::EmbeddingPotentialResult cached
+        = fde::EmbeddingPotentialEvaluator::evaluate_cached(
+            active_density(), frozen_density(), {0.4, 0.6}, config, xc, cache, nullptr);
+
+    EXPECT_DOUBLE_EQ(cached.hartree_cross_energy_ry,
+                     reference.hartree_cross_energy_ry);
+    EXPECT_DOUBLE_EQ(cached.nonadditive_kinetic_energy_ry,
+                     reference.nonadditive_kinetic_energy_ry);
+    EXPECT_DOUBLE_EQ(cached.nonadditive_xc_energy_ry,
+                     reference.nonadditive_xc_energy_ry);
+    EXPECT_EQ(cached.potential.alpha_ry, reference.potential.alpha_ry);
+    EXPECT_EQ(cached.potential.beta_ry, reference.potential.beta_ry);
+}
+
 TEST(FdePotential, LibxcPbeReportsBuildAvailability)
 {
     const fde::LibxcPbeProvider provider;
@@ -86,6 +115,21 @@ TEST(FdePotential, LibxcPbeReportsBuildAvailability)
                             1.0e-12);
     EXPECT_TRUE(std::isfinite(result.energy_ry));
     EXPECT_EQ(result.active_potential.alpha_ry.size(), 2);
+    const fde::FrozenSemilocalCache cache
+        = provider.prepare_frozen(frozen_density(),
+                                  {2, 1, 1, 0.5, 1.0, 1.0},
+                                  1.0e-12,
+                                  nullptr);
+    const fde::NonadditiveFunctionalResult cached
+        = provider.evaluate_cached(active_density(),
+                                   frozen_density(),
+                                   {2, 1, 1, 0.5, 1.0, 1.0},
+                                   1.0e-12,
+                                   cache,
+                                   nullptr);
+    EXPECT_DOUBLE_EQ(cached.energy_ry, result.energy_ry);
+    EXPECT_EQ(cached.active_potential.alpha_ry,
+              result.active_potential.alpha_ry);
 #else
     EXPECT_FALSE(fde::LibxcPbeProvider::available());
     EXPECT_THROW(provider.evaluate(active_density(),

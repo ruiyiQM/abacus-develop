@@ -436,8 +436,7 @@ bool LibxcPbeProvider::available()
 #endif
 }
 
-NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
-    const SpinDensity& active,
+FrozenSemilocalCache LibxcPbeProvider::prepare_frozen(
     const SpinDensity& frozen,
     const UniformGrid& grid,
     const double density_floor_bohr3,
@@ -452,22 +451,95 @@ NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
     const std::size_t size = differential_operator == nullptr
                                  ? global_size
                                  : differential_operator->local_size();
+    validate_density(frozen, size);
+    const GridFunctionalResult frozen_only
+        = evaluate_pbe(frozen, grid, density_floor_bohr3, differential_operator);
+    const double hartree_to_rydberg = 2.0;
+    FrozenSemilocalCache cache;
+    cache.energy_ry = hartree_to_rydberg * frozen_only.energy_hartree;
+    cache.potential_ry.alpha_ry.resize(size);
+    cache.potential_ry.beta_ry.resize(size);
+#pragma omp parallel for schedule(static)
+    for (std::size_t index = 0; index < size; ++index)
+    {
+        cache.potential_ry.alpha_ry[index]
+            = hartree_to_rydberg * frozen_only.alpha_potential_hartree[index];
+        cache.potential_ry.beta_ry[index]
+            = hartree_to_rydberg * frozen_only.beta_potential_hartree[index];
+    }
+    return cache;
+#else
+    (void)frozen;
+    (void)grid;
+    (void)density_floor_bohr3;
+    (void)differential_operator;
+    throw std::runtime_error("Libxc PBE support is unavailable in this ABACUS build");
+#endif
+}
+
+NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator) const
+{
+#ifdef __LIBXC
+    const FrozenSemilocalCache frozen_cache
+        = prepare_frozen(frozen, grid, density_floor_bohr3, differential_operator);
+    return evaluate_cached(active,
+                           frozen,
+                           grid,
+                           density_floor_bohr3,
+                           frozen_cache,
+                           differential_operator);
+#else
+    (void)active;
+    (void)frozen;
+    (void)grid;
+    (void)density_floor_bohr3;
+    (void)differential_operator;
+    throw std::runtime_error("Libxc PBE support is unavailable in this ABACUS build");
+#endif
+}
+
+NonadditiveFunctionalResult LibxcPbeProvider::evaluate_cached(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const FrozenSemilocalCache& frozen_cache,
+    const GridDifferentialOperator* differential_operator) const
+{
+#ifdef __LIBXC
+    if (!std::isfinite(density_floor_bohr3) || density_floor_bohr3 <= 0.0)
+    {
+        throw std::invalid_argument("Libxc PBE density floor must be finite and positive");
+    }
+    const std::size_t global_size = checked_grid_size(grid);
+    const std::size_t size = differential_operator == nullptr
+                                 ? global_size
+                                 : differential_operator->local_size();
     validate_density(active, size);
     validate_density(frozen, size);
+    if (!std::isfinite(frozen_cache.energy_ry)
+        || frozen_cache.potential_ry.alpha_ry.size() != size
+        || frozen_cache.potential_ry.beta_ry.size() != size)
+    {
+        throw std::invalid_argument("Libxc PBE frozen cache does not match the grid");
+    }
     const GridFunctionalResult total = evaluate_pbe(sum_density(active, frozen),
                                                     grid,
                                                     density_floor_bohr3,
                                                     differential_operator);
     const GridFunctionalResult active_only
         = evaluate_pbe(active, grid, density_floor_bohr3, differential_operator);
-    const GridFunctionalResult frozen_only
-        = evaluate_pbe(frozen, grid, density_floor_bohr3, differential_operator);
 
     const double hartree_to_rydberg = 2.0;
     NonadditiveFunctionalResult result;
     result.energy_ry = hartree_to_rydberg
-                       * (total.energy_hartree - active_only.energy_hartree
-                          - frozen_only.energy_hartree);
+                       * (total.energy_hartree - active_only.energy_hartree)
+                       - frozen_cache.energy_ry;
     result.active_potential.alpha_ry.resize(size);
     result.active_potential.beta_ry.resize(size);
     result.frozen_potential.alpha_ry.resize(size);
@@ -484,13 +556,11 @@ NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
               * (total.beta_potential_hartree[index]
                  - active_only.beta_potential_hartree[index]);
         result.frozen_potential.alpha_ry[index]
-            = hartree_to_rydberg
-              * (total.alpha_potential_hartree[index]
-                 - frozen_only.alpha_potential_hartree[index]);
+            = hartree_to_rydberg * total.alpha_potential_hartree[index]
+              - frozen_cache.potential_ry.alpha_ry[index];
         result.frozen_potential.beta_ry[index]
-            = hartree_to_rydberg
-              * (total.beta_potential_hartree[index]
-                 - frozen_only.beta_potential_hartree[index]);
+            = hartree_to_rydberg * total.beta_potential_hartree[index]
+              - frozen_cache.potential_ry.beta_ry[index];
     }
     return result;
 #else
@@ -498,6 +568,7 @@ NonadditiveFunctionalResult LibxcPbeProvider::evaluate(
     (void)frozen;
     (void)grid;
     (void)density_floor_bohr3;
+    (void)frozen_cache;
     (void)differential_operator;
     throw std::runtime_error("Libxc PBE support is unavailable in this ABACUS build");
 #endif

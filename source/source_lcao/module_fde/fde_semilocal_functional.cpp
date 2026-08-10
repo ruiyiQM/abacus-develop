@@ -73,6 +73,22 @@ void validate_density(const SpinDensity& density, const std::size_t expected_siz
     }
 }
 
+bool equal_spin_channels(const SpinDensity& density)
+{
+    return density.alpha_bohr3 == density.beta_bohr3;
+}
+
+void validate_frozen_cache(const FrozenSemilocalCache& cache,
+                           const std::size_t expected_size)
+{
+    if (!std::isfinite(cache.energy_ry)
+        || cache.potential_ry.alpha_ry.size() != expected_size
+        || cache.potential_ry.beta_ry.size() != expected_size)
+    {
+        throw std::invalid_argument("FDE frozen functional cache does not match the grid");
+    }
+}
+
 std::vector<double> add_density(const std::vector<double>& first,
                                 const std::vector<double>& second)
 {
@@ -344,24 +360,78 @@ ScalarFunctionalResult evaluate_unpolarized_dirac_exchange(const std::vector<dou
 }
 
 template <typename Evaluator>
-NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_density,
-                                                 const SpinDensity& frozen_density,
-                                                 const UniformGrid& grid,
-                                                 const double density_floor,
-                                                 const GridDifferentialOperator*
-                                                     differential_operator,
-                                                 const Evaluator& evaluator)
+FrozenSemilocalCache prepare_frozen_functional(
+    const SpinDensity& frozen_density,
+    const UniformGrid& grid,
+    const double density_floor,
+    const GridDifferentialOperator* differential_operator,
+    const Evaluator& evaluator)
 {
     const std::size_t size = evaluation_size(grid, differential_operator);
-    validate_density(active_density, size);
     validate_density(frozen_density, size);
     if (!std::isfinite(density_floor) || density_floor <= 0.0)
     {
         throw std::invalid_argument("FDE density floor must be finite and positive");
     }
 
+    FrozenSemilocalCache cache;
+    cache.energy_ry = 0.0;
+    cache.potential_ry.alpha_ry.assign(size, 0.0);
+    cache.potential_ry.beta_ry.assign(size, 0.0);
+    const std::vector<double>* frozen_channels[2]
+        = {&frozen_density.alpha_bohr3, &frozen_density.beta_bohr3};
+    std::vector<double>* cache_potentials[2]
+        = {&cache.potential_ry.alpha_ry, &cache.potential_ry.beta_ry};
+    const int evaluated_channels = equal_spin_channels(frozen_density) ? 1 : 2;
+
+    for (int spin = 0; spin < evaluated_channels; ++spin)
+    {
+        std::vector<double> frozen_scaled(size, 0.0);
+#pragma omp parallel for schedule(static)
+        for (std::size_t index = 0; index < size; ++index)
+        {
+            frozen_scaled[index] = 2.0 * (*frozen_channels[spin])[index];
+        }
+        const ScalarFunctionalResult frozen
+            = evaluator(frozen_scaled, grid, density_floor, differential_operator);
+        const int multiplicity = evaluated_channels == 1 ? 2 : 1;
+        cache.energy_ry += multiplicity * hartree_to_rydberg * 0.5
+                           * frozen.energy_hartree;
+#pragma omp parallel for schedule(static)
+        for (std::size_t index = 0; index < size; ++index)
+        {
+            (*cache_potentials[spin])[index]
+                = hartree_to_rydberg * frozen.potential_hartree[index];
+        }
+    }
+    if (evaluated_channels == 1)
+    {
+        cache.potential_ry.beta_ry = cache.potential_ry.alpha_ry;
+    }
+    return cache;
+}
+
+template <typename Evaluator>
+NonadditiveFunctionalResult evaluate_nonadditive_cached(
+    const SpinDensity& active_density,
+    const SpinDensity& frozen_density,
+    const UniformGrid& grid,
+    const double density_floor,
+    const GridDifferentialOperator* differential_operator,
+    const FrozenSemilocalCache& frozen_cache,
+    const Evaluator& evaluator)
+{
+    const std::size_t size = evaluation_size(grid, differential_operator);
+    validate_density(active_density, size);
+    validate_density(frozen_density, size);
+    validate_frozen_cache(frozen_cache, size);
+    if (!std::isfinite(density_floor) || density_floor <= 0.0)
+    {
+        throw std::invalid_argument("FDE density floor must be finite and positive");
+    }
+
     NonadditiveFunctionalResult result;
-    result.energy_ry = 0.0;
+    result.energy_ry = -frozen_cache.energy_ry;
     result.active_potential.alpha_ry.assign(size, 0.0);
     result.active_potential.beta_ry.assign(size, 0.0);
     result.frozen_potential.alpha_ry.assign(size, 0.0);
@@ -371,12 +441,16 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
         = {&active_density.alpha_bohr3, &active_density.beta_bohr3};
     const std::vector<double>* frozen_channels[2]
         = {&frozen_density.alpha_bohr3, &frozen_density.beta_bohr3};
+    const std::vector<double>* cached_frozen_potentials[2]
+        = {&frozen_cache.potential_ry.alpha_ry, &frozen_cache.potential_ry.beta_ry};
     std::vector<double>* active_potentials[2]
         = {&result.active_potential.alpha_ry, &result.active_potential.beta_ry};
     std::vector<double>* frozen_potentials[2]
         = {&result.frozen_potential.alpha_ry, &result.frozen_potential.beta_ry};
+    const int evaluated_channels
+        = (equal_spin_channels(active_density) && equal_spin_channels(frozen_density)) ? 1 : 2;
 
-    for (int spin = 0; spin < 2; ++spin)
+    for (int spin = 0; spin < evaluated_channels; ++spin)
     {
         std::vector<double> active_scaled(size, 0.0);
         std::vector<double> frozen_scaled(size, 0.0);
@@ -391,11 +465,9 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
             = evaluator(total_scaled, grid, density_floor, differential_operator);
         const ScalarFunctionalResult active
             = evaluator(active_scaled, grid, density_floor, differential_operator);
-        const ScalarFunctionalResult frozen
-            = evaluator(frozen_scaled, grid, density_floor, differential_operator);
-        result.energy_ry += hartree_to_rydberg * 0.5
-                            * (total.energy_hartree - active.energy_hartree
-                               - frozen.energy_hartree);
+        const int multiplicity = evaluated_channels == 1 ? 2 : 1;
+        result.energy_ry += multiplicity * hartree_to_rydberg * 0.5
+                            * (total.energy_hartree - active.energy_hartree);
 #pragma omp parallel for schedule(static)
         for (std::size_t index = 0; index < size; ++index)
         {
@@ -403,17 +475,21 @@ NonadditiveFunctionalResult evaluate_nonadditive(const SpinDensity& active_densi
                 = hartree_to_rydberg
                   * (total.potential_hartree[index] - active.potential_hartree[index]);
             (*frozen_potentials[spin])[index]
-                = hartree_to_rydberg
-                  * (total.potential_hartree[index] - frozen.potential_hartree[index]);
+                = hartree_to_rydberg * total.potential_hartree[index]
+                  - (*cached_frozen_potentials[spin])[index];
         }
+    }
+    if (evaluated_channels == 1)
+    {
+        result.active_potential.beta_ry = result.active_potential.alpha_ry;
+        result.frozen_potential.beta_ry = result.frozen_potential.alpha_ry;
     }
     return result;
 }
 
 } // namespace
 
-NonadditiveFunctionalResult SemilocalFunctional::nonadditive_kinetic(
-    const SpinDensity& active,
+FrozenSemilocalCache SemilocalFunctional::prepare_frozen_kinetic(
     const SpinDensity& frozen,
     const UniformGrid& grid,
     const KineticFunctional functional,
@@ -430,12 +506,75 @@ NonadditiveFunctionalResult SemilocalFunctional::nonadditive_kinetic(
                                             floor,
                                             local_operator);
     };
-    return evaluate_nonadditive(active,
-                                frozen,
-                                grid,
-                                density_floor_bohr3,
-                                differential_operator,
-                                evaluator);
+    return prepare_frozen_functional(frozen,
+                                     grid,
+                                     density_floor_bohr3,
+                                     differential_operator,
+                                     evaluator);
+}
+
+NonadditiveFunctionalResult SemilocalFunctional::nonadditive_kinetic(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const KineticFunctional functional,
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator)
+{
+    const FrozenSemilocalCache frozen_cache
+        = prepare_frozen_kinetic(frozen,
+                                 grid,
+                                 functional,
+                                 density_floor_bohr3,
+                                 differential_operator);
+    return nonadditive_kinetic_cached(active,
+                                      frozen,
+                                      grid,
+                                      functional,
+                                      density_floor_bohr3,
+                                      frozen_cache,
+                                      differential_operator);
+}
+
+NonadditiveFunctionalResult SemilocalFunctional::nonadditive_kinetic_cached(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const KineticFunctional functional,
+    const double density_floor_bohr3,
+    const FrozenSemilocalCache& frozen_cache,
+    const GridDifferentialOperator* differential_operator)
+{
+    const auto evaluator = [functional](const std::vector<double>& density,
+                                        const UniformGrid& local_grid,
+                                        const double floor,
+                                        const GridDifferentialOperator* local_operator) {
+        return evaluate_unpolarized_kinetic(density,
+                                            local_grid,
+                                            functional,
+                                            floor,
+                                            local_operator);
+    };
+    return evaluate_nonadditive_cached(active,
+                                       frozen,
+                                       grid,
+                                       density_floor_bohr3,
+                                       differential_operator,
+                                       frozen_cache,
+                                       evaluator);
+}
+
+FrozenSemilocalCache SemilocalFunctional::prepare_frozen_dirac_exchange(
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator)
+{
+    return prepare_frozen_functional(frozen,
+                                     grid,
+                                     density_floor_bohr3,
+                                     differential_operator,
+                                     evaluate_unpolarized_dirac_exchange);
 }
 
 NonadditiveFunctionalResult SemilocalFunctional::nonadditive_dirac_exchange(
@@ -445,12 +584,34 @@ NonadditiveFunctionalResult SemilocalFunctional::nonadditive_dirac_exchange(
     const double density_floor_bohr3,
     const GridDifferentialOperator* differential_operator)
 {
-    return evaluate_nonadditive(active,
-                                frozen,
-                                grid,
-                                density_floor_bohr3,
-                                differential_operator,
-                                evaluate_unpolarized_dirac_exchange);
+    const FrozenSemilocalCache frozen_cache
+        = prepare_frozen_dirac_exchange(frozen,
+                                        grid,
+                                        density_floor_bohr3,
+                                        differential_operator);
+    return nonadditive_dirac_exchange_cached(active,
+                                              frozen,
+                                              grid,
+                                              density_floor_bohr3,
+                                              frozen_cache,
+                                              differential_operator);
+}
+
+NonadditiveFunctionalResult SemilocalFunctional::nonadditive_dirac_exchange_cached(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const FrozenSemilocalCache& frozen_cache,
+    const GridDifferentialOperator* differential_operator)
+{
+    return evaluate_nonadditive_cached(active,
+                                       frozen,
+                                       grid,
+                                       density_floor_bohr3,
+                                       differential_operator,
+                                       frozen_cache,
+                                       evaluate_unpolarized_dirac_exchange);
 }
 
 } // namespace fde

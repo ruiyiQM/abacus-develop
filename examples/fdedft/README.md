@@ -14,3 +14,5 @@ These inputs demonstrate the workflow and are not converged production
 benchmarks.  See the case README for resource provenance and numerical details.
 The workflow writes per-call and aggregate performance JSON in addition to the
 scientific output; see `tools/fde/README.md` for the field definitions.
+Frozen-only semilocal functional values are cached inside each embedded SCF;
+this optimization is automatic and requires no example INPUT keyword.

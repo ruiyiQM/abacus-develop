@@ -75,6 +75,11 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
         throw std::invalid_argument("FDE potential data must match the local ABACUS density slab");
     }
     differential_operator_.reset(new PwGridDifferential(*rho_basis));
+    {
+        const ScopedPotFdeTimer cache_timer("prepare_frozen_cache");
+        frozen_cache_ = EmbeddingPotentialEvaluator::prepare_frozen(
+            frozen_density_, config_, *xc_provider_, differential_operator_.get());
+    }
     last_result_.potential.alpha_ry.assign(size, 0.0);
     last_result_.potential.beta_ry.assign(size, 0.0);
     last_result_.hartree_cross_energy_ry = 0.0;
@@ -86,12 +91,13 @@ EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) con
 {
     const ScopedPotFdeTimer evaluate_timer("evaluate_functionals");
     EmbeddingPotentialResult result
-        = EmbeddingPotentialEvaluator::evaluate(active_density,
-                                                frozen_density_,
-                                                frozen_hartree_potential_ry_,
-                                                config_,
-                                                *xc_provider_,
-                                                differential_operator_.get());
+        = EmbeddingPotentialEvaluator::evaluate_cached(active_density,
+                                                       frozen_density_,
+                                                       frozen_hartree_potential_ry_,
+                                                       config_,
+                                                       *xc_provider_,
+                                                       frozen_cache_,
+                                                       differential_operator_.get());
     double energies[3] = {result.hartree_cross_energy_ry,
                           result.nonadditive_kinetic_energy_ry,
                           result.nonadditive_xc_energy_ry};

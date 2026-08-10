@@ -5,6 +5,16 @@
 namespace fde
 {
 
+FrozenSemilocalCache DiracExchangeProvider::prepare_frozen(
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const GridDifferentialOperator* differential_operator) const
+{
+    return SemilocalFunctional::prepare_frozen_dirac_exchange(
+        frozen, grid, density_floor_bohr3, differential_operator);
+}
+
 NonadditiveFunctionalResult DiracExchangeProvider::evaluate(
     const SpinDensity& active,
     const SpinDensity& frozen,
@@ -19,6 +29,43 @@ NonadditiveFunctionalResult DiracExchangeProvider::evaluate(
                                                            differential_operator);
 }
 
+NonadditiveFunctionalResult DiracExchangeProvider::evaluate_cached(
+    const SpinDensity& active,
+    const SpinDensity& frozen,
+    const UniformGrid& grid,
+    const double density_floor_bohr3,
+    const FrozenSemilocalCache& frozen_cache,
+    const GridDifferentialOperator* differential_operator) const
+{
+    return SemilocalFunctional::nonadditive_dirac_exchange_cached(
+        active,
+        frozen,
+        grid,
+        density_floor_bohr3,
+        frozen_cache,
+        differential_operator);
+}
+
+FrozenEmbeddingCache EmbeddingPotentialEvaluator::prepare_frozen(
+    const SpinDensity& frozen_density,
+    const PotFdeConfig& config,
+    const NonadditiveXcProvider& xc_provider,
+    const GridDifferentialOperator* differential_operator)
+{
+    FrozenEmbeddingCache cache;
+    cache.kinetic = SemilocalFunctional::prepare_frozen_kinetic(
+        frozen_density,
+        config.grid,
+        config.kinetic_functional,
+        config.density_floor_bohr3,
+        differential_operator);
+    cache.xc = xc_provider.prepare_frozen(frozen_density,
+                                          config.grid,
+                                          config.density_floor_bohr3,
+                                          differential_operator);
+    return cache;
+}
+
 EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
     const SpinDensity& active_density,
     const SpinDensity& frozen_density,
@@ -27,19 +74,45 @@ EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate(
     const NonadditiveXcProvider& xc_provider,
     const GridDifferentialOperator* differential_operator)
 {
+    const FrozenEmbeddingCache frozen_cache
+        = prepare_frozen(frozen_density,
+                         config,
+                         xc_provider,
+                         differential_operator);
+    return evaluate_cached(active_density,
+                           frozen_density,
+                           frozen_hartree_potential_ry,
+                           config,
+                           xc_provider,
+                           frozen_cache,
+                           differential_operator);
+}
+
+EmbeddingPotentialResult EmbeddingPotentialEvaluator::evaluate_cached(
+    const SpinDensity& active_density,
+    const SpinDensity& frozen_density,
+    const std::vector<double>& frozen_hartree_potential_ry,
+    const PotFdeConfig& config,
+    const NonadditiveXcProvider& xc_provider,
+    const FrozenEmbeddingCache& frozen_cache,
+    const GridDifferentialOperator* differential_operator)
+{
     const NonadditiveFunctionalResult kinetic
-        = SemilocalFunctional::nonadditive_kinetic(active_density,
-                                                   frozen_density,
-                                                   config.grid,
-                                                   config.kinetic_functional,
-                                                   config.density_floor_bohr3,
-                                                   differential_operator);
+        = SemilocalFunctional::nonadditive_kinetic_cached(
+            active_density,
+            frozen_density,
+            config.grid,
+            config.kinetic_functional,
+            config.density_floor_bohr3,
+            frozen_cache.kinetic,
+            differential_operator);
     const NonadditiveFunctionalResult xc
-        = xc_provider.evaluate(active_density,
-                               frozen_density,
-                               config.grid,
-                               config.density_floor_bohr3,
-                               differential_operator);
+        = xc_provider.evaluate_cached(active_density,
+                                      frozen_density,
+                                      config.grid,
+                                      config.density_floor_bohr3,
+                                      frozen_cache.xc,
+                                      differential_operator);
     const std::size_t size = frozen_hartree_potential_ry.size();
     if (active_density.alpha_bohr3.size() != size || active_density.beta_bohr3.size() != size)
     {

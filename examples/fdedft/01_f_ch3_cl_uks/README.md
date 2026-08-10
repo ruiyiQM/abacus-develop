@@ -85,6 +85,11 @@ that density with Pulay and finally guarded plain mixing.  See
 `tools/fde/README.md` for precedence, validation rules, and the complete JSON
 schema used by these controls.
 
+Frozen-only LC94/PBE functional values are prepared once per active-fragment
+SCF and then reused for its electronic steps.  The cache is in memory, is
+invalidated by constructing the next fragment job, and needs no workflow or
+ABACUS INPUT option.
+
 The reference calculation converged the reactant and product states in five
 and six freeze--thaw cycles, respectively.  Its orthogonalized coupling is
 `-0.0006178906742 Ry` (`-8.406830896 meV`).  Compact reference files are under

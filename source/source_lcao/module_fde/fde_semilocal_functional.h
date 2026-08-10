@@ -42,6 +42,13 @@ struct NonadditiveFunctionalResult
     SpinPotential frozen_potential;
 };
 
+/** Frozen-only value reused while an active subsystem SCF changes its density. */
+struct FrozenSemilocalCache
+{
+    double energy_ry;
+    SpinPotential potential_ry;
+};
+
 /** Derivatives on the local part of a real-space grid. */
 class GridDifferentialOperator
 {
@@ -61,6 +68,13 @@ class GridDifferentialOperator
 class SemilocalFunctional
 {
   public:
+    static FrozenSemilocalCache prepare_frozen_kinetic(
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const KineticFunctional functional,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator);
+
     static NonadditiveFunctionalResult nonadditive_kinetic(
         const SpinDensity& active,
         const SpinDensity& frozen,
@@ -69,12 +83,35 @@ class SemilocalFunctional
         const double density_floor_bohr3,
         const GridDifferentialOperator* differential_operator = nullptr);
 
+    static NonadditiveFunctionalResult nonadditive_kinetic_cached(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const KineticFunctional functional,
+        const double density_floor_bohr3,
+        const FrozenSemilocalCache& frozen_cache,
+        const GridDifferentialOperator* differential_operator);
+
+    static FrozenSemilocalCache prepare_frozen_dirac_exchange(
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator);
+
     static NonadditiveFunctionalResult nonadditive_dirac_exchange(
         const SpinDensity& active,
         const SpinDensity& frozen,
         const UniformGrid& grid,
         const double density_floor_bohr3,
         const GridDifferentialOperator* differential_operator = nullptr);
+
+    static NonadditiveFunctionalResult nonadditive_dirac_exchange_cached(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const double density_floor_bohr3,
+        const FrozenSemilocalCache& frozen_cache,
+        const GridDifferentialOperator* differential_operator);
 };
 
 } // namespace fde

@@ -196,3 +196,95 @@ TEST(FdeSemilocalFunctional, EvaluatesAProcessorLocalSlabThroughInjectedDerivati
     EXPECT_EQ(differential.gradient_calls(), 6);
     EXPECT_EQ(differential.divergence_calls(), 6);
 }
+
+TEST(FdeSemilocalFunctional, ReusesFrozenKineticEvaluationWithoutChangingResult)
+{
+    const fde::SpinDensity active{{0.5, 0.4}, {0.25, 0.2}};
+    const fde::SpinDensity frozen{{0.2, 0.3}, {0.1, 0.15}};
+    const fde::UniformGrid global_grid{4, 1, 1, 0.5, 1.0, 1.0};
+    ZeroLocalDifferential reference_differential(2);
+    const fde::NonadditiveFunctionalResult reference
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            &reference_differential);
+
+    ZeroLocalDifferential cached_differential(2);
+    const fde::FrozenSemilocalCache cache
+        = fde::SemilocalFunctional::prepare_frozen_kinetic(
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            &cached_differential);
+    EXPECT_EQ(cached_differential.gradient_calls(), 2);
+    EXPECT_EQ(cached_differential.divergence_calls(), 2);
+    const fde::NonadditiveFunctionalResult cached
+        = fde::SemilocalFunctional::nonadditive_kinetic_cached(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            cache,
+            &cached_differential);
+    EXPECT_EQ(cached_differential.gradient_calls(), 6);
+    EXPECT_EQ(cached_differential.divergence_calls(), 6);
+    EXPECT_DOUBLE_EQ(cached.energy_ry, reference.energy_ry);
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+        EXPECT_DOUBLE_EQ(cached.active_potential.alpha_ry[index],
+                         reference.active_potential.alpha_ry[index]);
+        EXPECT_DOUBLE_EQ(cached.active_potential.beta_ry[index],
+                         reference.active_potential.beta_ry[index]);
+        EXPECT_DOUBLE_EQ(cached.frozen_potential.alpha_ry[index],
+                         reference.frozen_potential.alpha_ry[index]);
+        EXPECT_DOUBLE_EQ(cached.frozen_potential.beta_ry[index],
+                         reference.frozen_potential.beta_ry[index]);
+    }
+    fde::SemilocalFunctional::nonadditive_kinetic_cached(
+        active,
+        frozen,
+        global_grid,
+        fde::KineticFunctional::Lc94Pw91k,
+        1.0e-12,
+        cache,
+        &cached_differential);
+    EXPECT_EQ(cached_differential.gradient_calls(), 10);
+    EXPECT_EQ(cached_differential.divergence_calls(), 10);
+}
+
+TEST(FdeSemilocalFunctional, ClosedShellCacheEvaluatesOneSpinChannel)
+{
+    const fde::SpinDensity active{{0.5, 0.4}, {0.5, 0.4}};
+    const fde::SpinDensity frozen{{0.2, 0.3}, {0.2, 0.3}};
+    const fde::UniformGrid global_grid{4, 1, 1, 0.5, 1.0, 1.0};
+    ZeroLocalDifferential differential(2);
+    const fde::FrozenSemilocalCache cache
+        = fde::SemilocalFunctional::prepare_frozen_kinetic(
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            &differential);
+    EXPECT_EQ(differential.gradient_calls(), 1);
+    EXPECT_EQ(differential.divergence_calls(), 1);
+    const fde::NonadditiveFunctionalResult result
+        = fde::SemilocalFunctional::nonadditive_kinetic_cached(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Lc94Pw91k,
+            1.0e-12,
+            cache,
+            &differential);
+    EXPECT_EQ(differential.gradient_calls(), 3);
+    EXPECT_EQ(differential.divergence_calls(), 3);
+    EXPECT_EQ(result.active_potential.alpha_ry,
+              result.active_potential.beta_ry);
+    EXPECT_EQ(result.frozen_potential.alpha_ry,
+              result.frozen_potential.beta_ry);
+}
