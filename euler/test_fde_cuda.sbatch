@@ -158,16 +158,63 @@ for kedf in thomas_fermi pw91k revapbek; do
                      "${TEST_ROOT}/${kedf}-gpu/energies.txt"
 done
 
-# PW91k and revAPBEk also need a nonzero-gradient check.  Reuse the converged
-# CPU checkpoint from the uniform-seed smoke run as the identical active
-# density input for both backends.  This exercises the CPU PW FFT versus the
-# single-rank CUDA cuFFT path on a physical, nonuniform fragment density.
+# PW91k and revAPBEk also need a nonzero-gradient check.  A deliberately
+# unconverged one-step CPU bootstrap turns the uniform initialization into a
+# physical fragment density.  That exact checkpoint then becomes the active
+# density input for both backends, exercising the CPU PW FFT versus the
+# single-rank CUDA cuFFT path on identical nonuniform data.
 for kedf in pw91k revapbek; do
-    active_checkpoint="${TEST_ROOT}/${kedf}-cpu/result.fde_density"
+    bootstrap_root="${TEST_ROOT}/${kedf}-bootstrap"
+    mkdir -p "${bootstrap_root}"
+    cp "${TEMPLATE_ROOT}/INPUT" "${TEMPLATE_ROOT}/KPT" \
+       "${TEMPLATE_ROOT}/STRU" "${bootstrap_root}/"
+    cp "${REFERENCE_CASE}/FDE_CONFIG" "${bootstrap_root}/FDE_CONFIG"
+    cp "${ACTIVE_SEED}" "${bootstrap_root}/active.fde_seed"
+    cp "${FROZEN_SEED}" "${bootstrap_root}/frozen.fde_seed"
+    sed -i -E "s|^FUNCTIONALS .*|FUNCTIONALS pbe ${kedf}|" \
+        "${bootstrap_root}/active.fde_seed" "${bootstrap_root}/frozen.fde_seed"
+    sed -i -E \
+        -e "s|^ACTIVE_DENSITY .*|ACTIVE_DENSITY ${bootstrap_root}/active.fde_seed|" \
+        -e "s|^FROZEN_DENSITY CH3Cl .*|FROZEN_DENSITY CH3Cl ${bootstrap_root}/frozen.fde_seed|" \
+        -e "s|^OUTPUT_PREFIX .*|OUTPUT_PREFIX result|" \
+        -e "s|^KEDF .*|KEDF ${kedf}|" \
+        -e "s|^MAX_SCF_ITERATIONS .*|MAX_SCF_ITERATIONS 1|" \
+        -e "s|^SCF_DENSITY_TOLERANCE .*|SCF_DENSITY_TOLERANCE 1.0e-12|" \
+        "${bootstrap_root}/FDE_CONFIG"
+    sed -i -E \
+        -e "s|^suffix[[:space:]].*|suffix                  fde_${kedf}_bootstrap|" \
+        -e "s|^scf_thr[[:space:]].*|scf_thr                 1.0e-12|" \
+        -e "s|^scf_nmax[[:space:]].*|scf_nmax                1|" \
+        -e "s|^ks_solver[[:space:]].*|ks_solver               lapack|" \
+        "${bootstrap_root}/INPUT"
+    printf 'device                  cpu\n' >> "${bootstrap_root}/INPUT"
+    echo "RUN ${kedf} nonuniform bootstrap"
+    (
+        cd "${bootstrap_root}"
+        /usr/bin/time -f 'WALL_SECONDS %e' \
+            "${SRUN_BIN}" --export=ALL --exclusive --ntasks=1 \
+                --cpus-per-task="${TEST_THREADS}" \
+                "${ABACUS_BIN}" > stdout.log 2> stderr.log
+    )
+    cat "${bootstrap_root}/stderr.log"
+    active_checkpoint="${bootstrap_root}/result.partial.fde_density"
     if [[ ! -s "${active_checkpoint}" ]]; then
         echo "ERROR: nonuniform ${kedf} checkpoint is missing" >&2
         exit 5
     fi
+    python3 - "${ABACUS_ROOT}/tools/fde" "${active_checkpoint}" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from fde_workflow import read_density
+
+density = read_density(Path(sys.argv[2]))
+spreads = [max(density[spin]) - min(density[spin]) for spin in ("alpha", "beta")]
+print("DENSITY_SPREAD", *spreads)
+if max(spreads) <= 1.0e-8:
+    raise SystemExit("bootstrap density remained uniform")
+PY
     for backend in cpu gpu; do
         case_root="${TEST_ROOT}/${kedf}-nonuniform-${backend}"
         mkdir -p "${case_root}"
