@@ -32,6 +32,20 @@ MPI rank per allocated GPU.  A GPU-enabled ELPA installation may instead use
 `ks_solver: elpa`; the default toolchain ELPA is CPU-only, so cuSOLVER is the
 verified Euler path.
 
+After the CUDA build succeeds, run the focused 40 Ry FDE regression with:
+
+```bash
+sbatch euler/test_fde_cuda.sbatch
+```
+
+The job prepares the committed `[F-CH3-Cl]-` UKS example on its exact FFT
+grid and executes one deliberately loose electronic step for every
+Thomas--Fermi, PW91k, and revAPBEk CPU/GPU pair.  It checks that each run
+writes a valid FDE density checkpoint and reports the subsystem and
+nonadditive energies when the one-step smoke calculation satisfies the loose
+SCF threshold.  Results remain isolated below
+`/cluster/scratch/$USER/abacus-fde-cuda-test-$SLURM_JOB_ID`.
+
 ## First build
 
 Prepare a private toolchain copy once so dependency builds do not modify the
