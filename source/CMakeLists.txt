@@ -317,9 +317,27 @@ if(USE_CUDA)
     list(APPEND _abacus_feature_libs cudart nvToolsExt)
   endif()
   list(APPEND _abacus_feature_include_dirs ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 13.0
-     AND EXISTS "${CUDAToolkit_ROOT}/include/cccl")
-    list(APPEND _abacus_feature_include_dirs "${CUDAToolkit_ROOT}/include/cccl")
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 13.0)
+    # CUDA 13 installs Thrust/CUB through CCCL.  Depending on the toolkit
+    # packaging, CCCL is either below the top-level include directory or the
+    # architecture-specific target directory.  Host-compiled C++ sources also
+    # include Thrust, so propagate the discovered CCCL directory to the common
+    # ABACUS include list instead of relying on nvcc's implicit include paths.
+    set(_cuda_cccl_candidates
+      "${CUDAToolkit_ROOT}/include/cccl"
+      "${CUDAToolkit_TARGET_DIR}/include/cccl")
+    foreach(_cuda_include_dir IN LISTS
+            CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES CUDAToolkit_INCLUDE_DIRS)
+      list(APPEND _cuda_cccl_candidates "${_cuda_include_dir}/cccl")
+    endforeach()
+    foreach(_cuda_cccl_dir IN LISTS _cuda_cccl_candidates)
+      if(EXISTS "${_cuda_cccl_dir}/thrust/complex.h")
+        list(APPEND _abacus_feature_include_dirs "${_cuda_cccl_dir}")
+      endif()
+    endforeach()
+    unset(_cuda_cccl_dir)
+    unset(_cuda_include_dir)
+    unset(_cuda_cccl_candidates)
   endif()
 
   if(ENABLE_NCCL_PARALLEL_DEVICE)

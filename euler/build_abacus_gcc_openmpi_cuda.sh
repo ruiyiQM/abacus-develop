@@ -36,6 +36,7 @@ module load "${CUDA_MODULE}"
 # The isolated GNU toolchain supplies FFTW, Libxc, ELPA, LibRI, and LibComm.
 # It contains no Intel/oneAPI components and can be shared read-only by a CUDA
 # source build.
+export LD_RUN_PATH="${LD_RUN_PATH:-}"
 source "${TOOLCHAIN_SETUP}"
 
 for command_name in gcc g++ gfortran mpicc mpicxx mpifort cmake nvcc; do
