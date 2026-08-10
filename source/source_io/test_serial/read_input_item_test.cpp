@@ -17,6 +17,7 @@
  */
 #define private public
 #include "source_io/module_parameter/input_item.h"
+#include "source_io/module_parameter/fde_functional_capability.h"
 #include "source_io/module_parameter/read_input.h"
 #undef private
 
@@ -63,6 +64,7 @@ TEST_F(InputTest, NativeFdeInput)
     nupdown->second.str_values = {"0.0"};
     nupdown->second.read_value(nupdown->second, param);
     EXPECT_FALSE(param.sys.two_fermi);
+    param.input.nspin = 2;
     ASSERT_NE(task->second.reset_value, nullptr);
     task->second.reset_value(task->second, param);
     EXPECT_TRUE(param.sys.two_fermi);
@@ -76,11 +78,16 @@ TEST_F(InputTest, NativeFdeInput)
     param.input.dft_functional = "pbe";
     EXPECT_NO_THROW(task->second.check_value(task->second, param));
 
+    // The native runtime supports k points with kpar == 1; gamma_only is not
+    // part of this input item's capability gate.
     param.input.gamma_only = false;
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
+
+    param.input.dft_functional = "scan";
     EXPECT_EXIT(task->second.check_value(task->second, param),
                 ::testing::ExitedWithCode(1),
                 "");
-    param.input.gamma_only = true;
+
     param.input.dft_functional = "pbe0";
     EXPECT_EXIT(task->second.check_value(task->second, param),
                 ::testing::ExitedWithCode(1),
@@ -90,6 +97,21 @@ TEST_F(InputTest, NativeFdeInput)
     EXPECT_EXIT(task->second.check_value(task->second, param),
                 ::testing::ExitedWithCode(1),
                 "");
+}
+
+TEST_F(InputTest, NativeFdeMetaGgaCapability)
+{
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional("PBE"),
+              ModuleIO::FdeXcCapability::pbe_semilocal);
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional("SCAN"),
+              ModuleIO::FdeXcCapability::meta_gga_requires_tau);
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional(
+                  "MGGA_X_R2SCAN+MGGA_C_R2SCAN"),
+              ModuleIO::FdeXcCapability::meta_gga_requires_tau);
+    EXPECT_THAT(
+        ModuleIO::fde_xc_capability_error(
+            ModuleIO::FdeXcCapability::meta_gga_requires_tau),
+        testing::HasSubstr("pointwise kinetic-energy density tau"));
 }
 
 TEST_F(InputTest, RelaxMethod)

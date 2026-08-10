@@ -1,10 +1,45 @@
 #include "read_input.h"
 
+#include "fde_functional_capability.h"
 #include "read_input_tool.h"
 #include "source_base/tool_quit.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace ModuleIO
 {
+
+FdeXcCapability classify_fde_xc_functional(const std::string& functional)
+{
+    std::string normalized(functional);
+    std::transform(normalized.begin(),
+                   normalized.end(),
+                   normalized.begin(),
+                   [](const unsigned char character) {
+                       return static_cast<char>(std::tolower(character));
+                   });
+    if (normalized == "pbe")
+    {
+        return FdeXcCapability::pbe_semilocal;
+    }
+    if (normalized == "scan" || normalized.find("mgga_") != std::string::npos)
+    {
+        return FdeXcCapability::meta_gga_requires_tau;
+    }
+    return FdeXcCapability::unsupported;
+}
+
+std::string fde_xc_capability_error(const FdeXcCapability capability)
+{
+    if (capability == FdeXcCapability::meta_gga_requires_tau)
+    {
+        return "fde_task embedded_scf does not yet support meta-GGA XC: "
+               "FDE density artifacts lack pointwise kinetic-energy density tau, "
+               "and PotFde lacks the corresponding generalized-Kohn-Sham operator";
+    }
+    return "fde_task embedded_scf currently supports only PBE XC";
+}
 
 void ReadInput::item_fde()
 {
@@ -61,11 +96,13 @@ void ReadInput::item_fde()
                         "fde_task embedded_scf requires calculation scf, basis_type lcao, "
                         "nspin 1 or 2, noncolin 0, and lspinorb 0");
                 }
-                if (para.input.dft_functional != "pbe")
+                const FdeXcCapability capability
+                    = classify_fde_xc_functional(para.input.dft_functional);
+                if (capability != FdeXcCapability::pbe_semilocal)
                 {
                     ModuleBase::WARNING_QUIT(
                         "ReadInput",
-                        "fde_task embedded_scf currently requires dft_functional pbe");
+                        fde_xc_capability_error(capability));
                 }
             }
         };

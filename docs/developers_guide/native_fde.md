@@ -52,6 +52,26 @@ target. The production PBE nonadditive-XC adapter is introduced with the
 ABACUS potential integration, where it can share ABACUS grid conventions
 without changing the process-wide XC functional.
 
+### Exchange-correlation capability boundary
+
+Ordinary ABACUS support for an XC functional does not by itself make that
+functional available to native FDE. The embedded-SCF path must also be able to
+persist every frozen-fragment field and apply the nonadditive functional
+derivative to the active subsystem.
+
+| XC family | Native FDE status | Missing FDE data or operator |
+|---|---|---|
+| PBE GGA | Supported | None within the documented semilocal, no-NLCC contract |
+| SCAN/r2SCAN meta-GGA | Rejected explicitly | Pointwise fragment kinetic-energy density `tau` in density artifacts and the associated generalized-Kohn-Sham `delta Exc / delta tau` operator |
+
+ABACUS evaluates meta-GGA terms from both density and orbital kinetic-energy
+density. `FrozenDensityArtifact` currently stores spin densities plus a scalar
+orbital kinetic energy, not a pointwise `tau` field. `PotFde` also contributes
+only a multiplicative real-space spin potential. Reusing the ordinary SCAN
+local-density derivative while omitting the `tau` derivative would therefore
+be an incomplete meta-GGA FDE calculation, so `embedded_scf` fails before the
+SCF starts.
+
 ## Pseudopotential and AO-subspace boundary
 
 An environment atom contributes both a local pseudopotential and, in general,

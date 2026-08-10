@@ -4997,10 +4997,10 @@
 ### fde_task
 
 - **Type**: String
-- **Availability**: *LCAO Gamma-point, collinear-spin PBE calculations*
+- **Availability**: *LCAO collinear-spin PBE calculations*
 - **Description**: Select the native FDE runtime entry point.
   - `none`: run an ordinary ABACUS calculation.
-  - `embedded_scf`: run one subsystem-in-environment LCAO Gamma-point SCF job described by `fde_config`.
+  - `embedded_scf`: run one subsystem-in-environment LCAO SCF job described by `fde_config`.
   - `diabatic_postprocess`: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from `fde_config`. This mode does not require `STRU`.
 - **Default**: none
 
