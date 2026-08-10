@@ -96,6 +96,19 @@ TEST(FdeRuntimeConfig, RoundTripsDeterministically)
                      first.diagonal_energies[1].energy_ry);
 }
 
+TEST(FdeRuntimeConfig, AcceptsThomasFermiAliasAndWritesCanonicalName)
+{
+    std::string text(fluoride_substitution_config());
+    text.replace(text.find("KEDF lc94"), std::string("KEDF lc94").size(), "KEDF tf");
+    std::istringstream input(text);
+    const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_EQ(config.kinetic_functional, fde::KineticFunctional::ThomasFermi);
+
+    std::ostringstream serialized;
+    fde::FdeRuntimeConfigIO::write(serialized, config);
+    EXPECT_NE(serialized.str().find("KEDF thomas_fermi\n"), std::string::npos);
+}
+
 TEST(FdeRuntimeConfig, RejectsInvalidChargeSpinParity)
 {
     std::string text(fluoride_substitution_config());

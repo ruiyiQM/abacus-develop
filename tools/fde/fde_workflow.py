@@ -162,6 +162,9 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     controls = spec.get("controls", {})
     if not isinstance(controls, dict):
         raise WorkflowError("controls must be a JSON object")
+    kedf = _token(controls.get("kedf", "lc94"), "kedf").lower()
+    if kedf not in ("lc94", "thomas_fermi", "tf"):
+        raise WorkflowError("kedf must be lc94, thomas_fermi, or tf")
     solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
     if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx"):
         raise WorkflowError(

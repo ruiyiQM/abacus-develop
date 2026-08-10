@@ -46,6 +46,17 @@ assembly, and the complete `cal_v_eff` call.  Compare both electronic-step
 counts and wall time when evaluating an SCF policy: reducing FT cycles while
 making every inner solve much tighter is not necessarily a speedup.
 
+## Nonadditive kinetic functional
+
+Select the NAKE approximation with `controls.kedf`.  `thomas_fermi` is the
+canonical name for the local Thomas--Fermi functional; the shorter `tf` spelling
+is accepted as an input alias and is serialized as `thomas_fermi` by ABACUS.
+It contains no density-gradient term and is therefore the lowest-cost baseline
+for diagnosing whether convergence difficulty comes from a GGA kinetic
+potential.  Changing the KEDF changes the model and invalidates previous FDE
+density/functional-cache comparisons; use a separate work directory for each
+choice.
+
 ## Adaptive inner SCF
 
 `adaptive_scf` selects an inner-SCF stage from the preceding FT density RMS.

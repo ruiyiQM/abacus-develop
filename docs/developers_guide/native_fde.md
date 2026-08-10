@@ -52,6 +52,12 @@ target. The production PBE nonadditive-XC adapter is introduced with the
 ABACUS potential integration, where it can share ABACUS grid conventions
 without changing the process-wide XC functional.
 
+Thomas-Fermi is also a selectable runtime NAKE baseline. `KEDF
+thomas_fermi` is its canonical sidecar spelling and `KEDF tf` is an accepted
+input alias; deterministic serialization always writes the canonical name.
+Its local enhancement factor is exactly one, so it does not invoke a grid
+gradient or divergence contribution to the kinetic potential.
+
 ### Exchange-correlation capability boundary
 
 Ordinary ABACUS support for an XC functional does not by itself make that

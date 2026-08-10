@@ -410,13 +410,13 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             {
                 config.kinetic_functional = KineticFunctional::Lc94Pw91k;
             }
-            else if (value == "thomas_fermi")
+            else if (value == "thomas_fermi" || value == "tf")
             {
                 config.kinetic_functional = KineticFunctional::ThomasFermi;
             }
             else
             {
-                throw parse_error(line_number, "KEDF must be lc94 or thomas_fermi");
+                throw parse_error(line_number, "KEDF must be lc94, thomas_fermi, or tf");
             }
         }
         else if (key == "DENSITY_FLOOR_BOHR3")

@@ -154,6 +154,46 @@ TEST(FdeSemilocalFunctional, Lc94PotentialIsTheEnergyDerivative)
                 2.0e-6);
 }
 
+TEST(FdeSemilocalFunctional, ThomasFermiPotentialIsTheEnergyDerivative)
+{
+    fde::SpinDensity active = active_density();
+    const fde::SpinDensity frozen = frozen_density();
+    const double epsilon = 1.0e-6;
+    const std::size_t varied_index = 2;
+    const fde::NonadditiveFunctionalResult reference
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            line_grid(),
+            fde::KineticFunctional::ThomasFermi,
+            1.0e-12);
+    active.beta_bohr3[varied_index] += epsilon;
+    const double energy_plus
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+              active,
+              frozen,
+              line_grid(),
+              fde::KineticFunctional::ThomasFermi,
+              1.0e-12)
+              .energy_ry;
+    active.beta_bohr3[varied_index] -= 2.0 * epsilon;
+    const double energy_minus
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+              active,
+              frozen,
+              line_grid(),
+              fde::KineticFunctional::ThomasFermi,
+              1.0e-12)
+              .energy_ry;
+    const double volume_element = 0.5;
+    const double finite_difference
+        = (energy_plus - energy_minus) / (2.0 * epsilon * volume_element);
+
+    EXPECT_NEAR(reference.active_potential.beta_ry[varied_index],
+                finite_difference,
+                2.0e-8);
+}
+
 TEST(FdeSemilocalFunctional, ExchangeIsSymmetricAndRejectsNegativeDensity)
 {
     const fde::NonadditiveFunctionalResult first

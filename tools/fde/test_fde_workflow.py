@@ -37,6 +37,15 @@ class FdeWorkflowTest(unittest.TestCase):
         self.assertEqual(fde_workflow.spin_population(7, -1, 0), (4, 4))
         self.assertEqual(fde_workflow.spin_population(14, -1, -1), (7, 8))
 
+    def test_validates_thomas_fermi_kedf_names(self):
+        for name in ("thomas_fermi", "tf"):
+            spec = self.spec()
+            spec["controls"] = {"kedf": name}
+            fde_workflow.validate_spec(spec)
+        spec["controls"]["kedf"] = "unknown"
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "kedf"):
+            fde_workflow.validate_spec(spec)
+
     def test_rks_accepts_only_closed_shell_fragment_assignments(self):
         parameters = fde_workflow.embedded_scf_spin_parameters(
             {"spin_mode": "rks"}, 4, 0, 0)
