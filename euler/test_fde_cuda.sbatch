@@ -19,7 +19,7 @@ readonly TOOLCHAIN_SETUP="${ABACUS_TOOLCHAIN_SETUP:-/cluster/home/zhourui/abacus
 readonly CUDA_MODULE="${ABACUS_CUDA_MODULE:-cuda/13.0.2}"
 readonly TEST_THREADS="${ABACUS_FDE_TEST_THREADS:-${SLURM_CPUS_PER_TASK}}"
 readonly TEST_ROOT="${ABACUS_FDE_CUDA_TEST_ROOT:-/cluster/scratch/${USER}/abacus-fde-cuda-test-${SLURM_JOB_ID}}"
-readonly SRUN_BIN="${ABACUS_SRUN_BIN:-$(command -v srun)}"
+readonly SRUN_BIN="${ABACUS_SRUN_BIN:-/cluster/apps/slurm/bin/srun}"
 
 for required in "${ABACUS_BIN}" "${TOOLCHAIN_SETUP}" \
                 "${ABACUS_ROOT}/examples/fdedft/01_f_ch3_cl_uks/prepare_example.py" \
