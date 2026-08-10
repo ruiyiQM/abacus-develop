@@ -1,16 +1,35 @@
 #include "pot_fde.h"
 
 #include "fde_pw_pool_collectives.h"
+#include "source_base/timer.h"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace fde
 {
 
 namespace
 {
+
+class ScopedPotFdeTimer
+{
+  public:
+    explicit ScopedPotFdeTimer(const std::string& name) : name_(name)
+    {
+        ModuleBase::timer::start("PotFde", name_);
+    }
+
+    ~ScopedPotFdeTimer()
+    {
+        ModuleBase::timer::end("PotFde", name_);
+    }
+
+  private:
+    std::string name_;
+};
 
 double sanitize_charge_density(const double value)
 {
@@ -65,6 +84,7 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
 
 EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) const
 {
+    const ScopedPotFdeTimer evaluate_timer("evaluate_functionals");
     EmbeddingPotentialResult result
         = EmbeddingPotentialEvaluator::evaluate(active_density,
                                                 frozen_density_,
@@ -75,7 +95,10 @@ EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) con
     double energies[3] = {result.hartree_cross_energy_ry,
                           result.nonadditive_kinetic_energy_ry,
                           result.nonadditive_xc_energy_ry};
-    PwPoolCollectives::sum_in_place(energies, 3, *this->rho_basis_);
+    {
+        const ScopedPotFdeTimer reduction_timer("reduce_energies");
+        PwPoolCollectives::sum_in_place(energies, 3, *this->rho_basis_);
+    }
     result.hartree_cross_energy_ry = energies[0];
     result.nonadditive_kinetic_energy_ry = energies[1];
     result.nonadditive_xc_energy_ry = energies[2];
@@ -86,6 +109,7 @@ void PotFde::cal_v_eff(const Charge* const charge,
                        const UnitCell* const unit_cell,
                        ModuleBase::matrix& effective_potential)
 {
+    const ScopedPotFdeTimer total_timer("cal_v_eff");
     (void)unit_cell;
     if (charge == nullptr || charge->rho == nullptr
         || (charge->nspin != 1 && charge->nspin != 2)
@@ -96,51 +120,60 @@ void PotFde::cal_v_eff(const Charge* const charge,
         throw std::invalid_argument(
             "FDE potential requires a matching RKS or collinear UKS Charge object");
     }
+    {
+        const ScopedPotFdeTimer validation_timer("validate_charge");
+        for (int index = 0; index < effective_potential.nc; ++index)
+        {
+            if (!std::isfinite(charge->rho[0][index])
+                || (charge->nspin == 2 && !std::isfinite(charge->rho[1][index])))
+            {
+                throw std::invalid_argument("FDE Charge density contains a non-finite value");
+            }
+        }
+    }
     SpinDensity active;
     active.alpha_bohr3.resize(static_cast<std::size_t>(effective_potential.nc));
     active.beta_bohr3.resize(static_cast<std::size_t>(effective_potential.nc));
-    for (int index = 0; index < effective_potential.nc; ++index)
     {
-        if (!std::isfinite(charge->rho[0][index])
-            || (charge->nspin == 2 && !std::isfinite(charge->rho[1][index])))
-        {
-            throw std::invalid_argument("FDE Charge density contains a non-finite value");
-        }
-    }
+        const ScopedPotFdeTimer density_timer("prepare_active_density");
 #pragma omp parallel for schedule(static)
-    for (int index = 0; index < effective_potential.nc; ++index)
-    {
-        if (charge->nspin == 1)
+        for (int index = 0; index < effective_potential.nc; ++index)
         {
-            const double half_total
-                = 0.5 * sanitize_charge_density(charge->rho[0][index]);
-            active.alpha_bohr3[index] = half_total;
-            active.beta_bohr3[index] = half_total;
-        }
-        else
-        {
-            active.alpha_bohr3[index]
-                = sanitize_charge_density(charge->rho[0][index]);
-            active.beta_bohr3[index]
-                = sanitize_charge_density(charge->rho[1][index]);
+            if (charge->nspin == 1)
+            {
+                const double half_total
+                    = 0.5 * sanitize_charge_density(charge->rho[0][index]);
+                active.alpha_bohr3[index] = half_total;
+                active.beta_bohr3[index] = half_total;
+            }
+            else
+            {
+                active.alpha_bohr3[index]
+                    = sanitize_charge_density(charge->rho[0][index]);
+                active.beta_bohr3[index]
+                    = sanitize_charge_density(charge->rho[1][index]);
+            }
         }
     }
     last_result_ = this->evaluate(active);
-#pragma omp parallel for schedule(static)
-    for (int index = 0; index < effective_potential.nc; ++index)
     {
-        if (charge->nspin == 1)
+        const ScopedPotFdeTimer assembly_timer("assemble_effective_potential");
+#pragma omp parallel for schedule(static)
+        for (int index = 0; index < effective_potential.nc; ++index)
         {
-            // Along the closed-shell constraint n_alpha = n_beta = n / 2,
-            // dE/dn is one half of the sum of the two spin derivatives.
-            effective_potential(0, index)
-                += 0.5 * (last_result_.potential.alpha_ry[index]
-                          + last_result_.potential.beta_ry[index]);
-        }
-        else
-        {
-            effective_potential(0, index) += last_result_.potential.alpha_ry[index];
-            effective_potential(1, index) += last_result_.potential.beta_ry[index];
+            if (charge->nspin == 1)
+            {
+                // Along the closed-shell constraint n_alpha = n_beta = n / 2,
+                // dE/dn is one half of the sum of the two spin derivatives.
+                effective_potential(0, index)
+                    += 0.5 * (last_result_.potential.alpha_ry[index]
+                              + last_result_.potential.beta_ry[index]);
+            }
+            else
+            {
+                effective_potential(0, index) += last_result_.potential.alpha_ry[index];
+                effective_potential(1, index) += last_result_.potential.beta_ry[index];
+            }
         }
     }
 }

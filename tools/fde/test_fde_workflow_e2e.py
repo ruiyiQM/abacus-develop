@@ -14,6 +14,7 @@ SPEC.loader.exec_module(fde_workflow)
 
 
 FAKE_ABACUS = r'''#!/usr/bin/env python3
+import json
 import os
 from pathlib import Path
 
@@ -47,6 +48,12 @@ fragment = value(config, "ACTIVE_FRAGMENT")
 cycle = int(cwd.parent.name.split("-")[1])
 output = cwd / "OUT.fake"
 output.mkdir()
+(output / "abacus.json").write_text(json.dumps({
+    "output": [{"scf": [
+        {"energy": -10.0, "ediff": 0.0, "drho": 0.1, "time": 0.02},
+        {"energy": -10.1, "ediff": -0.1, "drho": 0.01, "time": 0.03}
+    ]}]
+}), encoding="utf-8")
 (output / "fake-CHARGE-DENSITY.restart").write_text("restart", encoding="utf-8")
 neutral = {}
 assignment = None
@@ -216,6 +223,12 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 self.assertRegex(text, r"(?m)^nupdown\s+0$")
             pes = json.loads((work / "fde_pes.json").read_text(encoding="utf-8"))
             self.assertEqual(len(pes["points"][0]["pairs"]), 1)
+            performance = json.loads(
+                (work / "fde_performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(performance["total_subsystem_calls"], 8)
+            self.assertEqual(performance["total_scf_iterations"], 0)
+            self.assertAlmostEqual(
+                performance["total_electronic_step_time_seconds"], 0.4)
 
     def test_two_states_freeze_thaw_postprocess_and_pes_table(self):
         with tempfile.TemporaryDirectory() as directory:

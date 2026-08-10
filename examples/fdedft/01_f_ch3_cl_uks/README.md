@@ -68,7 +68,13 @@ work/uks_two_fermi/reactant/checkpoint.json
 work/uks_two_fermi/product/checkpoint.json
 work/uks_two_fermi/postprocess/fde_diabatic.fde_diabatic.tsv
 work/fde_pes.tsv
+work/fde_performance.json
 ```
+
+Each state also has `performance.json` and `performance.jsonl`, and every
+active-fragment job has an `fde_performance.json`.  These files separate ABACUS
+electronic-step time from process/setup overhead and record the exact SCF
+threshold and mixing controls used by each call.
 
 The reference calculation converged the reactant and product states in five
 and six freeze--thaw cycles, respectively.  Its orthogonalized coupling is

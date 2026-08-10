@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
 
@@ -627,6 +628,138 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
     temporary.replace(path)
 
 
+def _atomic_text(path: Path, value: str) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(value, encoding="utf-8")
+    temporary.replace(path)
+
+
+def read_abacus_scf_metrics(job_directory: Path) -> Dict[str, object]:
+    """Read machine-readable electronic-step metrics without parsing text logs."""
+    candidates = sorted(job_directory.glob("OUT.*/abacus.json"))
+    if not candidates:
+        return {"abacus_json_available": False}
+    path = candidates[-1]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        outputs = document.get("output", [])
+        if not isinstance(outputs, list):
+            raise ValueError("output is not an array")
+        steps: List[Mapping[str, object]] = []
+        for output in outputs:
+            if not isinstance(output, dict):
+                continue
+            scf = output.get("scf", [])
+            if isinstance(scf, list):
+                steps.extend(step for step in scf if isinstance(step, dict))
+
+        def finite_values(name: str) -> List[float]:
+            values: List[float] = []
+            for step in steps:
+                value = step.get(name)
+                if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                        and math.isfinite(float(value))):
+                    values.append(float(value))
+            return values
+
+        times = finite_values("time")
+        residuals = finite_values("drho")
+        energies = finite_values("energy")
+        result: Dict[str, object] = {
+            "abacus_json_available": True,
+            "abacus_json": str(path.resolve()),
+            "electronic_steps": len(steps),
+            "electronic_step_time_seconds": math.fsum(times),
+        }
+        if residuals:
+            result["initial_drho"] = residuals[0]
+            result["final_drho"] = residuals[-1]
+        if energies:
+            result["initial_energy_ev"] = energies[0]
+            result["final_energy_ev"] = energies[-1]
+        return result
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        return {
+            "abacus_json_available": True,
+            "abacus_json": str(path.resolve()),
+            "abacus_json_error": str(error),
+        }
+
+
+def write_state_performance(state_directory: Path,
+                            history: Sequence[Mapping[str, object]]) -> None:
+    """Rewrite restart-safe JSON and JSONL performance reports for one state."""
+    records: List[Dict[str, object]] = []
+    for cycle in history:
+        inner_scf = cycle.get("inner_scf", {})
+        if not isinstance(inner_scf, dict):
+            continue
+        for fragment, metrics in inner_scf.items():
+            if not isinstance(metrics, dict):
+                continue
+            record = dict(metrics)
+            record.update({
+                "cycle": int(cycle["cycle"]),
+                "fragment": str(fragment),
+                "scf_mode": str(cycle.get("scf_mode", "unknown")),
+                "freeze_thaw_density_rms": cycle.get("density_rms"),
+            })
+            records.append(record)
+    numeric_sums = {
+        "wall_time_seconds": 0.0,
+        "electronic_step_time_seconds": 0.0,
+        "iterations": 0,
+    }
+    for record in records:
+        for name in numeric_sums:
+            value = record.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric_sums[name] += value
+    summary: Dict[str, object] = {
+        "schema_version": 1,
+        "subsystem_calls": len(records),
+        "total_wall_time_seconds": numeric_sums["wall_time_seconds"],
+        "total_electronic_step_time_seconds":
+            numeric_sums["electronic_step_time_seconds"],
+        "total_scf_iterations": int(numeric_sums["iterations"]),
+        "records": records,
+    }
+    _atomic_json(state_directory / "performance.json", summary)
+    _atomic_text(
+        state_directory / "performance.jsonl",
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
+
+
+def write_workflow_performance(root: Path) -> None:
+    """Aggregate completed state reports under a PES work directory."""
+    state_reports: List[Dict[str, object]] = []
+    for path in sorted(root.glob("*/*/performance.json")):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        state_reports.append({
+            "geometry": path.parent.parent.name,
+            "state": path.parent.name,
+            "path": str(path.resolve()),
+            "subsystem_calls": report.get("subsystem_calls", 0),
+            "total_wall_time_seconds": report.get("total_wall_time_seconds", 0.0),
+            "total_electronic_step_time_seconds":
+                report.get("total_electronic_step_time_seconds", 0.0),
+            "total_scf_iterations": report.get("total_scf_iterations", 0),
+        })
+    _atomic_json(root / "fde_performance.json", {
+        "schema_version": 1,
+        "states": state_reports,
+        "total_subsystem_calls": sum(int(item["subsystem_calls"])
+                                     for item in state_reports),
+        "total_wall_time_seconds": math.fsum(
+            float(item["total_wall_time_seconds"]) for item in state_reports),
+        "total_electronic_step_time_seconds": math.fsum(
+            float(item["total_electronic_step_time_seconds"])
+            for item in state_reports),
+        "total_scf_iterations": sum(int(item["total_scf_iterations"])
+                                    for item in state_reports),
+    })
+
+
 def remove_abacus_restart_files(job_directory: Path) -> None:
     """Remove large, reproducible charge restart files from one finished job."""
     for output_directory in job_directory.glob("OUT.*"):
@@ -741,10 +874,22 @@ def run_state(spec: Mapping[str, object],
             log_path = job_directory / "fde_abacus.log"
             environment = dict(os.environ)
             environment.setdefault("OMP_NUM_THREADS", "1")
+            launch_started = time.monotonic()
             with log_path.open("w", encoding="utf-8") as log:
                 completed = subprocess.run(list(spec["abacus_command"]), cwd=job_directory,
                                            env=environment, stdout=log,
                                            stderr=subprocess.STDOUT, check=False)
+            wall_time_seconds = time.monotonic() - launch_started
+            launch_metrics: Dict[str, object] = {
+                "schema_version": 1,
+                "returncode": completed.returncode,
+                "wall_time_seconds": wall_time_seconds,
+                "maximum_iterations": int(schedule["maximum_iterations"]),
+                "density_tolerance": float(schedule["density_tolerance"]),
+                "mixing": fragment_mixing_parameters(controls, active_label),
+            }
+            launch_metrics.update(read_abacus_scf_metrics(job_directory))
+            _atomic_json(job_directory / "fde_performance.json", launch_metrics)
             if completed.returncode != 0:
                 raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
             density_path, density_data = select_scf_density(job_directory,
@@ -764,7 +909,12 @@ def run_state(spec: Mapping[str, object],
                 "converged": inner_converged,
                 "iterations": density_data["scf_iterations"],
                 "density_residual": density_data["scf_density_residual"],
+                "wall_time_seconds": wall_time_seconds,
+                "maximum_iterations": int(schedule["maximum_iterations"]),
+                "density_tolerance": float(schedule["density_tolerance"]),
+                "mixing": fragment_mixing_parameters(controls, active_label),
             }
+            cycle_scf[active_label].update(read_abacus_scf_metrics(job_directory))
             if inner_converged:
                 cycle_fragment_paths[active_label] = fragment_path.resolve()
                 cycle_fragments.append(read_fragment(fragment_path))
@@ -805,6 +955,7 @@ def run_state(spec: Mapping[str, object],
             "history": history,
         }
         _atomic_json(checkpoint_path, checkpoint)
+        write_state_performance(state_directory, history)
         prune_completed_cycles(state_directory, cycle, retain_completed_cycles)
         if converged:
             composed = compose_state(str(state["label"]),
@@ -952,6 +1103,7 @@ def run_workflow(spec_path: Path) -> None:
                       for key in ("overlap", "h12_ry", "orthogonalized_coupling_ry"))
         table_lines.append("\t".join(fields))
     (root / "fde_pes.tsv").write_text("\n".join(table_lines) + "\n", encoding="utf-8")
+    write_workflow_performance(root)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import tempfile
@@ -228,6 +229,24 @@ class FdeWorkflowTest(unittest.TestCase):
             self.assertEqual(path, partial)
             self.assertFalse(density["scf_converged"])
             self.assertEqual(density["scf_iterations"], 50)
+
+    def test_reads_abacus_json_scf_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = Path(directory)
+            output = job / "OUT.test"
+            output.mkdir()
+            (output / "abacus.json").write_text(json.dumps({
+                "output": [{"scf": [
+                    {"energy": -10.0, "drho": 0.2, "time": 1.5},
+                    {"energy": -11.0, "drho": 0.01, "time": 2.0},
+                ]}]
+            }), encoding="utf-8")
+            metrics = fde_workflow.read_abacus_scf_metrics(job)
+            self.assertTrue(metrics["abacus_json_available"])
+            self.assertEqual(metrics["electronic_steps"], 2)
+            self.assertAlmostEqual(metrics["electronic_step_time_seconds"], 3.5)
+            self.assertAlmostEqual(metrics["initial_drho"], 0.2)
+            self.assertAlmostEqual(metrics["final_drho"], 0.01)
 
 
 if __name__ == "__main__":
