@@ -10,6 +10,8 @@ enum class FdeXcCapability
 {
     pbe_semilocal,
     meta_gga_requires_tau,
+    hybrid_requires_exact_exchange,
+    hybrid_meta_gga_requires_tau_and_exact_exchange,
     unsupported
 };
 

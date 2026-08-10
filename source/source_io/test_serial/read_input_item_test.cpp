@@ -114,6 +114,34 @@ TEST_F(InputTest, NativeFdeMetaGgaCapability)
         testing::HasSubstr("pointwise kinetic-energy density tau"));
 }
 
+TEST_F(InputTest, NativeFdeHybridCapability)
+{
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional("PBE0"),
+              ModuleIO::FdeXcCapability::hybrid_requires_exact_exchange);
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional("HSE"),
+              ModuleIO::FdeXcCapability::hybrid_requires_exact_exchange);
+    EXPECT_EQ(ModuleIO::classify_fde_xc_functional("HYB_GGA_XC_LB07"),
+              ModuleIO::FdeXcCapability::hybrid_requires_exact_exchange);
+    EXPECT_EQ(
+        ModuleIO::classify_fde_xc_functional("SCAN0"),
+        ModuleIO::FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange);
+    EXPECT_EQ(
+        ModuleIO::classify_fde_xc_functional("HYB_MGGA_X_BMK"),
+        ModuleIO::FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange);
+    EXPECT_THAT(
+        ModuleIO::fde_xc_capability_error(
+            ModuleIO::FdeXcCapability::hybrid_requires_exact_exchange),
+        testing::AllOf(
+            testing::HasSubstr("nonlocal interfragment exact-exchange operator"),
+            testing::HasSubstr("fragment density-matrix artifacts")));
+    EXPECT_THAT(
+        ModuleIO::fde_xc_capability_error(
+            ModuleIO::FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange),
+        testing::AllOf(
+            testing::HasSubstr("kinetic-energy density tau"),
+            testing::HasSubstr("nonlocal interfragment exact-exchange operator")));
+}
+
 TEST_F(InputTest, RelaxMethod)
 {
     ModuleIO::ReadInput readinput(0);

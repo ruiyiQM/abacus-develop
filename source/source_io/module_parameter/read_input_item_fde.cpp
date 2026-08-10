@@ -23,6 +23,21 @@ FdeXcCapability classify_fde_xc_functional(const std::string& functional)
     {
         return FdeXcCapability::pbe_semilocal;
     }
+    if (normalized == "scan0" || normalized.find("hyb_mgga_") != std::string::npos)
+    {
+        return FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange;
+    }
+    if (normalized == "hf" || normalized == "pbe0" || normalized == "hse"
+        || normalized == "b3lyp" || normalized == "lc_pbe"
+        || normalized == "lc_wpbe" || normalized == "lrc_wpbe"
+        || normalized == "lrc_wpbeh" || normalized == "cam_pbeh"
+        || normalized == "wp22" || normalized == "cwp22"
+        || normalized == "muller" || normalized == "power"
+        || normalized.find("hyb_lda_") != std::string::npos
+        || normalized.find("hyb_gga_") != std::string::npos)
+    {
+        return FdeXcCapability::hybrid_requires_exact_exchange;
+    }
     if (normalized == "scan" || normalized.find("mgga_") != std::string::npos)
     {
         return FdeXcCapability::meta_gga_requires_tau;
@@ -32,6 +47,20 @@ FdeXcCapability classify_fde_xc_functional(const std::string& functional)
 
 std::string fde_xc_capability_error(const FdeXcCapability capability)
 {
+    if (capability
+        == FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange)
+    {
+        return "fde_task embedded_scf does not yet support hybrid meta-GGA XC: "
+               "FDE lacks pointwise kinetic-energy density tau and its "
+               "generalized-Kohn-Sham operator, as well as the nonlocal "
+               "interfragment exact-exchange operator and fragment density-matrix artifacts";
+    }
+    if (capability == FdeXcCapability::hybrid_requires_exact_exchange)
+    {
+        return "fde_task embedded_scf does not yet support hybrid XC: "
+               "FDE lacks the nonlocal interfragment exact-exchange operator "
+               "and fragment density-matrix artifacts";
+    }
     if (capability == FdeXcCapability::meta_gga_requires_tau)
     {
         return "fde_task embedded_scf does not yet support meta-GGA XC: "

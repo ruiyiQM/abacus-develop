@@ -63,6 +63,8 @@ derivative to the active subsystem.
 |---|---|---|
 | PBE GGA | Supported | None within the documented semilocal, no-NLCC contract |
 | SCAN/r2SCAN meta-GGA | Rejected explicitly | Pointwise fragment kinetic-energy density `tau` in density artifacts and the associated generalized-Kohn-Sham `delta Exc / delta tau` operator |
+| PBE0/HSE/HF and other hybrids | Rejected explicitly | Fragment density-matrix/exchange artifacts and a nonlocal interfragment exact-exchange operator |
+| SCAN0 and other hybrid meta-GGAs | Rejected explicitly | Both of the preceding meta-GGA and exact-exchange capabilities |
 
 ABACUS evaluates meta-GGA terms from both density and orbital kinetic-energy
 density. `FrozenDensityArtifact` currently stores spin densities plus a scalar
@@ -71,6 +73,15 @@ only a multiplicative real-space spin potential. Reusing the ordinary SCAN
 local-density derivative while omitting the `tau` derivative would therefore
 be an incomplete meta-GGA FDE calculation, so `embedded_scf` fails before the
 SCF starts.
+
+For a hybrid functional, the missing nonadditive exact-exchange contribution
+depends on occupied fragment density matrices and is a nonlocal operator. It
+cannot be represented by the local spin-grid interface of
+`NonadditiveXcProvider`/`PotFde`. The ordinary ABACUS EXX operator may still be
+used outside FDE, but enabling it only for each isolated active-fragment SCF
+would omit interfragment exact exchange and would not define a consistent
+hybrid FDE energy or coupling. `SCAN0` needs both this EXX extension and the
+meta-GGA `tau` extension.
 
 ## Pseudopotential and AO-subspace boundary
 
