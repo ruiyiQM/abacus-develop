@@ -93,6 +93,15 @@
     "strict_confirmation_cycles": 2,
     "freeze_thaw_density_tolerance": 1e-5,
     "energy_tolerance_ry": 2e-5,
+    "update_scheme": "auto",
+    "jacobi_parallelism": 1,
+    "outer_mixing": {
+      "type": "none",
+      "beta": 0.5,
+      "history": 4,
+      "regularization": 1e-10,
+      "apply_in_strict": false
+    },
     "retain_completed_cycles": 1,
     "remove_abacus_restart_files": true,
     "update_order": ["F", "CH3Cl"],

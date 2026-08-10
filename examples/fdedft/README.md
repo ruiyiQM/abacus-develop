@@ -16,3 +16,6 @@ The workflow writes per-call and aggregate performance JSON in addition to the
 scientific output; see `tools/fde/README.md` for the field definitions.
 Frozen-only semilocal functional values are cached inside each embedded SCF;
 this optimization is automatic and requires no example INPUT keyword.
+The workflow also provides explicit Gauss--Seidel/Jacobi updates and optional
+outer linear/Anderson density mixing; the case README documents safe defaults
+and MPI resource requirements.

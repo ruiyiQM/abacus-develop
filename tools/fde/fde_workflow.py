@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from array import array
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -227,6 +228,53 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     labels = [_label(fragment["label"], "fragment label") for fragment in fragments]
     if len(set(labels)) != len(labels):
         raise WorkflowError("fragment labels must be unique")
+    update_order = controls.get("update_order", labels)
+    if (not isinstance(update_order, list) or len(update_order) != len(labels)
+            or not all(isinstance(label, str) for label in update_order)
+            or set(update_order) != set(labels)):
+        raise WorkflowError("update_order must be a permutation of fragment labels")
+    update_scheme = _token(
+        controls.get("update_scheme", "auto"), "update_scheme").lower()
+    if update_scheme not in ("auto", "gauss_seidel", "jacobi"):
+        raise WorkflowError("update_scheme must be auto, gauss_seidel, or jacobi")
+    parallelism = controls.get("jacobi_parallelism", 1)
+    if (isinstance(parallelism, bool) or not isinstance(parallelism, int)
+            or parallelism < 1 or parallelism > len(labels)):
+        raise WorkflowError("jacobi_parallelism must be between 1 and the fragment count")
+    if parallelism > 1 and update_scheme != "jacobi":
+        raise WorkflowError("jacobi_parallelism greater than one requires update_scheme=jacobi")
+
+    outer_mixing = controls.get("outer_mixing", {})
+    if not isinstance(outer_mixing, dict):
+        raise WorkflowError("outer_mixing must be a JSON object")
+    unknown_outer = set(outer_mixing) - {
+        "type", "beta", "history", "regularization", "apply_in_strict",
+    }
+    if unknown_outer:
+        raise WorkflowError("outer_mixing contains unsupported keys")
+    outer_type = _token(outer_mixing.get("type", "none"), "outer_mixing.type")
+    if outer_type not in ("none", "linear", "anderson"):
+        raise WorkflowError("outer_mixing.type must be none, linear, or anderson")
+    outer_beta = outer_mixing.get("beta", 0.5)
+    if (isinstance(outer_beta, bool) or not isinstance(outer_beta, (int, float))
+            or not math.isfinite(float(outer_beta))
+            or float(outer_beta) <= 0.0 or float(outer_beta) > 1.0):
+        raise WorkflowError("outer_mixing.beta must be in (0, 1]")
+    outer_history = outer_mixing.get("history", 4)
+    if (isinstance(outer_history, bool) or not isinstance(outer_history, int)
+            or outer_history < 1 or outer_history > 8
+            or (outer_type == "anderson" and outer_history < 2)):
+        raise WorkflowError("outer_mixing.history must be 2--8 for Anderson")
+    regularization = outer_mixing.get("regularization", 1e-10)
+    if (isinstance(regularization, bool)
+            or not isinstance(regularization, (int, float))
+            or not math.isfinite(float(regularization))
+            or float(regularization) <= 0.0):
+        raise WorkflowError("outer_mixing.regularization must be finite and positive")
+    apply_in_strict = outer_mixing.get("apply_in_strict", False)
+    if not isinstance(apply_in_strict, bool) or apply_in_strict:
+        raise WorkflowError(
+            "outer_mixing.apply_in_strict must currently be false so final artifacts agree")
     fragment_mixing = controls.get("fragment_mixing", {})
     if not isinstance(fragment_mixing, dict):
         raise WorkflowError("fragment_mixing must be a JSON object")
@@ -400,16 +448,16 @@ def _read_binary_density(path: Path) -> Dict[str, object]:
             fragment = _binary_record(stream, "FRAGMENT")[0]
             state = _binary_record(stream, "STATE")[0]
             geometry = _binary_record(stream, "GEOMETRY")[0]
-            _binary_record(stream, "GRID_FINGERPRINT")
-            _binary_record(stream, "PSEUDOPOTENTIALS")
-            _binary_record(stream, "ORBITALS")
-            _binary_record(stream, "CORE_DENSITY")
-            _binary_record(stream, "FUNCTIONALS")
+            grid_fingerprint = _binary_record(stream, "GRID_FINGERPRINT")[0]
+            pseudopotentials = _binary_record(stream, "PSEUDOPOTENTIALS")[0]
+            orbitals = _binary_record(stream, "ORBITALS")[0]
+            core_density = _binary_record(stream, "CORE_DENSITY")[0]
+            functionals = _binary_record(stream, "FUNCTIONALS")
             grid = _binary_record(stream, "GRID")
             if len(grid) != 4:
                 raise WorkflowError("binary density GRID metadata is malformed")
             grid_size = int(grid[0]) * int(grid[1]) * int(grid[2])
-            _binary_record(stream, "POPULATIONS")
+            populations = _binary_record(stream, "POPULATIONS")
             scf = _binary_record(stream, "SCF")
             cycle = int(scf[0])
             convergence_flag = int(scf[1])
@@ -422,7 +470,7 @@ def _read_binary_density(path: Path) -> Dict[str, object]:
             else:
                 scf_iterations = 0
                 scf_density_residual = None
-            _binary_record(stream, "ENERGIES_RY")
+            energies = _binary_record(stream, "ENERGIES_RY")
             byte_order = _binary_record(stream, "BYTE_ORDER")
             if byte_order != ["LITTLE_ENDIAN"]:
                 raise WorkflowError("unsupported binary density byte order")
@@ -454,8 +502,17 @@ def _read_binary_density(path: Path) -> Dict[str, object]:
         "scf_iterations": scf_iterations,
         "scf_density_residual": scf_density_residual,
         "initialization_seed": False,
+        "artifact_format": "binary",
         "grid_size": grid_size,
+        "grid_dimensions": [int(grid[0]), int(grid[1]), int(grid[2])],
         "cell_volume": float(grid[3]),
+        "grid_fingerprint": grid_fingerprint,
+        "pseudopotentials": pseudopotentials,
+        "orbitals": orbitals,
+        "core_density": core_density,
+        "functionals": functionals,
+        "populations": [int(populations[0]), int(populations[1])],
+        "energies_ry": [float(energies[0]), float(energies[1])],
         "alpha": alpha,
         "beta": beta,
     }
@@ -479,6 +536,8 @@ def read_density(path: Path) -> Dict[str, object]:
             scf_iterations = 0
             scf_density_residual = None
             initialization_seed = True
+            populations = records["POPULATIONS"][0]
+            energies = ["0", "0"]
         else:
             schema_version = int(records["FDE_DENSITY_ARTIFACT"][0][0])
             alpha = [float(value) for value in records["RHO_ALPHA"][0][1:]]
@@ -500,6 +559,8 @@ def read_density(path: Path) -> Dict[str, object]:
                 scf_iterations = 0
                 scf_density_residual = None
             initialization_seed = False
+            populations = records["POPULATIONS"][0]
+            energies = records["ENERGIES_RY"][0]
         if not alpha or len(alpha) != len(beta):
             raise WorkflowError("density grid must be nonempty and spin-compatible")
         grid = records["GRID"][0]
@@ -513,8 +574,17 @@ def read_density(path: Path) -> Dict[str, object]:
             "scf_iterations": scf_iterations,
             "scf_density_residual": scf_density_residual,
             "initialization_seed": initialization_seed,
+            "artifact_format": "uniform" if initialization_seed else "text",
             "grid_size": len(alpha),
+            "grid_dimensions": [int(grid[0]), int(grid[1]), int(grid[2])],
             "cell_volume": float(grid[3]),
+            "grid_fingerprint": records["GRID_FINGERPRINT"][0][0],
+            "pseudopotentials": records["PSEUDOPOTENTIALS"][0][0],
+            "orbitals": records["ORBITALS"][0][0],
+            "core_density": records["CORE_DENSITY"][0][0],
+            "functionals": records["FUNCTIONALS"][0],
+            "populations": [int(populations[0]), int(populations[1])],
+            "energies_ry": [float(energies[0]), float(energies[1])],
             "alpha": alpha,
             "beta": beta,
         }
@@ -565,6 +635,238 @@ def density_rms(first: Mapping[str, object], second: Mapping[str, object]) -> fl
             (left - right) ** 2 for left, right in zip(values, reference))
         value_count += len(values)
     return math.sqrt(squared_difference / value_count)
+
+
+def _solve_dense_system(matrix: Sequence[Sequence[float]],
+                        right_hand_side: Sequence[float]) -> List[float]:
+    size = len(right_hand_side)
+    work = [list(row) + [float(right_hand_side[index])]
+            for index, row in enumerate(matrix)]
+    if len(work) != size or any(len(row) != size + 1 for row in work):
+        raise WorkflowError("outer Anderson linear system is not square")
+    for column in range(size):
+        pivot = max(range(column, size), key=lambda row: abs(work[row][column]))
+        if abs(work[pivot][column]) <= 1e-18:
+            raise WorkflowError("outer Anderson history is numerically singular")
+        work[column], work[pivot] = work[pivot], work[column]
+        inverse = 1.0 / work[column][column]
+        for index in range(column, size + 1):
+            work[column][index] *= inverse
+        for row in range(size):
+            if row == column:
+                continue
+            factor = work[row][column]
+            for index in range(column, size + 1):
+                work[row][index] -= factor * work[column][index]
+    return [work[index][size] for index in range(size)]
+
+
+def _anderson_coefficients(
+        pairs: Sequence[Tuple[Mapping[str, object], Mapping[str, object]]],
+        regularization: float) -> List[float]:
+    for old, raw in pairs:
+        density_rms(old, raw)
+    count = len(pairs)
+    vector_size = 2 * int(pairs[0][0]["grid_size"])
+    matrix = [[0.0] * (count + 1) for _ in range(count + 1)]
+    for row in range(count):
+        row_old, row_raw = pairs[row]
+        for column in range(row, count):
+            column_old, column_raw = pairs[column]
+            value = math.fsum(
+                (row_output - row_input) * (column_output - column_input)
+                for row_input, row_output, column_input, column_output in zip(
+                    row_old["alpha"], row_raw["alpha"],
+                    column_old["alpha"], column_raw["alpha"]))
+            value += math.fsum(
+                (row_output - row_input) * (column_output - column_input)
+                for row_input, row_output, column_input, column_output in zip(
+                    row_old["beta"], row_raw["beta"],
+                    column_old["beta"], column_raw["beta"]))
+            value /= vector_size
+            matrix[row][column] = value
+            matrix[column][row] = value
+        matrix[row][row] += regularization
+        matrix[row][count] = 1.0
+        matrix[count][row] = 1.0
+    solution = _solve_dense_system(matrix, [0.0] * count + [1.0])
+    return solution[:count]
+
+
+def _project_density(values: Iterable[float],
+                     electrons: int,
+                     volume_element: float) -> Tuple[array, Dict[str, object]]:
+    projected = array("d")
+    clipped = 0
+    for value in values:
+        if not math.isfinite(value):
+            raise WorkflowError("outer density mixing produced a non-finite value")
+        if value < 0.0:
+            value = 0.0
+            clipped += 1
+        projected.append(value)
+    integral = math.fsum(projected) * volume_element
+    if electrons == 0:
+        projected = array("d", [0.0]) * len(projected)
+        scale = 0.0
+    else:
+        if not math.isfinite(integral) or integral <= 0.0:
+            raise WorkflowError("outer density mixing cannot restore the spin population")
+        scale = electrons / integral
+        for index in range(len(projected)):
+            projected[index] *= scale
+    return projected, {"clipped_points": clipped, "normalization_scale": scale}
+
+
+def mix_density_history(
+    pairs: Sequence[Tuple[Mapping[str, object], Mapping[str, object]]],
+    method: str,
+    beta: float,
+    regularization: float,
+) -> Tuple[array, array, Dict[str, object]]:
+    if not pairs:
+        raise WorkflowError("outer density mixing requires at least one update")
+    coefficients = ([1.0] if method == "linear"
+                    else _anderson_coefficients(pairs, regularization))
+    current = pairs[-1][1]
+    populations = list(current["populations"])
+    volume_element = float(current["cell_volume"]) / int(current["grid_size"])
+
+    def channel_values(channel: str) -> Iterable[float]:
+        for index in range(int(current["grid_size"])):
+            yield math.fsum(
+                coefficient
+                * ((1.0 - beta) * float(old[channel][index])
+                   + beta * float(raw[channel][index]))
+                for coefficient, (old, raw) in zip(coefficients, pairs))
+
+    alpha, alpha_projection = _project_density(
+        channel_values("alpha"), int(populations[0]), volume_element)
+    beta_density, beta_projection = _project_density(
+        channel_values("beta"), int(populations[1]), volume_element)
+    return alpha, beta_density, {
+        "coefficients": coefficients,
+        "alpha_projection": alpha_projection,
+        "beta_projection": beta_projection,
+    }
+
+
+def _write_binary_array(stream, values: array) -> None:
+    output = array("d", values)
+    if sys.byteorder != "little":
+        output.byteswap()
+    output.tofile(stream)
+
+
+def write_mixed_density(path: Path,
+                        reference: Mapping[str, object],
+                        alpha: array,
+                        beta: array) -> None:
+    dimensions = list(reference["grid_dimensions"])
+    populations = list(reference["populations"])
+    energies = list(reference["energies_ry"])
+    functionals = list(reference["functionals"])
+    iterations = max(1, int(reference.get("scf_iterations", 0)))
+    residual = reference.get("scf_density_residual")
+    residual = 0.0 if residual is None else float(residual)
+    lines = [
+        "FDE_DENSITY_BINARY 1 2",
+        f"FRAGMENT {reference['fragment']}",
+        f"STATE {reference['state']}",
+        f"GEOMETRY {reference['geometry']}",
+        f"GRID_FINGERPRINT {reference['grid_fingerprint']}",
+        f"PSEUDOPOTENTIALS {reference['pseudopotentials']}",
+        f"ORBITALS {reference['orbitals']}",
+        f"CORE_DENSITY {reference['core_density']}",
+        f"FUNCTIONALS {' '.join(str(value) for value in functionals)}",
+        (f"GRID {dimensions[0]} {dimensions[1]} {dimensions[2]} "
+         f"{float(reference['cell_volume']):.17g}"),
+        f"POPULATIONS {populations[0]} {populations[1]}",
+        (f"SCF {int(reference['cycle'])} 0 {iterations} "
+         f"{residual:.17g}"),
+        f"ENERGIES_RY {float(energies[0]):.17g} {float(energies[1]):.17g}",
+        "BYTE_ORDER LITTLE_ENDIAN",
+        f"RHO_ALPHA_BINARY {len(alpha)}",
+    ]
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("wb") as stream:
+        stream.write(("\n".join(lines) + "\n").encode("ascii"))
+        _write_binary_array(stream, alpha)
+        stream.write(f"\nRHO_BETA_BINARY {len(beta)}\n".encode("ascii"))
+        _write_binary_array(stream, beta)
+        stream.write(b"\nEND\n")
+    temporary.replace(path)
+
+
+def apply_outer_mixing(
+    controls: Mapping[str, object],
+    state_directory: Path,
+    cycle: int,
+    strict_scf: bool,
+    labels: Sequence[str],
+    input_paths: Mapping[str, Path],
+    raw_paths: Mapping[str, Path],
+    history: Sequence[Mapping[str, object]],
+) -> Tuple[Dict[str, Path], Dict[str, object]]:
+    settings = controls.get("outer_mixing", {})
+    method = str(settings.get("type", "none")) if isinstance(settings, dict) else "none"
+    apply_in_strict = bool(settings.get("apply_in_strict", False))
+    if method == "none" or (strict_scf and not apply_in_strict):
+        return dict(raw_paths), {
+            "type": method,
+            "applied": False,
+            "reason": "strict_stage" if strict_scf and method != "none" else "disabled",
+            "input_densities": {label: str(input_paths[label]) for label in labels},
+            "raw_densities": {label: str(raw_paths[label]) for label in labels},
+            "mixed_densities": {label: str(raw_paths[label]) for label in labels},
+        }
+
+    depth = int(settings.get("history", 4))
+    beta = float(settings.get("beta", 0.5))
+    regularization = float(settings.get("regularization", 1e-10))
+    previous_records = [entry.get("outer_mixing", {}) for entry in history]
+    previous_records = [entry for entry in previous_records
+                        if isinstance(entry, dict) and entry.get("applied")]
+    mixed_directory = state_directory / f"cycle-{cycle:03d}" / "outer-mixed"
+    mixed_directory.mkdir(parents=True, exist_ok=True)
+    output_paths: Dict[str, Path] = {}
+    diagnostics: Dict[str, object] = {}
+    for label in labels:
+        pairs: List[Tuple[Mapping[str, object], Mapping[str, object]]] = []
+        if method == "anderson" and depth > 1:
+            for record in previous_records[-(depth - 1):]:
+                old_path = Path(record["input_densities"][label])
+                raw_path = Path(record["raw_densities"][label])
+                if old_path.is_file() and raw_path.is_file():
+                    pairs.append((read_density(old_path), read_density(raw_path)))
+        current_old = read_density(input_paths[label])
+        current_raw = read_density(raw_paths[label])
+        pairs.append((current_old, current_raw))
+        fallback = None
+        try:
+            alpha, beta_density, detail = mix_density_history(
+                pairs, method, beta, regularization)
+        except WorkflowError as error:
+            if method != "anderson":
+                raise
+            alpha, beta_density, detail = mix_density_history(
+                [pairs[-1]], "linear", beta, regularization)
+            fallback = str(error)
+        output_path = (mixed_directory / f"{label}.fde_density").resolve()
+        write_mixed_density(output_path, current_raw, alpha, beta_density)
+        output_paths[label] = output_path
+        detail.update({"history_used": len(pairs), "fallback": fallback})
+        diagnostics[label] = detail
+    return output_paths, {
+        "type": method,
+        "applied": True,
+        "beta": beta,
+        "regularization": regularization,
+        "input_densities": {label: str(input_paths[label]) for label in labels},
+        "raw_densities": {label: str(raw_paths[label]) for label in labels},
+        "mixed_densities": {label: str(output_paths[label]) for label in labels},
+        "fragments": diagnostics,
+    }
 
 
 def read_fragment(path: Path) -> Dict[str, object]:
@@ -975,6 +1277,143 @@ def prune_completed_cycles(state_directory: Path,
             shutil.rmtree(candidate)
 
 
+def run_fragment_scf(
+    spec: Mapping[str, object],
+    geometry: Mapping[str, object],
+    state: Mapping[str, object],
+    state_directory: Path,
+    active_label: str,
+    input_densities: Mapping[str, Path],
+    cycle: int,
+    schedule: Mapping[str, object],
+    neutral_electrons: int,
+) -> Dict[str, object]:
+    controls = dict(spec.get("controls", {}))
+    assignment = state["fragments"][active_label]
+    spin_parameters = embedded_scf_spin_parameters(
+        controls,
+        neutral_electrons,
+        int(assignment["charge"]),
+        int(assignment["spin"]))
+    recovery = controls.get("mixing_recovery", {})
+    recovery_enabled = bool(
+        isinstance(recovery, dict) and recovery.get("enabled", False))
+    maximum_retries = (len(recovery.get("fallbacks", []))
+                       if recovery_enabled and isinstance(recovery, dict) else 0)
+    attempts: List[Dict[str, object]] = []
+    retry = 0
+    attempt_densities = dict(input_densities)
+    while True:
+        directory_name = (active_label if retry == 0
+                          else f"{active_label}-retry-{retry:02d}")
+        job_directory = state_directory / f"cycle-{cycle:03d}" / directory_name
+        if job_directory.exists():
+            shutil.rmtree(job_directory)
+        shutil.copytree(Path(geometry["template_directory"]), job_directory)
+        config_path = job_directory / "FDE_CONFIG"
+        write_runtime_config(config_path,
+                             spec,
+                             state,
+                             active_label,
+                             attempt_densities,
+                             "result",
+                             int(schedule["maximum_iterations"]),
+                             float(schedule["density_tolerance"]))
+        mixing = fragment_mixing_parameters(
+            controls, active_label, schedule.get("stage"), retry)
+        input_parameters: Dict[str, object] = {
+            "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
+            "nspin": spin_parameters["nspin"],
+            "noncolin": 0, "lspinorb": 0, "symmetry": 0,
+            "dft_functional": "pbe",
+            "ks_solver": str(controls.get("ks_solver", "lapack")),
+            "kpar": int(controls.get("kpar", 1)),
+            "nelec": spin_parameters["nelec"],
+            "nupdown": spin_parameters["nupdown"],
+            "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
+            "scf_nmax": int(schedule["maximum_iterations"]),
+            "scf_thr": float(schedule["density_tolerance"]),
+        }
+        input_parameters.update(mixing)
+        patch_input(job_directory / "INPUT", input_parameters)
+        log_path = job_directory / "fde_abacus.log"
+        environment = dict(os.environ)
+        environment.setdefault("OMP_NUM_THREADS", "1")
+        launch_started = time.monotonic()
+        with log_path.open("w", encoding="utf-8") as log:
+            completed = subprocess.run(
+                list(spec["abacus_command"]), cwd=job_directory,
+                env=environment, stdout=log, stderr=subprocess.STDOUT,
+                check=False)
+        wall_time_seconds = time.monotonic() - launch_started
+        launch_metrics: Dict[str, object] = {
+            "schema_version": 1,
+            "retry": retry,
+            "returncode": completed.returncode,
+            "wall_time_seconds": wall_time_seconds,
+            "maximum_iterations": int(schedule["maximum_iterations"]),
+            "density_tolerance": float(schedule["density_tolerance"]),
+            "mixing": mixing,
+        }
+        launch_metrics.update(read_abacus_scf_metrics(job_directory))
+        _atomic_json(job_directory / "fde_performance.json", launch_metrics)
+        if completed.returncode != 0:
+            raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
+        density_path, density_data = select_scf_density(
+            job_directory, bool(controls.get("allow_partial_scf", False)))
+        inner_converged = bool(density_data["scf_converged"])
+        fragment_path = job_directory / "result.fde_fragment"
+        if inner_converged and not fragment_path.is_file():
+            raise WorkflowError(
+                f"converged ABACUS job did not produce an FDE fragment in {job_directory}")
+        if not inner_converged and fragment_path.exists():
+            raise WorkflowError(
+                f"partial ABACUS job produced a final FDE fragment in {job_directory}")
+        if bool(controls.get("remove_abacus_restart_files", False)):
+            remove_abacus_restart_files(job_directory)
+        attempt_densities[active_label] = density_path.resolve()
+        attempt_metrics = dict(launch_metrics)
+        attempt_metrics.update({
+            "converged": inner_converged,
+            "density_artifact_iterations": density_data["scf_iterations"],
+            "density_residual": density_data["scf_density_residual"],
+            "job_directory": str(job_directory.resolve()),
+        })
+        attempts.append(attempt_metrics)
+        if (inner_converged or not bool(schedule["strict"])
+                or retry >= maximum_retries):
+            break
+        retry += 1
+
+    metrics = {
+        "converged": inner_converged,
+        "iterations": sum(
+            int(item.get("density_artifact_iterations", 0)
+                or item.get("electronic_steps", 0)) for item in attempts),
+        "density_residual": density_data["scf_density_residual"],
+        "wall_time_seconds": math.fsum(
+            float(item["wall_time_seconds"]) for item in attempts),
+        "electronic_steps": sum(
+            int(item.get("electronic_steps", 0)) for item in attempts),
+        "electronic_step_time_seconds": math.fsum(
+            float(item.get("electronic_step_time_seconds", 0.0))
+            for item in attempts),
+        "maximum_iterations": int(schedule["maximum_iterations"]),
+        "density_tolerance": float(schedule["density_tolerance"]),
+        "mixing": mixing,
+        "retry_count": retry,
+        "attempts": attempts,
+    }
+    return {
+        "label": active_label,
+        "density_path": density_path.resolve(),
+        "density_data": density_data,
+        "fragment_path": fragment_path.resolve() if inner_converged else None,
+        "fragment": read_fragment(fragment_path) if inner_converged else None,
+        "metrics": metrics,
+    }
+
+
 def run_state(spec: Mapping[str, object],
               geometry: Mapping[str, object],
               state: Mapping[str, object],
@@ -987,12 +1426,12 @@ def run_state(spec: Mapping[str, object],
     density_tolerance = float(controls.get("freeze_thaw_density_tolerance", 1e-7))
     energy_tolerance = float(controls.get("energy_tolerance_ry", 1e-8))
     symmetry_tolerance = float(controls.get("symmetry_tolerance", 1e-10))
-    ks_solver = str(controls.get("ks_solver", "lapack"))
-    kpar = int(controls.get("kpar", 1))
     retain_completed_cycles = int(controls.get("retain_completed_cycles", 0))
-    remove_restarts = bool(controls.get("remove_abacus_restart_files", False))
-    allow_partial_scf = bool(controls.get("allow_partial_scf", False))
     required_strict_confirmations = int(controls.get("strict_confirmation_cycles", 2))
+    update_scheme = str(controls.get("update_scheme", "auto"))
+    if update_scheme == "auto":
+        update_scheme = "gauss_seidel"
+    jacobi_parallelism = int(controls.get("jacobi_parallelism", 1))
     state_directory = output_directory / str(state["label"])
     state_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = state_directory / "checkpoint.json"
@@ -1027,126 +1466,52 @@ def run_state(spec: Mapping[str, object],
         cycle_fragments: List[Mapping[str, object]] = []
         cycle_fragment_paths: Dict[str, Path] = {}
         cycle_scf: Dict[str, Dict[str, object]] = {}
-        for active_label in update_order:
-            assignment = state["fragments"][active_label]
-            spin_parameters = embedded_scf_spin_parameters(
-                controls,
-                neutral[active_label],
-                int(assignment["charge"]),
-                int(assignment["spin"]))
-            recovery = controls.get("mixing_recovery", {})
-            recovery_enabled = bool(
-                isinstance(recovery, dict) and recovery.get("enabled", False))
-            maximum_retries = (len(recovery.get("fallbacks", []))
-                               if recovery_enabled and isinstance(recovery, dict) else 0)
-            attempts: List[Dict[str, object]] = []
-            retry = 0
-            while True:
-                directory_name = (active_label if retry == 0
-                                  else f"{active_label}-retry-{retry:02d}")
-                job_directory = (state_directory / f"cycle-{cycle:03d}"
-                                 / directory_name)
-                if job_directory.exists():
-                    shutil.rmtree(job_directory)
-                shutil.copytree(Path(geometry["template_directory"]), job_directory)
-                config_path = job_directory / "FDE_CONFIG"
-                write_runtime_config(config_path,
-                                     spec,
-                                     state,
-                                     active_label,
-                                     densities,
-                                     "result",
-                                     int(schedule["maximum_iterations"]),
-                                     float(schedule["density_tolerance"]))
-                mixing = fragment_mixing_parameters(
-                    controls, active_label, schedule.get("stage"), retry)
-                input_parameters: Dict[str, object] = {
-                    "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
-                    "nspin": spin_parameters["nspin"],
-                    "noncolin": 0, "lspinorb": 0, "symmetry": 0,
-                    "dft_functional": "pbe", "ks_solver": ks_solver, "kpar": kpar,
-                    "nelec": spin_parameters["nelec"],
-                    "nupdown": spin_parameters["nupdown"],
-                    "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
-                    "scf_nmax": int(schedule["maximum_iterations"]),
-                    "scf_thr": float(schedule["density_tolerance"]),
-                }
-                input_parameters.update(mixing)
-                patch_input(job_directory / "INPUT", input_parameters)
-                log_path = job_directory / "fde_abacus.log"
-                environment = dict(os.environ)
-                environment.setdefault("OMP_NUM_THREADS", "1")
-                launch_started = time.monotonic()
-                with log_path.open("w", encoding="utf-8") as log:
-                    completed = subprocess.run(
-                        list(spec["abacus_command"]), cwd=job_directory,
-                        env=environment, stdout=log, stderr=subprocess.STDOUT,
-                        check=False)
-                wall_time_seconds = time.monotonic() - launch_started
-                launch_metrics: Dict[str, object] = {
-                    "schema_version": 1,
-                    "retry": retry,
-                    "returncode": completed.returncode,
-                    "wall_time_seconds": wall_time_seconds,
-                    "maximum_iterations": int(schedule["maximum_iterations"]),
-                    "density_tolerance": float(schedule["density_tolerance"]),
-                    "mixing": mixing,
-                }
-                launch_metrics.update(read_abacus_scf_metrics(job_directory))
-                _atomic_json(job_directory / "fde_performance.json", launch_metrics)
-                if completed.returncode != 0:
-                    raise WorkflowError(
-                        f"ABACUS failed in {job_directory}; see {log_path}")
-                density_path, density_data = select_scf_density(
-                    job_directory, allow_partial_scf)
-                inner_converged = bool(density_data["scf_converged"])
-                fragment_path = job_directory / "result.fde_fragment"
-                if inner_converged and not fragment_path.is_file():
-                    raise WorkflowError(
-                        "converged ABACUS job did not produce an FDE fragment "
-                        f"in {job_directory}")
-                if not inner_converged and fragment_path.exists():
-                    raise WorkflowError(
-                        "partial ABACUS job produced a final FDE fragment "
-                        f"in {job_directory}")
-                if remove_restarts:
-                    remove_abacus_restart_files(job_directory)
-                densities[active_label] = density_path.resolve()
-                attempt_metrics = dict(launch_metrics)
-                attempt_metrics.update({
-                    "converged": inner_converged,
-                    "density_artifact_iterations": density_data["scf_iterations"],
-                    "density_residual": density_data["scf_density_residual"],
-                    "job_directory": str(job_directory.resolve()),
-                })
-                attempts.append(attempt_metrics)
-                if (inner_converged or not strict_scf or retry >= maximum_retries):
-                    break
-                retry += 1
+        cycle_input_paths = dict(densities)
 
-            total_iterations = sum(
-                int(item.get("density_artifact_iterations", 0)
-                    or item.get("electronic_steps", 0)) for item in attempts)
-            cycle_scf[active_label] = {
-                "converged": inner_converged,
-                "iterations": total_iterations,
-                "density_residual": density_data["scf_density_residual"],
-                "wall_time_seconds": math.fsum(
-                    float(item["wall_time_seconds"]) for item in attempts),
-                "electronic_steps": sum(
-                    int(item.get("electronic_steps", 0)) for item in attempts),
-                "electronic_step_time_seconds": math.fsum(
-                    float(item.get("electronic_step_time_seconds", 0.0))
-                    for item in attempts),
-                "maximum_iterations": int(schedule["maximum_iterations"]),
-                "density_tolerance": float(schedule["density_tolerance"]),
-                "mixing": mixing,
-                "retry_count": retry,
-                "attempts": attempts,
-            }
-            if inner_converged:
-                cycle_fragment_paths[active_label] = fragment_path.resolve()
-                cycle_fragments.append(read_fragment(fragment_path))
+        def launch(active_label: str,
+                   input_paths: Mapping[str, Path]) -> Dict[str, object]:
+            return run_fragment_scf(spec,
+                                    geometry,
+                                    state,
+                                    state_directory,
+                                    active_label,
+                                    input_paths,
+                                    cycle,
+                                    schedule,
+                                    neutral[active_label])
+
+        results: List[Dict[str, object]] = []
+        if update_scheme == "gauss_seidel":
+            for active_label in update_order:
+                result = launch(active_label, densities)
+                results.append(result)
+                densities[active_label] = Path(result["density_path"])
+        elif jacobi_parallelism == 1:
+            results = [launch(active_label, cycle_input_paths)
+                       for active_label in update_order]
+        else:
+            with ThreadPoolExecutor(max_workers=jacobi_parallelism) as executor:
+                futures = [executor.submit(launch, active_label, cycle_input_paths)
+                           for active_label in update_order]
+                results = [future.result() for future in futures]
+
+        raw_density_paths: Dict[str, Path] = {}
+        for result in results:
+            active_label = str(result["label"])
+            raw_density_paths[active_label] = Path(result["density_path"])
+            cycle_scf[active_label] = dict(result["metrics"])
+            if result["fragment_path"] is not None:
+                cycle_fragment_paths[active_label] = Path(result["fragment_path"])
+                cycle_fragments.append(result["fragment"])
+        densities, outer_mixing = apply_outer_mixing(
+            controls,
+            state_directory,
+            cycle,
+            strict_scf,
+            labels,
+            cycle_input_paths,
+            raw_density_paths,
+            history)
         residual = max(density_rms(old_density_data[label], read_density(densities[label]))
                        for label in labels)
         all_inner_converged = len(cycle_fragment_paths) == len(labels)
@@ -1166,6 +1531,8 @@ def run_state(spec: Mapping[str, object],
         history.append({"cycle": cycle, "density_rms": residual, "energy_ry": energy,
                         "energy_change_ry": energy_change,
                         "scf_mode": schedule["mode"],
+                        "update_scheme": update_scheme,
+                        "outer_mixing": outer_mixing,
                         "scf_schedule": {
                             "strict": strict_scf,
                             "maximum_iterations": schedule["maximum_iterations"],
@@ -1181,6 +1548,8 @@ def run_state(spec: Mapping[str, object],
             "cycle": cycle, "converged": converged, "density_rms": residual,
             "energy_ry": energy, "energy_change_ry": energy_change,
             "scf_mode": schedule["mode"],
+            "update_scheme": update_scheme,
+            "outer_mixing": outer_mixing,
             "scf_schedule": history[-1]["scf_schedule"],
             "all_inner_scf_converged": all_inner_converged,
             "strict_cycle_complete": strict_cycle_complete,
@@ -1192,7 +1561,12 @@ def run_state(spec: Mapping[str, object],
         }
         _atomic_json(checkpoint_path, checkpoint)
         write_state_performance(state_directory, history)
-        prune_completed_cycles(state_directory, cycle, retain_completed_cycles)
+        outer_settings = controls.get("outer_mixing", {})
+        outer_history = (int(outer_settings.get("history", 4))
+                         if isinstance(outer_settings, dict)
+                         and outer_settings.get("type") == "anderson" else 0)
+        prune_completed_cycles(
+            state_directory, cycle, max(retain_completed_cycles, outer_history))
         if converged:
             composed = compose_state(str(state["label"]),
                                      [cycle_fragment_paths[label] for label in labels],

@@ -144,6 +144,67 @@ floor with a linear decomposition: `grad(max(rho,floor))` is not generally the
 sum of separately floored gradients.  This preserves the reference functional
 and potential at vacuum-grid points.
 
+## Freeze--thaw update schemes
+
+The validated production postprocessor still requires exactly two fragments.
+Within that boundary the workflow supports:
+
+- `auto`: currently selects Gauss--Seidel for the two-fragment case;
+- `gauss_seidel`: the second fragment immediately sees the first fragment's
+  new raw density;
+- `jacobi`: both fragments see an immutable snapshot from the preceding FT
+  cycle.
+
+`update_order` must be a permutation of all fragment labels.  With Jacobi it
+controls deterministic result ordering, not the density snapshot.  Set
+`jacobi_parallelism: 1` to evaluate the Jacobi map sequentially, or `2` to
+launch both subsystem commands concurrently.
+
+Concurrent launch does not invent or divide Slurm resources.  Each
+`abacus_command` must already be safe to run concurrently, for example by using
+`srun --exclusive` with a per-step rank count inside an allocation large enough
+for both steps.  Do not set parallelism to two if both launchers would claim the
+same 80 cores.
+
+## Outer linear and Anderson mixing
+
+Outer mixing operates on the FT map after all subsystem calls in a cycle.  It
+is distinct from ABACUS inner Pulay/Broyden charge mixing:
+
+```json
+"outer_mixing": {
+  "type": "anderson",
+  "beta": 0.5,
+  "history": 4,
+  "regularization": 1e-10,
+  "apply_in_strict": false
+}
+```
+
+- `none` passes the raw subsystem densities unchanged.
+- `linear` applies `(1-beta) rho_old + beta rho_raw`.
+- `anderson` minimizes the norm of the recent FT residual combination and then
+  applies `beta` to the extrapolated map.  The current implementation uses a
+  block-diagonal history: each fragment solves its own small Anderson system.
+
+Mixed densities are projected to nonnegative values and independently
+renormalized to the exact α/β populations before being written as binary FDE
+artifacts.  A singular Anderson system automatically falls back to the current
+linear update and records the reason in `checkpoint.json`.
+
+`apply_in_strict` must currently be `false`.  Strict cycles therefore use raw
+ABACUS densities, and the final density, fragment orbital artifact, energy, and
+coupling all describe the same SCF solutions.  Anderson requires two to eight
+history slots.  The workflow retains at least that many cycle directories even
+when `retain_completed_cycles` is smaller, because prior input/raw density files
+are the restartable history.  On large FFT grids this storage cost should be
+considered before increasing the depth.
+
+For two fragments, start with `auto` and `outer_mixing.type: none`.  Enable
+linear damping when Gauss--Seidel oscillates.  Use Jacobi plus Anderson when
+concurrent subsystem resources are genuinely available or when a snapshot
+update is needed for reproducibility experiments.
+
 ## Tests
 
 ```bash

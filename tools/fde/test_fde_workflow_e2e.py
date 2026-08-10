@@ -135,7 +135,8 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
 
 
 def prepare_case(root: Path, partial_first_cycle: bool = False,
-                 rks: bool = False, adaptive: bool = False):
+                 rks: bool = False, adaptive: bool = False,
+                 jacobi_outer: bool = False):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -210,6 +211,15 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
             "mixing_recovery": {
                 "enabled": True,
                 "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+            },
+        })
+    if jacobi_outer:
+        controls.update({
+            "update_scheme": "jacobi",
+            "jacobi_parallelism": 2,
+            "outer_mixing": {
+                "type": "anderson", "beta": 0.5, "history": 2,
+                "regularization": 1e-10, "apply_in_strict": False,
             },
         })
     specification = {
@@ -349,6 +359,29 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                                / "INPUT").read_text(encoding="utf-8")
                 self.assertRegex(retry_input, r"(?m)^mixing_type\s+plain$")
                 self.assertRegex(retry_input, r"(?m)^mixing_beta\s+0\.05$")
+
+    def test_parallel_jacobi_uses_cycle_snapshot_and_outer_mixing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(
+                root, adaptive=True, jacobi_outer=True)
+            fde_workflow.run_workflow(spec_path)
+
+            checkpoint = json.loads(
+                (work / "g0" / "reactant" / "checkpoint.json").read_text(
+                    encoding="utf-8"))
+            first = checkpoint["history"][0]
+            self.assertEqual(first["update_scheme"], "jacobi")
+            self.assertTrue(first["outer_mixing"]["applied"])
+            self.assertFalse(checkpoint["history"][1]["outer_mixing"]["applied"])
+            mixed_f = Path(first["outer_mixing"]["mixed_densities"]["F"])
+            self.assertTrue(mixed_f.is_file())
+            cycle_one_ch3cl = (work / "g0" / "reactant" / "cycle-001"
+                               / "CH3Cl" / "FDE_CONFIG").read_text(encoding="utf-8")
+            self.assertIn("reactant_F.fde_seed", cycle_one_ch3cl)
+            cycle_two_f = (work / "g0" / "reactant" / "cycle-002"
+                           / "F" / "FDE_CONFIG").read_text(encoding="utf-8")
+            self.assertIn("outer-mixed", cycle_two_f)
 
 
 if __name__ == "__main__":

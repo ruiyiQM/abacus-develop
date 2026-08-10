@@ -90,6 +90,29 @@ SCF and then reused for its electronic steps.  The cache is in memory, is
 invalidated by constructing the next fragment job, and needs no workflow or
 ABACUS INPUT option.
 
+The committed template explicitly uses `update_scheme: auto`, which selects
+Gauss--Seidel for this two-fragment donor/acceptor pair, and leaves outer mixing
+off to preserve the reference trajectory.  For a convergence experiment, copy
+the template and replace those controls with:
+
+```json
+"update_scheme": "jacobi",
+"jacobi_parallelism": 2,
+"outer_mixing": {
+  "type": "anderson",
+  "beta": 0.5,
+  "history": 4,
+  "regularization": 1e-10,
+  "apply_in_strict": false
+}
+```
+
+The parallel setting requires an allocation and `abacus_command` that can host
+two exclusive subsystem MPI steps.  On a single 80-core node use
+`jacobi_parallelism: 1`; otherwise the two nominal 80-rank calls would
+oversubscribe the node.  Strict cycles never mix, so the final energies and
+coupling remain tied to the final raw fragment SCFs.
+
 The reference calculation converged the reactant and product states in five
 and six freeze--thaw cycles, respectively.  Its orthogonalized coupling is
 `-0.0006178906742 Ry` (`-8.406830896 meV`).  Compact reference files are under

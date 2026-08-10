@@ -191,6 +191,69 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(fde_workflow.WorkflowError, "must be zero"):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_jacobi_and_outer_anderson_controls(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "update_scheme": "jacobi",
+            "jacobi_parallelism": 2,
+            "update_order": ["CH3Cl", "F"],
+            "outer_mixing": {
+                "type": "anderson", "beta": 0.4, "history": 4,
+                "regularization": 1e-10, "apply_in_strict": False,
+            },
+        }
+        fde_workflow.validate_spec(spec)
+        spec["controls"]["outer_mixing"]["apply_in_strict"] = True
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "final artifacts"):
+            fde_workflow.validate_spec(spec)
+
+    def test_linear_outer_mixing_preserves_populations_and_writes_binary(self):
+        old = {
+            "fragment": "F", "state": "reactant", "geometry": "g0",
+            "schema_version": 2, "cycle": 1, "scf_converged": True,
+            "scf_iterations": 4, "scf_density_residual": 1e-6,
+            "grid_size": 2, "grid_dimensions": [2, 1, 1], "cell_volume": 2.0,
+            "grid_fingerprint": "grid", "pseudopotentials": "pp",
+            "orbitals": "nao", "core_density": "none",
+            "functionals": ["pbe", "lc94"], "populations": [1, 0],
+            "energies_ry": [0.1, 0.2],
+            "alpha": [0.8, 0.2], "beta": [0.0, 0.0],
+        }
+        raw = dict(old)
+        raw["alpha"] = [0.2, 0.8]
+        alpha, beta, detail = fde_workflow.mix_density_history(
+            [(old, raw)], "linear", 0.5, 1e-10)
+        self.assertEqual(list(alpha), [0.5, 0.5])
+        self.assertEqual(list(beta), [0.0, 0.0])
+        self.assertEqual(detail["coefficients"], [1.0])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mixed.fde_density"
+            fde_workflow.write_mixed_density(path, raw, alpha, beta)
+            mixed = fde_workflow.read_density(path)
+            self.assertEqual(mixed["artifact_format"], "binary")
+            self.assertFalse(mixed["scf_converged"])
+            self.assertEqual(mixed["populations"], [1, 0])
+            self.assertEqual(list(mixed["alpha"]), [0.5, 0.5])
+
+    def test_anderson_coefficients_are_normalized(self):
+        base = {
+            "fragment": "F", "state": "reactant", "geometry": "g0",
+            "grid_size": 2, "cell_volume": 2.0, "populations": [1, 0],
+            "alpha": [0.7, 0.3], "beta": [0.0, 0.0],
+        }
+        first_raw = dict(base)
+        first_raw["alpha"] = [0.6, 0.4]
+        second_old = dict(base)
+        second_old["alpha"] = [0.6, 0.4]
+        second_raw = dict(base)
+        second_raw["alpha"] = [0.55, 0.45]
+        alpha, _, detail = fde_workflow.mix_density_history(
+            [(base, first_raw), (second_old, second_raw)],
+            "anderson", 0.5, 1e-8)
+        self.assertAlmostEqual(sum(detail["coefficients"]), 1.0)
+        self.assertAlmostEqual(sum(alpha), 1.0)
+        self.assertTrue(all(value >= 0.0 for value in alpha))
+
     def test_rejects_invalid_fragment_mixing_values(self):
         spec = self.spec()
         spec["controls"] = {
