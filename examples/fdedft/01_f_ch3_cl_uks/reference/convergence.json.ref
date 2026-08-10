@@ -1,0 +1,16 @@
+{
+  "reactant": {
+    "converged": true,
+    "cycle": 5,
+    "density_rms": 1.3774229728655035e-07,
+    "energy_change_ry": 1.74561334063128e-05,
+    "energy_ry": -92.93155990321034
+  },
+  "product": {
+    "converged": true,
+    "cycle": 6,
+    "density_rms": 1.4458407244538046e-06,
+    "energy_change_ry": 5.6236595611380835e-06,
+    "energy_ry": -92.52378514955767
+  }
+}

@@ -29,8 +29,9 @@ toolchain/abacus_env.sh
 .trae
 .codex
 compile_commands.json
-examples/fde_f_ch3_cl/generated/
-examples/fde_f_ch3_cl/grid_probe.log
-examples/fde_f_ch3_cl/resources/
-examples/fde_f_ch3_cl/work/
-examples/fde_f_ch3_cl/workflow.json
+examples/fdedft/01_f_ch3_cl_uks/generated/
+examples/fdedft/01_f_ch3_cl_uks/grid_probe.log
+examples/fdedft/01_f_ch3_cl_uks/resources/
+examples/fdedft/01_f_ch3_cl_uks/work/
+examples/fdedft/01_f_ch3_cl_uks/workflow.json
+examples/fdedft/01_f_ch3_cl_uks/fdedft.output

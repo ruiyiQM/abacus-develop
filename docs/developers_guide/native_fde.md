@@ -330,12 +330,16 @@ linearized-state artifact per state, an AO-overlap artifact, and a postprocess
 external production scheduler deliberately stops at two until the generalized
 runtime energy recomputation is connected.
 
-`examples/fde_f_ch3_cl` prepares a five-point illustrative SN2 scan for the
-two charge-localized states. Given an ABACUS executable, no-NLCC PBE
-pseudopotentials, numerical orbitals, and a cube header from the target grid,
-it generates state-local compact seeds and an absolute-path workflow. The
-example geometries and uniform seeds are execution scaffolding, not benchmark
-reference data.
+`examples/fdedft/01_f_ch3_cl_uks` prepares one near-symmetric
+`[F-CH3-Cl]-` geometry for two charge-localized states. Given an ABACUS
+executable and the pinned no-NLCC PBE pseudopotentials and numerical orbitals,
+it probes the target grid, generates state-local compact seeds, and writes an
+absolute-path workflow. The case explicitly selects UKS; `fde_task
+embedded_scf` then activates the internal two-Fermi path so each fragment's
+alpha/beta populations remain fixed. Compact reference energies and coupling
+output from a completed Euler calculation are committed with their provenance.
+The 40 Ry example and uniform seeds are execution scaffolding, not a converged
+benchmark.
 
 The generated postprocess sidecar adds one `LINEARIZED_STATE <state> <path>`
 record per determinant. Run it with a minimal `INPUT` containing

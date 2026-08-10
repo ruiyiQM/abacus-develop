@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare absolute paths and compact FDE seed densities for this example."""
+"""Prepare the single-point UKS FDE example and its compact seed densities."""
 
 from __future__ import annotations
 
@@ -105,9 +105,9 @@ def probe_grid(root: Path, abacus: Path, pseudo_dir: Path,
     log_path = root / "grid_probe.log"
     with tempfile.TemporaryDirectory(prefix="fde-grid-probe-", dir=str(root)) as directory:
         work = Path(directory)
-        shutil.copy2(root / "template" / "STRU", work / "STRU")
-        shutil.copy2(root / "template" / "KPT", work / "KPT")
-        input_text = (root / "template" / "INPUT").read_text(encoding="utf-8")
+        shutil.copy2(root / "STRU", work / "STRU")
+        shutil.copy2(root / "KPT", work / "KPT")
+        input_text = (root / "INPUT").read_text(encoding="utf-8")
         (work / "INPUT").write_text(patch_input_text(input_text, {
             "suffix": "fde_grid_probe",
             "scf_nmax": 1,
@@ -115,6 +115,7 @@ def probe_grid(root: Path, abacus: Path, pseudo_dir: Path,
             "nspin": 1,
             "nbands": 12,
             "out_chg": "2 10",
+            "fde_task": "none",
             "pseudo_dir": pseudo_dir,
             "orbital_dir": orbital_dir,
         }), encoding="utf-8")
@@ -156,19 +157,22 @@ def write_seed(path: Path,
 
 
 def render_stru(template: str, f_c: float, c_cl: float) -> str:
-    f_line = "9.850000 12.000000 12.000000 0 0 0"
-    cl_line = "14.150000 12.000000 12.000000 0 0 0"
+    f_line = "9.80263158 12.000000 12.000000 0 0 0"
+    cl_line = "14.12368421 12.000000 12.000000 0 0 0"
     if f_line not in template or cl_line not in template:
         raise ValueError("template STRU coordinate anchors are missing")
     result = template.replace(f_line,
-                              f"{12.0 - f_c:.6f} 12.000000 12.000000 0 0 0")
+                              f"{12.0 - f_c:.8f} 12.000000 12.000000 0 0 0")
     return result.replace(cl_line,
-                          f"{12.0 + c_cl:.6f} 12.000000 12.000000 0 0 0")
+                          f"{12.0 + c_cl:.8f} 12.000000 12.000000 0 0 0")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--abacus", type=Path, required=True)
+    parser.add_argument(
+        "--mpi-ranks", type=int, default=1,
+        help="run each embedded SCF with mpirun at this rank count (default: 1)")
     parser.add_argument("--pseudo-dir", type=Path,
                         default=DEFAULT_RESOURCE_ROOT / "pseudopotentials")
     parser.add_argument("--orbital-dir", type=Path,
@@ -180,6 +184,9 @@ def main() -> int:
         "--allow-unverified-resources", action="store_true",
         help="allow custom files with the default names without SHA-256 verification")
     arguments = parser.parse_args()
+
+    if arguments.mpi_ranks < 1:
+        parser.error("--mpi-ranks must be a positive integer")
 
     root = ROOT
     abacus = arguments.abacus.resolve()
@@ -196,6 +203,11 @@ def main() -> int:
         parser.error(f"ABACUS executable is not a file: {abacus}")
     if not os.access(abacus, os.X_OK):
         parser.error(f"ABACUS executable is not executable: {abacus}")
+    launcher = None
+    if arguments.mpi_ranks > 1:
+        launcher = shutil.which("mpirun")
+        if launcher is None:
+            parser.error("mpirun is required when --mpi-ranks is greater than one")
     manifest = load_resource_manifest()
     try:
         validate_resources(pseudo_dir, orbital_dir, manifest,
@@ -216,16 +228,16 @@ def main() -> int:
         parser.error(str(error))
 
     spec = json.loads((root / "workflow.template.json").read_text(encoding="utf-8"))
-    spec["abacus_command"] = [str(abacus)]
+    spec["abacus_command"] = ([launcher, "-np", str(arguments.mpi_ranks), str(abacus)]
+                               if launcher else [str(abacus)])
     spec["postprocess_command"] = [str(abacus)]
     spec["work_directory"] = str((root / "work").resolve())
     spec["geometries"] = []
     generated = root / "generated"
     generated.mkdir(exist_ok=True)
-    template = root / "template"
-    stru_template = (template / "STRU").read_text(encoding="utf-8")
+    stru_template = (root / "STRU").read_text(encoding="utf-8")
 
-    with (root / "geometries.csv").open(newline="", encoding="utf-8") as stream:
+    with (root / "geometry.csv").open(newline="", encoding="utf-8") as stream:
         for row in csv.DictReader(stream):
             label = row["label"]
             if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", label) is None:
@@ -234,7 +246,9 @@ def main() -> int:
             template_output = geometry_root / "template"
             if template_output.exists():
                 shutil.rmtree(template_output)
-            shutil.copytree(template, template_output)
+            template_output.mkdir(parents=True)
+            for filename in ("INPUT", "KPT", "STRU"):
+                shutil.copy2(root / filename, template_output / filename)
             (template_output / "STRU").write_text(
                 render_stru(stru_template, float(row["f_c_angstrom"]),
                             float(row["c_cl_angstrom"])), encoding="utf-8")

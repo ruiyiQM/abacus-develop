@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "system": "[F-CH3-Cl]-",
+  "geometry_source_label": "g09",
+  "geometry": {
+    "f_c_angstrom": 2.1973684210526314,
+    "c_cl_angstrom": 2.1236842105263158,
+    "coordinate_angstrom": -0.0736842105263158
+  },
+  "method": "PBE/LC94 UKS FDE-FODFT",
+  "basis": "SG15-v1.0 PBE plus StandardOrbitals-v2.0 DZP",
+  "ecutwfc_ry": 40,
+  "abacus_source_commit": "3d2dfb0f7ccbc6e6e9fb575a5519b80f7d9ffe0b",
+  "resource_source_commit": "3b634f1618f5c56baa97084a41ae17e801d46ab9",
+  "execution": {
+    "cluster": "ETH Euler",
+    "mpi_ranks": 20,
+    "openmp_threads_per_rank": 4,
+    "occupation_control": "fde_task embedded_scf forces internal two-Fermi UKS; nelec and nupdown are set per fragment"
+  }
+}
