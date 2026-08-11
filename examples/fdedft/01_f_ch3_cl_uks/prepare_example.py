@@ -164,13 +164,14 @@ def write_seed(path: Path,
                beta: int,
                grid: Tuple[int, int, int, float],
                resource_commit: str,
+               fragment_xc: str,
                kedf: str) -> None:
     nx, ny, nz, volume = grid
     lines = ["FDE_UNIFORM_DENSITY_SEED 1", f"FRAGMENT {fragment}", f"STATE {state}",
              f"GEOMETRY {geometry}", f"GRID_FINGERPRINT grid-{nx}x{ny}x{nz}",
              f"PSEUDOPOTENTIALS sg15-v1.0-pbe-oncv-no-nlcc-{resource_commit}",
              f"ORBITALS standard-v2.0-dzp-100ry-{resource_commit}",
-             "CORE_DENSITY none", f"FUNCTIONALS pbe {kedf}",
+             "CORE_DENSITY none", f"FUNCTIONALS {fragment_xc} {kedf}",
              f"GRID {nx} {ny} {nz} {volume:.17g}", f"POPULATIONS {alpha} {beta}",
              f"RHO_UNIFORM {alpha / volume:.17g} {beta / volume:.17g}", "END"]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -207,6 +208,12 @@ def main() -> int:
         "--kedf", choices=("thomas_fermi", "pw91k", "revapbek"),
         default="pw91k",
         help="nonadditive kinetic functional (default: pw91k)")
+    parser.add_argument(
+        "--fragment-xc", choices=("pbe", "pbe0", "scan"), default="pbe",
+        help="intramolecular fragment functional (default: pbe)")
+    parser.add_argument(
+        "--embedding-xc", choices=("pbe",), default="pbe",
+        help="nonadditive interfragment XC functional (currently: pbe)")
     parser.add_argument(
         "--variant-label",
         help="safe suffix for independent benchmark workflow/generated/work paths")
@@ -280,6 +287,8 @@ def main() -> int:
                                if launcher else [str(abacus)])
     spec["postprocess_command"] = [str(abacus)]
     spec["controls"]["kedf"] = arguments.kedf
+    spec["controls"]["fragment_xc"] = arguments.fragment_xc
+    spec["controls"]["embedding_xc"] = arguments.embedding_xc
     spec["controls"]["maximum_scf_iterations"] = arguments.maximum_scf_iterations
     spec["controls"]["scf_density_tolerance"] = arguments.scf_density_tolerance
     spec["controls"]["freeze_thaw_density_tolerance"] \
@@ -293,7 +302,12 @@ def main() -> int:
     if arguments.variant_label is not None:
         variant_suffix = f"-{arguments.variant_label}"
     else:
-        variant_suffix = "" if arguments.kedf == "pw91k" else f"-{arguments.kedf}"
+        variant_parts = []
+        if arguments.fragment_xc != "pbe":
+            variant_parts.append(f"{arguments.fragment_xc}-in-{arguments.embedding_xc}")
+        if arguments.kedf != "pw91k":
+            variant_parts.append(arguments.kedf)
+        variant_suffix = "" if not variant_parts else "-" + "-".join(variant_parts)
     spec["work_directory"] = str((root / f"work{variant_suffix}").resolve())
     spec.setdefault("provenance", {})["numerical_controls"] = {
         "ecutwfc_ry": arguments.ecutwfc,
@@ -301,6 +315,8 @@ def main() -> int:
         "freeze_thaw_density_tolerance": arguments.freeze_thaw_density_tolerance,
         "energy_tolerance_ry": arguments.energy_tolerance_ry,
         "maximum_scf_iterations": arguments.maximum_scf_iterations,
+        "fragment_xc": arguments.fragment_xc,
+        "embedding_xc": arguments.embedding_xc,
     }
     spec["geometries"] = []
     generated = root / f"generated{variant_suffix}"
@@ -352,7 +368,7 @@ def main() -> int:
                     seed_path = seed_directory / f"{state_label}_{fragment_label}.fde_seed"
                     write_seed(seed_path, label, state_label, fragment_label,
                                alpha, beta, grid, manifest["source_commit"],
-                               arguments.kedf)
+                               arguments.fragment_xc, arguments.kedf)
                     initial[state_label][fragment_label] = str(seed_path.resolve())
             spec["geometries"].append({"label": label,
                                        "coordinate_angstrom": (float(row["c_cl_angstrom"])

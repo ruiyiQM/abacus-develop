@@ -9,6 +9,8 @@ Current boundary:
 - `runtime/`: persistent worker protocol, immutable-session contract, and
   future task-local lifecycle helpers;
 - `restart/`: resident AO density-matrix/orbital warm-start policy;
+- `functionals/`: the fragment/embedding XC policy and future provider
+  factories;
 - root artifact and state files: versioned density, determinant, band,
   fragment, and linearized-state formats;
 - root embedding files: grid partitioning, semilocal functionals, `PotFde`,
@@ -16,8 +18,8 @@ Current boundary:
 - root coupling/energy files: diabatic assembly, coupling, canonical ledgers,
   freeze--thaw maps, and PES utilities.
 
-Planned migrations use `functionals/`, `coupling/`, `gpu/`, and
-`workflow/` only when the corresponding implementation is changed. Do not
+Planned migrations use `coupling/`, `gpu/`, and `workflow/` only when the
+corresponding implementation is changed. Do not
 move unrelated files merely for directory symmetry: every move must preserve
 the old include path or update all consumers and tests in one commit.
 
@@ -40,3 +42,17 @@ Hamiltonian/grid state while retaining the resident DMK/DMR and orbital
 coefficients. The new FDE density artifact remains the authoritative real-space
 charge seed. ABACUS resets charge-mixing history at electronic iteration one,
 so Broyden/DIIS vectors do not cross request boundaries.
+
+## Exchange-correlation boundary
+
+`FRAGMENT_XC` is the intrafragment ABACUS KS/GKS model and accepts `pbe`,
+`pbe0`, or `scan`. `EMBEDDING_XC` is the nonadditive interfragment XC model
+and currently accepts only `pbe`. Thus PBE0-in-PBE and SCAN-in-PBE retain the
+ordinary ABACUS exact-exchange or kinetic-energy-density machinery inside
+each active fragment, while `PotFde` continues to evaluate a density-only PBE
+nonadditive XC potential between fragments. No interfragment exact exchange
+or nonadditive meta-GGA tau term is implied.
+
+Both choices are immutable within a persistent session and are recorded in
+every density artifact. Mixing density artifacts from different fragment XC
+models is rejected before an SCF starts.

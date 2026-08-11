@@ -8,6 +8,7 @@
 #include "fde_solver_policy.h"
 #include "fde_spin_density.h"
 #include "fde_fragment_artifact.h"
+#include "functionals/fde_xc_policy.h"
 #include "pot_fde.h"
 #include "runtime/fde_session_contract.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
@@ -294,6 +295,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
 
 void validate_artifact_set(const FrozenDensityArtifact& active,
                            const std::vector<FrozenDensityArtifact>& frozen,
+                           const std::string& fragment_xc,
                            const double electron_tolerance,
                            const Parallel_Orbitals& orbitals)
 {
@@ -321,6 +323,11 @@ void validate_artifact_set(const FrozenDensityArtifact& active,
                     "FDE compatible artifact set requires at least two fragments");
             }
             DensityArtifactIO::validate(active, electron_tolerance);
+            if (active.xc_functional != fragment_xc)
+            {
+                throw std::invalid_argument(
+                    "FDE density artifact fragment XC does not match FDE_CONFIG");
+            }
             for (std::size_t index = 0; index < frozen.size(); ++index)
             {
                 DensityArtifactIO::validate_compatible_pair(active,
@@ -349,6 +356,11 @@ void validate_artifact_set(const FrozenDensityArtifact& active,
             "FDE compatible artifact set requires at least two fragments");
     }
     DensityArtifactIO::validate(active, electron_tolerance);
+    if (active.xc_functional != fragment_xc)
+    {
+        throw std::invalid_argument(
+            "FDE density artifact fragment XC does not match FDE_CONFIG");
+    }
     for (std::size_t index = 0; index < frozen.size(); ++index)
     {
         DensityArtifactIO::validate_compatible_pair(active,
@@ -526,6 +538,13 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         return std::unique_ptr<FdeLcaoDriver>();
     }
     const FdeRuntimeConfig config = read_config_file(input.fde_config);
+    const std::string input_fragment_xc
+        = FdeXcPolicy::canonical_fragment(input.dft_functional);
+    if (input_fragment_xc != config.fragment_xc)
+    {
+        throw std::invalid_argument(
+            "FDE INPUT dft_functional does not match FDE_CONFIG FRAGMENT_XC");
+    }
     if (config.active_state.empty() || config.active_fragment.empty()
         || config.active_density_path.empty())
     {
@@ -646,6 +665,7 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     }
     validate_artifact_set(active_initial,
                           frozen_environment,
+                          config.fragment_xc,
                           config.electron_tolerance,
                           orbitals);
 
@@ -746,6 +766,7 @@ void FdeLcaoDriver::reload_session_config(
     }
     validate_artifact_set(active,
                           frozen_environment,
+                          requested.fragment_xc,
                           requested.electron_tolerance,
                           orbitals);
 
@@ -932,6 +953,11 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
         return;
     }
     density_basis_ = &density_basis;
+    if (config_.embedding_xc != "pbe")
+    {
+        throw std::invalid_argument(
+            "FDE nonadditive XC provider does not match EMBEDDING_XC");
+    }
     if (!LibxcPbeProvider::available())
     {
         throw std::runtime_error("FDE embedded_scf requires an ABACUS build with Libxc");
@@ -1616,6 +1642,7 @@ void FdeLcaoDriver::write_scf_artifacts(
         density.scf_density_residual = status.density_residual;
         density.kinetic_functional
             = kinetic_functional_name(config_.kinetic_functional);
+        density.xc_functional = config_.fragment_xc;
         density.rho_alpha_bohr3.swap(global_alpha);
         density.rho_beta_bohr3.swap(global_beta);
         std::ofstream density_output(density_path.c_str(), std::ios::binary);

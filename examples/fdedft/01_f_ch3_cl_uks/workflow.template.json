@@ -21,6 +21,8 @@
   "controls": {
     "execution_mode": "persistent_session",
     "spin_mode": "uks",
+    "fragment_xc": "pbe",
+    "embedding_xc": "pbe",
     "kedf": "pw91k",
     "device": "cpu",
     "ks_solver": "genelpa",

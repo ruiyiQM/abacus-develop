@@ -1,5 +1,7 @@
 #include "fde_runtime_config.h"
 
+#include "functionals/fde_xc_policy.h"
+
 #include <algorithm>
 #include <cmath>
 #include <istream>
@@ -94,6 +96,8 @@ void require_unique(const std::vector<std::string>& labels, const std::string& k
 FdeRuntimeConfig::FdeRuntimeConfig()
     : schema_version(1),
       atom_count(0),
+      fragment_xc("pbe"),
+      embedding_xc("pbe"),
       kinetic_functional(KineticFunctional::Pw91k),
       density_floor_bohr3(1.0e-12),
       maximum_scf_iterations(100),
@@ -220,6 +224,8 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
     {
         throw std::invalid_argument("FDE_CONFIG OUTPUT_PREFIX must not be empty");
     }
+    FdeXcPolicy::canonical_fragment(config.fragment_xc);
+    FdeXcPolicy::canonical_embedding(config.embedding_xc);
     if (!finite_positive(config.density_floor_bohr3)
         || config.maximum_scf_iterations < 1
         || !finite_positive(config.scf_density_tolerance)
@@ -425,6 +431,16 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
                     "KEDF must be pw91k, lc94, thomas_fermi, tf, or revapbek");
             }
         }
+        else if (key == "FRAGMENT_XC")
+        {
+            config.fragment_xc = FdeXcPolicy::canonical_fragment(
+                read_value<std::string>(line, line_number, "fragment XC"));
+        }
+        else if (key == "EMBEDDING_XC")
+        {
+            config.embedding_xc = FdeXcPolicy::canonical_embedding(
+                read_value<std::string>(line, line_number, "embedding XC"));
+        }
         else if (key == "DENSITY_FLOOR_BOHR3")
         {
             config.density_floor_bohr3 = read_value<double>(line, line_number, "density floor");
@@ -580,6 +596,10 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
         output << "AO_OVERLAP " << config.ao_overlap_path << '\n';
     }
     output << "OUTPUT_PREFIX " << config.output_prefix << '\n';
+    output << "FRAGMENT_XC " << FdeXcPolicy::canonical_fragment(config.fragment_xc)
+           << '\n';
+    output << "EMBEDDING_XC " << FdeXcPolicy::canonical_embedding(config.embedding_xc)
+           << '\n';
     output << "KEDF " << kinetic_functional_name(config.kinetic_functional) << '\n';
     output << "DENSITY_FLOOR_BOHR3 " << config.density_floor_bohr3 << '\n';
     output << "MAX_SCF_ITERATIONS " << config.maximum_scf_iterations << '\n';

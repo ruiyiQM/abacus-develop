@@ -5006,12 +5006,12 @@ parameters:
       * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config. This mode does not require STRU.
     default_value: none
     unit: ""
-    availability: LCAO collinear-spin PBE calculations
+    availability: LCAO collinear-spin PBE, PBE0, or SCAN fragment calculations
   - name: fde_config
     category: Frozen-density embedding
     type: String
     description: |
-      Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
+      Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, independent fragment/embedding XC choices, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
     default_value: FDE_CONFIG
     unit: ""
     availability: fde_task is not none

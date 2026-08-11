@@ -56,6 +56,8 @@ struct FdeRuntimeConfig
     std::string ao_overlap_path;
     std::string output_prefix;
 
+    std::string fragment_xc;
+    std::string embedding_xc;
     KineticFunctional kinetic_functional;
     double density_floor_bohr3;
     int maximum_scf_iterations;

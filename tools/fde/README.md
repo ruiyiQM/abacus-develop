@@ -74,6 +74,29 @@ assembly, and the complete `cal_v_eff` call.  Compare both electronic-step
 counts and wall time when evaluating an SCF policy: reducing FT cycles while
 making every inner solve much tighter is not necessarily a speedup.
 
+## Fragment XC versus embedding XC
+
+The workflow separates the functional used by each isolated fragment from the
+functional used for nonadditive interfragment XC:
+
+```json
+"fragment_xc": "pbe0",
+"embedding_xc": "pbe"
+```
+
+`fragment_xc` accepts `pbe`, `pbe0`, or `scan` and is written to ABACUS as
+`dft_functional`. `embedding_xc` currently accepts only `pbe` and selects the
+LibXC PBE nonadditive provider in `PotFde`. Consequently, PBE0-in-PBE includes
+exact exchange only within a fragment, and SCAN-in-PBE uses tau only within a
+fragment. Neither mode includes interfragment exact exchange or a nonadditive
+meta-GGA tau contribution. This is an explicit embedding approximation, not a
+full-system PBE0 or SCAN calculation.
+
+The generated `FDE_CONFIG` and density artifacts record both sides of this
+contract. Seeds and freeze--thaw checkpoints cannot be reused across different
+`fragment_xc` values. Preparing a non-PBE fragment example automatically uses
+a separate `*-pbe0-in-pbe` or `*-scan-in-pbe` work path.
+
 ## Nonadditive kinetic functional
 
 Select the NAKE approximation with `controls.kedf`.  `thomas_fermi` is the

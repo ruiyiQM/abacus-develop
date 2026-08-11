@@ -10,6 +10,11 @@ Available case:
   for `[F-CH3-Cl]-`, using fixed alpha/beta fragment populations (the native
   two-Fermi path).
 
+The maintained workflow also accepts PBE0-in-PBE and SCAN-in-PBE variants:
+the first name is the intrafragment solver functional, while the second is the
+nonadditive interfragment XC functional. See the case README for the precise
+approximation and preparation commands.
+
 These inputs demonstrate the workflow and are not converged production
 benchmarks.  See the case README for resource provenance and numerical details.
 The workflow writes per-call and aggregate performance JSON in addition to the

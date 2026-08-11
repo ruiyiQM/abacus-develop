@@ -30,7 +30,8 @@ path automatically.  Thus `nupdown 0` fixes equal alpha/beta populations for
 a closed-shell fragment instead of reverting to an unconstrained shared Fermi
 level.  Odd-electron fragments retain the requested signed spin population.
 
-The example uses PBE, the PW91k (LibXC LC94) nonadditive kinetic functional, SG15-v1.0 PBE
+The default example uses PBE both inside each fragment and for nonadditive
+interfragment XC, the PW91k (LibXC LC94) nonadditive kinetic functional, SG15-v1.0 PBE
 pseudopotentials, StandardOrbitals-v2.0 DZP numerical orbitals, and a 40 Ry
 grid cutoff.  The cutoff was chosen for a low-cost functional test; it is not
 a converged production recommendation.
@@ -86,6 +87,22 @@ python3 prepare_example.py --abacus /absolute/path/to/abacus --kedf revapbek
 The default PW91k case writes `workflow.json`, `generated/`, and `work/`.
 Thomas--Fermi and revAPBEk use suffixed workflow, generated, and work paths so
 their checkpoints and performance reports cannot overwrite one another.
+
+To test a generalized KS or meta-GGA fragment solver while retaining the PBE
+embedding potential, prepare a separate variant:
+
+```bash
+python3 prepare_example.py --abacus /absolute/path/to/abacus \
+    --fragment-xc pbe0 --embedding-xc pbe
+python3 prepare_example.py --abacus /absolute/path/to/abacus \
+    --fragment-xc scan --embedding-xc pbe
+```
+
+These write `workflow-pbe0-in-pbe.json` and `workflow-scan-in-pbe.json` with
+separate generated/work directories. PBE0 exact exchange and SCAN kinetic
+energy density are evaluated only inside each active fragment; the
+interfragment nonadditive XC term remains density-only PBE. This is therefore
+PBE0-in-PBE or SCAN-in-PBE embedding, not a full-system hybrid/meta-GGA model.
 
 The committed reference remains a CPU/GCC/OpenMPI/ELPA calculation.  For a
 CUDA build, copy `workflow.template.json` and change the two controls below;

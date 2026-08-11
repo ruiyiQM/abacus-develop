@@ -4997,7 +4997,7 @@
 ### fde_task
 
 - **Type**: String
-- **Availability**: *LCAO collinear-spin PBE calculations*
+- **Availability**: *LCAO collinear-spin PBE, PBE0, or SCAN fragment calculations*
 - **Description**: Select the native FDE runtime entry point.
   - `none`: run an ordinary ABACUS calculation.
   - `embedded_scf`: run one subsystem-in-environment LCAO SCF job described by `fde_config`.
@@ -5009,7 +5009,7 @@
 
 - **Type**: String
 - **Availability**: *fde_task is not none*
-- **Description**: Path to the deterministic `FDE_CONFIG` sidecar file. The sidecar defines fragments, diabatic charge/spin states, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
+- **Description**: Path to the deterministic `FDE_CONFIG` sidecar file. The sidecar defines fragments, diabatic charge/spin states, independent fragment/embedding XC choices, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.
 - **Default**: FDE_CONFIG
 
 [back to top](#full-list-of-input-keywords)

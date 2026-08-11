@@ -43,6 +43,21 @@ def canonical_kedf_name(value: object) -> str:
     return aliases[name]
 
 
+def canonical_fragment_xc_name(value: object) -> str:
+    name = _token(value, "fragment_xc").lower()
+    if name not in ("pbe", "pbe0", "scan"):
+        raise WorkflowError("fragment_xc must be pbe, pbe0, or scan")
+    return name
+
+
+def canonical_embedding_xc_name(value: object) -> str:
+    name = _token(value, "embedding_xc").lower()
+    if name != "pbe":
+        raise WorkflowError(
+            "embedding_xc currently supports only pbe; fragment_xc may be pbe0 or scan")
+    return name
+
+
 def _token(value: object, description: str) -> str:
     text = str(value)
     if not text or any(character.isspace() for character in text):
@@ -184,6 +199,8 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     if not isinstance(controls, dict):
         raise WorkflowError("controls must be a JSON object")
     canonical_kedf_name(controls.get("kedf", "pw91k"))
+    canonical_fragment_xc_name(controls.get("fragment_xc", "pbe"))
+    canonical_embedding_xc_name(controls.get("embedding_xc", "pbe"))
     execution_mode = _token(
         controls.get("execution_mode", "process"), "execution_mode")
     if execution_mode not in ("process", "persistent_session"):
@@ -1106,6 +1123,8 @@ def write_runtime_config(path: Path,
     controls = dict(spec.get("controls", {}))
     update_order = controls.get("update_order", [fragment["label"] for fragment in fragments])
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
+                  f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
+                  f"EMBEDDING_XC {canonical_embedding_xc_name(controls.get('embedding_xc', 'pbe'))}",
                   f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
                   f"DENSITY_FLOOR_BOHR3 {controls.get('density_floor_bohr3', 1e-12)}",
                   f"MAX_SCF_ITERATIONS {maximum_scf_iterations}",
@@ -1493,7 +1512,8 @@ def run_fragment_scf(
             "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
             "nspin": spin_parameters["nspin"],
             "noncolin": 0, "lspinorb": 0, "symmetry": 0,
-            "dft_functional": "pbe",
+            "dft_functional": canonical_fragment_xc_name(
+                controls.get("fragment_xc", "pbe")),
             "device": str(controls.get("device", "cpu")).lower(),
             "ks_solver": str(controls.get("ks_solver", "lapack")),
             "kpar": int(controls.get("kpar", 1)),
@@ -1830,6 +1850,8 @@ def write_postprocess_inputs(spec: Mapping[str, object],
     fragment_labels = [fragment["label"] for fragment in fragments]
     lines.extend((f"AO_OVERLAP {_absolute_token(overlap_path, 'AO overlap path')}",
                   "OUTPUT_PREFIX fde_diabatic",
+                  f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
+                  f"EMBEDDING_XC {canonical_embedding_xc_name(controls.get('embedding_xc', 'pbe'))}",
                   f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
                   "DENSITY_FLOOR_BOHR3 1e-12",
                   "MAX_SCF_ITERATIONS 100", "SCF_DENSITY_TOLERANCE 1e-8",

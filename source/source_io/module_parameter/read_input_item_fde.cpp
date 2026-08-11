@@ -45,29 +45,38 @@ FdeXcCapability classify_fde_xc_functional(const std::string& functional)
     return FdeXcCapability::unsupported;
 }
 
+bool supports_fde_fragment_xc(const std::string& functional)
+{
+    std::string normalized(functional);
+    std::transform(normalized.begin(),
+                   normalized.end(),
+                   normalized.begin(),
+                   [](const unsigned char character) {
+                       return static_cast<char>(std::tolower(character));
+                   });
+    return normalized == "pbe" || normalized == "pbe0" || normalized == "scan";
+}
+
 std::string fde_xc_capability_error(const FdeXcCapability capability)
 {
     if (capability
         == FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange)
     {
-        return "fde_task embedded_scf does not yet support hybrid meta-GGA XC: "
-               "FDE lacks pointwise kinetic-energy density tau and its "
-               "generalized-Kohn-Sham operator, as well as the nonlocal "
-               "interfragment exact-exchange operator and fragment density-matrix artifacts";
+        return "hybrid meta-GGA is a valid fragment solver class, but the "
+               "native FDE workflow currently exposes only pbe, pbe0, and scan "
+               "as fragment_xc choices";
     }
     if (capability == FdeXcCapability::hybrid_requires_exact_exchange)
     {
-        return "fde_task embedded_scf does not yet support hybrid XC: "
-               "FDE lacks the nonlocal interfragment exact-exchange operator "
-               "and fragment density-matrix artifacts";
+        return "hybrid XC is evaluated only inside each fragment; use pbe0 as "
+               "fragment_xc and pbe as embedding_xc";
     }
     if (capability == FdeXcCapability::meta_gga_requires_tau)
     {
-        return "fde_task embedded_scf does not yet support meta-GGA XC: "
-               "FDE density artifacts lack pointwise kinetic-energy density tau, "
-               "and PotFde lacks the corresponding generalized-Kohn-Sham operator";
+        return "meta-GGA XC is evaluated only inside each fragment; use scan "
+               "as fragment_xc and pbe as embedding_xc";
     }
-    return "fde_task embedded_scf currently supports only PBE XC";
+    return "fde_task embedded_scf fragment XC must be pbe, pbe0, or scan";
 }
 
 void ReadInput::item_fde()
@@ -84,7 +93,7 @@ void ReadInput::item_fde()
 * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
         item.default_value = "none";
         item.unit = "";
-        item.availability = "LCAO collinear-spin PBE calculations";
+        item.availability = "LCAO collinear-spin PBE, PBE0, or SCAN fragment calculations";
         read_sync_string(input.fde_task);
         item.reset_value = [](const Input_Item&, Parameter& para) {
             // A spin-polarized embedded subsystem carries a prescribed
@@ -130,13 +139,13 @@ void ReadInput::item_fde()
                         "fde_task embedded_scf/embedded_session requires calculation scf, basis_type lcao, "
                         "nspin 1 or 2, noncolin 0, and lspinorb 0");
                 }
-                const FdeXcCapability capability
-                    = classify_fde_xc_functional(para.input.dft_functional);
-                if (capability != FdeXcCapability::pbe_semilocal)
+                if (!supports_fde_fragment_xc(para.input.dft_functional))
                 {
                     ModuleBase::WARNING_QUIT(
                         "ReadInput",
-                        fde_xc_capability_error(capability));
+                        fde_xc_capability_error(
+                            classify_fde_xc_functional(
+                                para.input.dft_functional)));
                 }
             }
         };
@@ -147,7 +156,7 @@ void ReadInput::item_fde()
         item.annotation = "path to the native FDE sidecar configuration";
         item.category = "Frozen-density embedding";
         item.type = "String";
-        item.description = R"(Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.)";
+        item.description = R"(Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, independent fragment/embedding XC choices, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.)";
         item.default_value = "FDE_CONFIG";
         item.unit = "";
         item.availability = "fde_task is not none";

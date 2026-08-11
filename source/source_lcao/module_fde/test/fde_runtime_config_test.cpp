@@ -71,11 +71,37 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(config.active_fragment, "F");
     EXPECT_EQ(config.active_density_path, "artifacts/reactant_F.fde_density");
     EXPECT_EQ(config.maximum_scf_iterations, 120);
+    EXPECT_EQ(config.fragment_xc, "pbe");
+    EXPECT_EQ(config.embedding_xc, "pbe");
     EXPECT_DOUBLE_EQ(config.mixing_beta, 0.25);
     EXPECT_TRUE(config.calculate_force);
     ASSERT_EQ(config.linearized_state_artifacts.size(), 2);
     EXPECT_EQ(config.linearized_state_artifacts[1].label, "product");
     EXPECT_EQ(fde::FdeRuntimeConfigIO::state_index(config, "product"), 1);
+}
+
+TEST(FdeRuntimeConfig, ParsesAndCanonicalizesIndependentXcChoices)
+{
+    std::string text(fluoride_substitution_config());
+    const std::string anchor = "KEDF pw91k";
+    text.insert(text.find(anchor), "FRAGMENT_XC PBE0\nEMBEDDING_XC PBE\n");
+    std::istringstream input(text);
+    const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_EQ(config.fragment_xc, "pbe0");
+    EXPECT_EQ(config.embedding_xc, "pbe");
+
+    std::ostringstream serialized;
+    fde::FdeRuntimeConfigIO::write(serialized, config);
+    EXPECT_NE(serialized.str().find("FRAGMENT_XC pbe0\n"), std::string::npos);
+    EXPECT_NE(serialized.str().find("EMBEDDING_XC pbe\n"), std::string::npos);
+}
+
+TEST(FdeRuntimeConfig, RejectsNonPbeEmbeddingXc)
+{
+    std::string text(fluoride_substitution_config());
+    text.insert(text.find("KEDF pw91k"), "EMBEDDING_XC pbe0\n");
+    std::istringstream input(text);
+    EXPECT_THROW(fde::FdeRuntimeConfigIO::read(input), std::invalid_argument);
 }
 
 TEST(FdeRuntimeConfig, RoundTripsDeterministically)

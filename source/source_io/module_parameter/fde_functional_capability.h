@@ -18,6 +18,9 @@ enum class FdeXcCapability
 /** Classify an XC functional against the native embedded-SCF FDE contract. */
 FdeXcCapability classify_fde_xc_functional(const std::string& functional);
 
+/** True for the fragment-level choices exposed by the native workflow. */
+bool supports_fde_fragment_xc(const std::string& functional);
+
 /** Explain why a classified functional cannot be used by native FDE. */
 std::string fde_xc_capability_error(FdeXcCapability capability);
 

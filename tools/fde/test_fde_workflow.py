@@ -59,6 +59,36 @@ class FdeWorkflowTest(unittest.TestCase):
         self.assertEqual(fde_workflow.canonical_kedf_name("tf"),
                          "thomas_fermi")
 
+    def test_validates_fragment_and_embedding_xc_split(self):
+        for fragment_xc in ("pbe", "pbe0", "scan"):
+            spec = self.spec()
+            spec["controls"] = {
+                "fragment_xc": fragment_xc,
+                "embedding_xc": "pbe",
+            }
+            fde_workflow.validate_spec(spec)
+        spec["controls"]["fragment_xc"] = "b3lyp"
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "fragment_xc"):
+            fde_workflow.validate_spec(spec)
+        spec["controls"] = {"fragment_xc": "pbe0", "embedding_xc": "pbe0"}
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "embedding_xc"):
+            fde_workflow.validate_spec(spec)
+
+    def test_runtime_config_records_xc_split(self):
+        spec = self.spec()
+        spec["controls"] = {"fragment_xc": "SCAN", "embedding_xc": "PBE"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "FDE_CONFIG"
+            state = spec["states"][0]
+            fde_workflow.write_runtime_config(
+                path, spec, state, "F",
+                {"F": root / "f.density", "CH3Cl": root / "c.density"},
+                "result", 20, 1e-6)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("FRAGMENT_XC scan\n", text)
+            self.assertIn("EMBEDDING_XC pbe\n", text)
+
     def test_rks_accepts_only_closed_shell_fragment_assignments(self):
         parameters = fde_workflow.embedded_scf_spin_parameters(
             {"spin_mode": "rks"}, 4, 0, 0)

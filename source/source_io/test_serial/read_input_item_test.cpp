@@ -89,11 +89,12 @@ TEST_F(InputTest, NativeFdeInput)
     EXPECT_NO_THROW(task->second.check_value(task->second, param));
 
     param.input.dft_functional = "scan";
-    EXPECT_EXIT(task->second.check_value(task->second, param),
-                ::testing::ExitedWithCode(1),
-                "");
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
 
     param.input.dft_functional = "pbe0";
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
+
+    param.input.dft_functional = "b3lyp";
     EXPECT_EXIT(task->second.check_value(task->second, param),
                 ::testing::ExitedWithCode(1),
                 "");
@@ -116,7 +117,8 @@ TEST_F(InputTest, NativeFdeMetaGgaCapability)
     EXPECT_THAT(
         ModuleIO::fde_xc_capability_error(
             ModuleIO::FdeXcCapability::meta_gga_requires_tau),
-        testing::HasSubstr("pointwise kinetic-energy density tau"));
+        testing::HasSubstr("fragment_xc"));
+    EXPECT_TRUE(ModuleIO::supports_fde_fragment_xc("SCAN"));
 }
 
 TEST_F(InputTest, NativeFdeHybridCapability)
@@ -136,15 +138,13 @@ TEST_F(InputTest, NativeFdeHybridCapability)
     EXPECT_THAT(
         ModuleIO::fde_xc_capability_error(
             ModuleIO::FdeXcCapability::hybrid_requires_exact_exchange),
-        testing::AllOf(
-            testing::HasSubstr("nonlocal interfragment exact-exchange operator"),
-            testing::HasSubstr("fragment density-matrix artifacts")));
+        testing::HasSubstr("pbe0"));
     EXPECT_THAT(
         ModuleIO::fde_xc_capability_error(
             ModuleIO::FdeXcCapability::hybrid_meta_gga_requires_tau_and_exact_exchange),
-        testing::AllOf(
-            testing::HasSubstr("kinetic-energy density tau"),
-            testing::HasSubstr("nonlocal interfragment exact-exchange operator")));
+        testing::HasSubstr("currently exposes"));
+    EXPECT_TRUE(ModuleIO::supports_fde_fragment_xc("PBE0"));
+    EXPECT_FALSE(ModuleIO::supports_fde_fragment_xc("B3LYP"));
 }
 
 TEST_F(InputTest, RelaxMethod)

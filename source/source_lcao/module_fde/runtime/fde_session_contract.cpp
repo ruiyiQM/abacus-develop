@@ -168,6 +168,10 @@ void FdeSessionContract::validate_compatible(
             "diagonal_energies");
     require(initialized.ao_overlap_path == requested.ao_overlap_path,
             "ao_overlap_path");
+    require(initialized.fragment_xc == requested.fragment_xc,
+            "fragment_xc");
+    require(initialized.embedding_xc == requested.embedding_xc,
+            "embedding_xc");
     require(initialized.kinetic_functional == requested.kinetic_functional,
             "kinetic_functional");
     require(initialized.density_floor_bohr3 == requested.density_floor_bohr3,

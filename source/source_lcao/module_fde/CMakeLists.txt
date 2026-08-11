@@ -32,6 +32,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_spin_density.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_subspace_solver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/functionals/fde_xc_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pot_fde.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/restart/fde_warm_start.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session.cpp

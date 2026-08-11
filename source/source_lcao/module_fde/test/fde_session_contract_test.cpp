@@ -77,4 +77,14 @@ TEST(FdeSessionContract, RejectsChangedScfControls)
         std::invalid_argument);
 }
 
+TEST(FdeSessionContract, RejectsChangedFunctionalModel)
+{
+    const fde::FdeRuntimeConfig initialized = config();
+    fde::FdeRuntimeConfig requested = initialized;
+    requested.fragment_xc = "pbe0";
+    EXPECT_THROW(
+        fde::FdeSessionContract::validate_compatible(initialized, requested),
+        std::invalid_argument);
+}
+
 } // namespace

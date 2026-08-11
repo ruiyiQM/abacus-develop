@@ -76,6 +76,7 @@ config = (request_config if request_config is not None
           else Path(value(cwd / "INPUT", "fde_config")))
 state = value(config, "ACTIVE_STATE")
 fragment = value(config, "ACTIVE_FRAGMENT")
+fragment_xc = value(config, "FRAGMENT_XC")
 cycle = int(cwd.parent.name.split("-")[1])
 output = cwd / "OUT.fake"
 output.mkdir()
@@ -110,7 +111,7 @@ if ((cwd / "PARTIAL_ON_FIRST_CYCLE").exists() and cycle == 1) or partial_first_a
         "FDE_DENSITY_ARTIFACT 2\n"
         f"FRAGMENT {fragment}\nSTATE {state}\nGEOMETRY g0\n"
         "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS fake\nORBITALS fake\n"
-        "CORE_DENSITY none\nFUNCTIONALS pbe lc94\nGRID 1 1 1 1\n"
+        f"CORE_DENSITY none\nFUNCTIONALS {fragment_xc} lc94\nGRID 1 1 1 1\n"
         f"POPULATIONS {alpha} {beta}\nSCF {cycle} 0 50 0.04\n"
         "ENERGIES_RY 0 0\n"
         f"RHO_ALPHA 1 {alpha}\nRHO_BETA 1 {beta}\nEND\n",
@@ -121,7 +122,7 @@ density.write_text(
     "FDE_DENSITY_ARTIFACT 1\n"
     f"FRAGMENT {fragment}\nSTATE {state}\nGEOMETRY g0\n"
     "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS fake\nORBITALS fake\n"
-    "CORE_DENSITY none\nFUNCTIONALS pbe lc94\nGRID 1 1 1 1\n"
+    f"CORE_DENSITY none\nFUNCTIONALS {fragment_xc} lc94\nGRID 1 1 1 1\n"
     f"POPULATIONS {alpha} {beta}\nSCF {cycle} 1\nENERGIES_RY 0 0\n"
     f"RHO_ALPHA 1 {alpha}\nRHO_BETA 1 {beta}\nEND\n",
     encoding="utf-8")
@@ -155,12 +156,13 @@ fragment_artifact.write_text(
 '''
 
 
-def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> None:
+def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int,
+               fragment_xc: str) -> None:
     path.write_text(
         "FDE_UNIFORM_DENSITY_SEED 1\n"
         f"FRAGMENT {fragment}\nSTATE {state}\nGEOMETRY g0\n"
         "GRID_FINGERPRINT grid\nPSEUDOPOTENTIALS fake\nORBITALS fake\n"
-        "CORE_DENSITY none\nFUNCTIONALS pbe lc94\nGRID 1 1 1 1\n"
+        f"CORE_DENSITY none\nFUNCTIONALS {fragment_xc} lc94\nGRID 1 1 1 1\n"
         f"POPULATIONS {alpha} {beta}\nRHO_UNIFORM {alpha} {beta}\nEND\n",
         encoding="utf-8")
 
@@ -168,7 +170,8 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
 def prepare_case(root: Path, partial_first_cycle: bool = False,
                  rks: bool = False, adaptive: bool = False,
                  jacobi_outer: bool = False, gpu: bool = False,
-                 persistent_session: bool = False):
+                 persistent_session: bool = False,
+                 fragment_xc: str = "pbe"):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -201,7 +204,7 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
     initial = {"reactant": {}, "product": {}}
     for (state, fragment), (alpha, beta) in populations.items():
         seed = seeds / f"{state}_{fragment}.fde_seed"
-        write_seed(seed, state, fragment, alpha, beta)
+        write_seed(seed, state, fragment, alpha, beta, fragment_xc)
         initial[state][fragment] = str(seed)
 
     work = root / "work"
@@ -212,6 +215,7 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
                 "retain_completed_cycles": 3 if partial_first_cycle else 1,
                 "remove_abacus_restart_files": True,
                 "update_order": ["F", "CH3Cl"]}
+    controls.update({"fragment_xc": fragment_xc, "embedding_xc": "pbe"})
     if gpu:
         controls.update({"device": "gpu", "ks_solver": "cusolver"})
     if rks:
@@ -323,6 +327,28 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 text = input_path.read_text(encoding="utf-8")
                 self.assertRegex(text, r"(?m)^device\s+gpu$")
                 self.assertRegex(text, r"(?m)^ks_solver\s+cusolver$")
+
+    def test_pbe0_in_pbe_reaches_inputs_configs_and_densities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, fragment_xc="pbe0")
+
+            fde_workflow.run_workflow(spec_path)
+
+            inputs = list(work.glob("g0/*/cycle-*/*/INPUT"))
+            configs = list(work.glob("g0/*/cycle-*/*/FDE_CONFIG"))
+            densities = list(work.glob("g0/*/cycle-*/*/result.fde_density"))
+            self.assertTrue(inputs and configs and densities)
+            for input_path in inputs:
+                self.assertRegex(input_path.read_text(encoding="utf-8"),
+                                 r"(?m)^dft_functional\s+pbe0$")
+            for config_path in configs:
+                text = config_path.read_text(encoding="utf-8")
+                self.assertIn("FRAGMENT_XC pbe0\n", text)
+                self.assertIn("EMBEDDING_XC pbe\n", text)
+            for density_path in densities:
+                self.assertIn("FUNCTIONALS pbe0 lc94\n",
+                              density_path.read_text(encoding="utf-8"))
 
     def test_closed_shell_rks_generates_single_spin_channel_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
