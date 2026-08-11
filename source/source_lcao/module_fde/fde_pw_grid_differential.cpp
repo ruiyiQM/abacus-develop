@@ -53,8 +53,57 @@ PwGridDifferential::PwGridDifferential(const ModulePW::PW_Basis& basis,
             gpu_gz_[index] = basis_.gcar[reciprocal_index][2] * basis_.tpiba;
         }
     }
+    if (use_gpu_)
+    {
+        gpu_workspace_.reset(new FdeGpuWorkspace());
+        if (use_gpu_fft_)
+        {
+            gpu_workspace_->prepare_spectral(
+                static_cast<std::size_t>(basis_.nx),
+                static_cast<std::size_t>(basis_.ny),
+                static_cast<std::size_t>(basis_.nz),
+                gpu_box_indices_,
+                gpu_gx_,
+                gpu_gy_,
+                gpu_gz_);
+        }
+    }
 #else
     (void)use_gpu_;
+#endif
+}
+
+PwGridDifferential::~PwGridDifferential() {}
+
+bool PwGridDifferential::evaluate_kinetic_on_gpu(
+    const std::vector<double>& density,
+    const KineticFunctional functional,
+    const double density_floor,
+    const double volume_element,
+    std::vector<double>& potential,
+    double& energy_hartree) const
+{
+#ifdef __CUDA
+    if (!use_gpu_ || gpu_workspace_.get() == nullptr
+        || (functional != KineticFunctional::ThomasFermi && !use_gpu_fft_))
+    {
+        return false;
+    }
+    gpu_workspace_->kinetic_functional(density,
+                                       functional,
+                                       density_floor,
+                                       volume_element,
+                                       potential,
+                                       energy_hartree);
+    return true;
+#else
+    (void)density;
+    (void)functional;
+    (void)density_floor;
+    (void)volume_element;
+    (void)potential;
+    (void)energy_hartree;
+    return false;
 #endif
 }
 
@@ -110,17 +159,10 @@ void PwGridDifferential::gradient(const std::vector<double>& values,
 #ifdef __CUDA
     if (use_gpu_fft_)
     {
-        gpu_spectral_gradient(values,
-                              static_cast<std::size_t>(basis_.nx),
-                              static_cast<std::size_t>(basis_.ny),
-                              static_cast<std::size_t>(basis_.nz),
-                              gpu_box_indices_,
-                              gpu_gx_,
-                              gpu_gy_,
-                              gpu_gz_,
-                              gradient_x,
-                              gradient_y,
-                              gradient_z);
+        gpu_workspace_->spectral_gradient(values,
+                                          gradient_x,
+                                          gradient_y,
+                                          gradient_z);
         return;
     }
 #endif
@@ -158,16 +200,9 @@ std::vector<double> PwGridDifferential::divergence(
 #ifdef __CUDA
     if (use_gpu_fft_)
     {
-        return gpu_spectral_divergence(vector_x,
-                                       vector_y,
-                                       vector_z,
-                                       static_cast<std::size_t>(basis_.nx),
-                                       static_cast<std::size_t>(basis_.ny),
-                                       static_cast<std::size_t>(basis_.nz),
-                                       gpu_box_indices_,
-                                       gpu_gx_,
-                                       gpu_gy_,
-                                       gpu_gz_);
+        return gpu_workspace_->spectral_divergence(vector_x,
+                                                   vector_y,
+                                                   vector_z);
     }
 #endif
     const std::complex<double> imaginary_unit(0.0, 1.0);

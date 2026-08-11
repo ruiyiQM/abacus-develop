@@ -3,6 +3,7 @@
 
 #include "fde_semilocal_functional.h"
 
+#include <memory>
 #include <vector>
 
 namespace ModulePW
@@ -13,16 +14,26 @@ class PW_Basis;
 namespace fde
 {
 
+class FdeGpuWorkspace;
+
 /** Grid derivatives implemented by the distributed ABACUS PW FFT path. */
 class PwGridDifferential : public GridDifferentialOperator
 {
   public:
     explicit PwGridDifferential(const ModulePW::PW_Basis& basis,
                                 bool use_gpu);
+    ~PwGridDifferential() override;
 
     std::size_t local_size() const override;
     bool uses_gpu() const override;
     bool all_processes(bool local_condition) const override;
+    bool evaluate_kinetic_on_gpu(
+        const std::vector<double>& density,
+        KineticFunctional functional,
+        double density_floor,
+        double volume_element,
+        std::vector<double>& potential,
+        double& energy_hartree) const override;
     void gradient(const std::vector<double>& values,
                   std::vector<double>& gradient_x,
                   std::vector<double>& gradient_y,
@@ -39,6 +50,9 @@ class PwGridDifferential : public GridDifferentialOperator
     std::vector<double> gpu_gx_;
     std::vector<double> gpu_gy_;
     std::vector<double> gpu_gz_;
+#ifdef __CUDA
+    mutable std::unique_ptr<FdeGpuWorkspace> gpu_workspace_;
+#endif
 };
 
 } // namespace fde

@@ -1,5 +1,5 @@
-#include "fde_gpu_kernels.h"
-#include "fde_semilocal_functional.h"
+#include "../fde_gpu_kernels.h"
+#include "../fde_semilocal_functional.h"
 
 #include <cuda_runtime.h>
 #include <cufft.h>
@@ -91,6 +91,7 @@ class DeviceBuffer
 
     T* data() { return pointer_; }
     const T* data() const { return pointer_; }
+    std::size_t capacity() const { return capacity_; }
 
   private:
     T* pointer_;
@@ -258,6 +259,38 @@ __global__ void real_to_complex_kernel(const int size,
     }
 }
 
+__global__ void regularize_density_kernel(const int size,
+                                          const double* input,
+                                          const double density_floor,
+                                          double* regularized,
+                                          unsigned char* active)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x;
+         index < size;
+         index += stride)
+    {
+        active[index] = input[index] > density_floor ? 1 : 0;
+        regularized[index] = fmax(input[index], density_floor);
+    }
+}
+
+__global__ void subtract_divergence_kernel(const int size,
+                                           const unsigned char* active,
+                                           const double* divergence,
+                                           double* potential)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x;
+         index < size;
+         index += stride)
+    {
+        potential[index] = active[index]
+                               ? potential[index] - divergence[index]
+                               : 0.0;
+    }
+}
+
 __global__ void spectral_derivative_kernel(
     const int plane_waves,
     const int* box_indices,
@@ -305,6 +338,7 @@ __global__ void complex_to_real_kernel(const int size,
 class PointWorkspace
 {
   public:
+    DeviceBuffer<double> raw_density;
     DeviceBuffer<double> density;
     DeviceBuffer<unsigned char> active;
     DeviceBuffer<double> gradient_x;
@@ -314,6 +348,7 @@ class PointWorkspace
     DeviceBuffer<double> flux_x;
     DeviceBuffer<double> flux_y;
     DeviceBuffer<double> flux_z;
+    DeviceBuffer<double> divergence;
     DeviceBuffer<double> energy;
 };
 
@@ -439,10 +474,25 @@ void forward_real(SpectralWorkspace& workspace,
                 "forward transform");
 }
 
-void inverse_to_host(SpectralWorkspace& workspace,
-                     std::vector<double>& result,
-                     const int size)
+void forward_device_real(SpectralWorkspace& workspace,
+                         const double* values,
+                         const int size)
 {
+    real_to_complex_kernel<<<blocks_for(size), threads_per_block>>>(
+        size, values, workspace.transformed.data());
+    cuda_check(cudaGetLastError(), "real-to-complex kernel");
+    cufft_check(cufftExecZ2Z(workspace.plan(),
+                            workspace.transformed.data(),
+                            workspace.transformed.data(),
+                            CUFFT_FORWARD),
+                "forward transform");
+}
+
+void inverse_to_device(SpectralWorkspace& workspace,
+                       DeviceBuffer<double>& result,
+                       const int size)
+{
+    result.resize(static_cast<std::size_t>(size));
     cufft_check(cufftExecZ2Z(workspace.plan(),
                             workspace.work.data(),
                             workspace.work.data(),
@@ -450,13 +500,330 @@ void inverse_to_host(SpectralWorkspace& workspace,
                 "inverse transform");
     complex_to_real_kernel<<<blocks_for(size), threads_per_block>>>(
         size, 1.0 / static_cast<double>(size), workspace.work.data(),
-        workspace.real.data());
+        result.data());
     cuda_check(cudaGetLastError(), "complex-to-real kernel");
+}
+
+void inverse_to_host(SpectralWorkspace& workspace,
+                     std::vector<double>& result,
+                     const int size)
+{
+    inverse_to_device(workspace, workspace.real, size);
     copy_to_host(result, workspace.real, static_cast<std::size_t>(size),
                  "real-grid download");
 }
 
 } // namespace
+
+class FdeGpuWorkspace::Impl
+{
+  public:
+    Impl()
+        : spectral_ready(false),
+          nx(0),
+          ny(0),
+          nz(0),
+          stats{0, 0, 0, 0}
+    {
+    }
+
+    PointWorkspace point;
+    SpectralWorkspace spectral;
+    bool spectral_ready;
+    std::size_t nx;
+    std::size_t ny;
+    std::size_t nz;
+    FdeGpuTransferStats stats;
+};
+
+FdeGpuWorkspace::FdeGpuWorkspace() : impl_(new Impl()) {}
+
+FdeGpuWorkspace::~FdeGpuWorkspace()
+{
+    delete impl_;
+}
+
+void FdeGpuWorkspace::prepare_spectral(
+    const std::size_t nx,
+    const std::size_t ny,
+    const std::size_t nz,
+    const std::vector<int>& box_indices,
+    const std::vector<double>& gx,
+    const std::vector<double>& gy,
+    const std::vector<double>& gz)
+{
+    if (impl_->spectral_ready)
+    {
+        throw std::logic_error(
+            "FDE resident GPU reciprocal metadata is immutable");
+    }
+    const std::size_t size = nx * ny * nz;
+    validate_spectral_arguments(size, box_indices, gx, gy, gz);
+    checked_size(size, "FFT");
+    checked_size(box_indices.size(), "plane-wave");
+    impl_->spectral.prepare(static_cast<int>(nx),
+                            static_cast<int>(ny),
+                            static_cast<int>(nz),
+                            box_indices.size());
+    upload_spectral_metadata(impl_->spectral,
+                             box_indices,
+                             gx,
+                             gy,
+                             gz);
+    impl_->stats.host_to_device_bytes
+        += box_indices.size() * sizeof(int)
+           + (gx.size() + gy.size() + gz.size()) * sizeof(double);
+    ++impl_->stats.metadata_uploads;
+    impl_->nx = nx;
+    impl_->ny = ny;
+    impl_->nz = nz;
+    impl_->spectral_ready = true;
+}
+
+void FdeGpuWorkspace::kinetic_functional(
+    const std::vector<double>& density,
+    const KineticFunctional functional,
+    const double density_floor,
+    const double volume_element,
+    std::vector<double>& potential,
+    double& energy_hartree)
+{
+    if (functional != KineticFunctional::ThomasFermi
+        && functional != KineticFunctional::Pw91k
+        && functional != KineticFunctional::RevApbek)
+    {
+        throw std::invalid_argument(
+            "FDE resident GPU received an unknown kinetic functional");
+    }
+    const bool local = functional == KineticFunctional::ThomasFermi;
+    if (!local
+        && (!impl_->spectral_ready
+            || density.size() != impl_->nx * impl_->ny * impl_->nz))
+    {
+        throw std::invalid_argument(
+            "FDE resident GPU GGA density does not fill its FFT box");
+    }
+    const std::size_t size = density.size();
+    const int count = checked_size(size, "resident NAKE");
+    PointWorkspace& point = impl_->point;
+    copy_to_device(point.raw_density, density, "resident density upload");
+    impl_->stats.host_to_device_bytes += size * sizeof(double);
+    point.density.resize(size);
+    point.active.resize(size);
+    point.potential.resize(size);
+    point.energy.resize(size);
+    regularize_density_kernel<<<blocks_for(count), threads_per_block>>>(
+        count,
+        point.raw_density.data(),
+        density_floor,
+        point.density.data(),
+        point.active.data());
+    cuda_check(cudaGetLastError(), "resident density regularization kernel");
+
+    const double* device_gx = nullptr;
+    const double* device_gy = nullptr;
+    const double* device_gz = nullptr;
+    double* device_flux_x = nullptr;
+    double* device_flux_y = nullptr;
+    double* device_flux_z = nullptr;
+    if (!local)
+    {
+        SpectralWorkspace& spectral = impl_->spectral;
+        point.gradient_x.resize(size);
+        point.gradient_y.resize(size);
+        point.gradient_z.resize(size);
+        DeviceBuffer<double>* gradients[3]
+            = {&point.gradient_x, &point.gradient_y, &point.gradient_z};
+        const DeviceBuffer<double>* g_components[3]
+            = {&spectral.gx, &spectral.gy, &spectral.gz};
+        const int reciprocal_count
+            = checked_size(spectral.gx.capacity(), "plane-wave");
+        forward_device_real(spectral, point.density.data(), count);
+        for (int direction = 0; direction < 3; ++direction)
+        {
+            cuda_check(cudaMemset(spectral.work.data(),
+                                  0,
+                                  size * sizeof(cufftDoubleComplex)),
+                       "resident gradient buffer clear");
+            spectral_derivative_kernel<<<blocks_for(reciprocal_count),
+                                         threads_per_block>>>(
+                reciprocal_count,
+                spectral.box_indices.data(),
+                g_components[direction]->data(),
+                spectral.transformed.data(),
+                spectral.work.data(),
+                false);
+            cuda_check(cudaGetLastError(),
+                       "resident spectral-gradient kernel");
+            inverse_to_device(spectral, *gradients[direction], count);
+        }
+        point.flux_x.resize(size);
+        point.flux_y.resize(size);
+        point.flux_z.resize(size);
+        device_gx = point.gradient_x.data();
+        device_gy = point.gradient_y.data();
+        device_gz = point.gradient_z.data();
+        device_flux_x = point.flux_x.data();
+        device_flux_y = point.flux_y.data();
+        device_flux_z = point.flux_z.data();
+    }
+
+    kinetic_local_kernel<<<blocks_for(count), threads_per_block>>>(
+        count,
+        static_cast<int>(functional),
+        point.density.data(),
+        point.active.data(),
+        device_gx,
+        device_gy,
+        device_gz,
+        density_floor,
+        volume_element,
+        point.potential.data(),
+        device_flux_x,
+        device_flux_y,
+        device_flux_z,
+        point.energy.data());
+    cuda_check(cudaGetLastError(), "resident NAKE point kernel");
+
+    if (!local)
+    {
+        SpectralWorkspace& spectral = impl_->spectral;
+        const int reciprocal_count
+            = checked_size(spectral.gx.capacity(), "plane-wave");
+        cuda_check(cudaMemset(spectral.work.data(),
+                              0,
+                              size * sizeof(cufftDoubleComplex)),
+                   "resident divergence buffer clear");
+        const DeviceBuffer<double>* fluxes[3]
+            = {&point.flux_x, &point.flux_y, &point.flux_z};
+        const DeviceBuffer<double>* g_components[3]
+            = {&spectral.gx, &spectral.gy, &spectral.gz};
+        for (int direction = 0; direction < 3; ++direction)
+        {
+            forward_device_real(spectral, fluxes[direction]->data(), count);
+            spectral_derivative_kernel<<<blocks_for(reciprocal_count),
+                                         threads_per_block>>>(
+                reciprocal_count,
+                spectral.box_indices.data(),
+                g_components[direction]->data(),
+                spectral.transformed.data(),
+                spectral.work.data(),
+                true);
+            cuda_check(cudaGetLastError(),
+                       "resident spectral-divergence kernel");
+        }
+        inverse_to_device(spectral, point.divergence, count);
+        subtract_divergence_kernel<<<blocks_for(count), threads_per_block>>>(
+            count,
+            point.active.data(),
+            point.divergence.data(),
+            point.potential.data());
+        cuda_check(cudaGetLastError(),
+                   "resident divergence assembly kernel");
+    }
+
+    thrust::device_ptr<double> energy_begin(point.energy.data());
+    energy_hartree = thrust::reduce(energy_begin,
+                                    energy_begin + count,
+                                    0.0,
+                                    thrust::plus<double>());
+    copy_to_host(potential,
+                 point.potential,
+                 size,
+                 "resident NAKE potential download");
+    impl_->stats.device_to_host_bytes += size * sizeof(double);
+    ++impl_->stats.resident_kinetic_evaluations;
+}
+
+void FdeGpuWorkspace::spectral_gradient(
+    const std::vector<double>& values,
+    std::vector<double>& gradient_x,
+    std::vector<double>& gradient_y,
+    std::vector<double>& gradient_z)
+{
+    if (!impl_->spectral_ready
+        || values.size() != impl_->nx * impl_->ny * impl_->nz)
+    {
+        throw std::invalid_argument(
+            "FDE resident GPU gradient input does not fill its FFT box");
+    }
+    const int count = checked_size(values.size(), "FFT");
+    const int plane_waves
+        = checked_size(impl_->spectral.gx.capacity(), "plane-wave");
+    forward_real(impl_->spectral, values, count);
+    impl_->stats.host_to_device_bytes += values.size() * sizeof(double);
+    const DeviceBuffer<double>* components[3]
+        = {&impl_->spectral.gx, &impl_->spectral.gy, &impl_->spectral.gz};
+    std::vector<double>* outputs[3]
+        = {&gradient_x, &gradient_y, &gradient_z};
+    for (int direction = 0; direction < 3; ++direction)
+    {
+        cuda_check(cudaMemset(impl_->spectral.work.data(),
+                              0,
+                              values.size() * sizeof(cufftDoubleComplex)),
+                   "gradient buffer clear");
+        spectral_derivative_kernel<<<blocks_for(plane_waves),
+                                     threads_per_block>>>(
+            plane_waves,
+            impl_->spectral.box_indices.data(),
+            components[direction]->data(),
+            impl_->spectral.transformed.data(),
+            impl_->spectral.work.data(),
+            false);
+        cuda_check(cudaGetLastError(), "spectral-gradient kernel");
+        inverse_to_host(impl_->spectral, *outputs[direction], count);
+    }
+    impl_->stats.device_to_host_bytes
+        += 3 * values.size() * sizeof(double);
+}
+
+std::vector<double> FdeGpuWorkspace::spectral_divergence(
+    const std::vector<double>& vector_x,
+    const std::vector<double>& vector_y,
+    const std::vector<double>& vector_z)
+{
+    const std::size_t size = impl_->nx * impl_->ny * impl_->nz;
+    if (!impl_->spectral_ready || vector_x.size() != size
+        || vector_y.size() != size || vector_z.size() != size)
+    {
+        throw std::invalid_argument(
+            "FDE resident GPU divergence input does not fill its FFT box");
+    }
+    const int count = checked_size(size, "FFT");
+    const int plane_waves
+        = checked_size(impl_->spectral.gx.capacity(), "plane-wave");
+    cuda_check(cudaMemset(impl_->spectral.work.data(),
+                          0,
+                          size * sizeof(cufftDoubleComplex)),
+               "divergence buffer clear");
+    const std::vector<double>* inputs[3]
+        = {&vector_x, &vector_y, &vector_z};
+    const DeviceBuffer<double>* components[3]
+        = {&impl_->spectral.gx, &impl_->spectral.gy, &impl_->spectral.gz};
+    for (int direction = 0; direction < 3; ++direction)
+    {
+        forward_real(impl_->spectral, *inputs[direction], count);
+        spectral_derivative_kernel<<<blocks_for(plane_waves),
+                                     threads_per_block>>>(
+            plane_waves,
+            impl_->spectral.box_indices.data(),
+            components[direction]->data(),
+            impl_->spectral.transformed.data(),
+            impl_->spectral.work.data(),
+            true);
+        cuda_check(cudaGetLastError(), "spectral-divergence kernel");
+    }
+    std::vector<double> result;
+    inverse_to_host(impl_->spectral, result, count);
+    impl_->stats.host_to_device_bytes += 3 * size * sizeof(double);
+    impl_->stats.device_to_host_bytes += size * sizeof(double);
+    return result;
+}
+
+FdeGpuTransferStats FdeGpuWorkspace::transfer_stats() const
+{
+    return impl_->stats;
+}
 
 void gpu_kinetic_local_terms(
     const std::vector<double>& regularized_density,

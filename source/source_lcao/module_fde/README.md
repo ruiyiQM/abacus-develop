@@ -13,6 +13,7 @@ Current boundary:
   factories;
 - `coupling/`: runtime provider selection/factory and coupling validation
   policy;
+- `gpu/`: CUDA kernels and the per-`PotFde` resident density/FFT workspace;
 - root artifact and state files: versioned density, determinant, band,
   fragment, and linearized-state formats;
 - root embedding files: grid partitioning, semilocal functionals, `PotFde`,
@@ -20,8 +21,8 @@ Current boundary:
 - root coupling/energy files: diabatic assembly, coupling, canonical ledgers,
   freeze--thaw maps, and PES utilities.
 
-Planned migrations use `gpu/` and `workflow/` only when the
-corresponding implementation is changed. Do not
+Planned migrations use `workflow/` only when the corresponding implementation
+is changed. Do not
 move unrelated files merely for directory symmetry: every move must preserve
 the old include path or update all consumers and tests in one commit.
 
@@ -80,3 +81,20 @@ then records the directional transition-energy asymmetry and
 `0.5 |S12| |E12(forward)-E21(reverse)|` as a linearization-sensitivity
 estimate. That estimate is a diagnostic of the current first-order model, not
 a statistical error bar.
+
+## GPU residency boundary
+
+Each CUDA-enabled `PotFde` owns a `FdeGpuWorkspace` through its persistent PW
+differential operator. Reciprocal indices, G vectors, cuFFT plans, and allocated
+buffers are uploaded or created once per session. For a full-box, single-rank
+PW grid, PW91k/revAPBEk now fuse density regularization, spectral gradients,
+pointwise NAKE, flux divergence, and final potential assembly on the device.
+One density is uploaded and one final potential is downloaded per scalar
+functional evaluation; intermediate gradients and fluxes never cross PCIe.
+Thomas--Fermi uses the same resident point workspace on every GPU rank.
+
+This does not change the multi-rank FFT boundary: distributed LCAO density
+slabs continue to use ABACUS' MPI CPU PW transform, followed by GPU pointwise
+NAKE work on each rank. A CUDA-aware distributed FFT requires a separate
+decomposition/backend project and is not inferred from device-resident local
+buffers.

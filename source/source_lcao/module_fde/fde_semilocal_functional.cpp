@@ -271,6 +271,22 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
                                                          differential_operator)
 {
     const std::size_t size = evaluation_size(grid, differential_operator);
+    const double volume_element
+        = grid.spacing_x_bohr * grid.spacing_y_bohr * grid.spacing_z_bohr;
+    ScalarFunctionalResult result;
+    result.energy_hartree = 0.0;
+    result.potential_hartree.assign(size, 0.0);
+    if (differential_operator != nullptr
+        && differential_operator->evaluate_kinetic_on_gpu(
+            density,
+            functional,
+            density_floor,
+            volume_element,
+            result.potential_hartree,
+            result.energy_hartree))
+    {
+        return result;
+    }
     std::vector<double> regularized(size, density_floor);
     std::vector<unsigned char> active(size, 0);
 #pragma omp parallel for schedule(static)
@@ -283,11 +299,6 @@ ScalarFunctionalResult evaluate_unpolarized_kinetic(const std::vector<double>& d
     const double c_tf = 0.3 * std::pow(3.0 * pi * pi, 2.0 / 3.0);
     const double reduced_gradient_scale = 1.0 / (2.0 * std::pow(3.0 * pi * pi, 1.0 / 3.0));
     const double reference_energy_density = c_tf * std::pow(density_floor, 5.0 / 3.0);
-    const double volume_element
-        = grid.spacing_x_bohr * grid.spacing_y_bohr * grid.spacing_z_bohr;
-    ScalarFunctionalResult result;
-    result.energy_hartree = 0.0;
-    result.potential_hartree.assign(size, 0.0);
     if (functional == KineticFunctional::ThomasFermi)
     {
 #ifdef __CUDA

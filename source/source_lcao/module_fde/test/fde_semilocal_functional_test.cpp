@@ -70,6 +70,40 @@ class ZeroLocalDifferential : public fde::GridDifferentialOperator
     mutable int divergence_calls_;
 };
 
+class ResidentKineticDifferential : public ZeroLocalDifferential
+{
+  public:
+    explicit ResidentKineticDifferential(const std::size_t size)
+        : ZeroLocalDifferential(size), resident_calls_(0)
+    {
+    }
+
+    bool evaluate_kinetic_on_gpu(
+        const std::vector<double>& density,
+        const fde::KineticFunctional functional,
+        const double density_floor,
+        const double volume_element,
+        std::vector<double>& potential,
+        double& energy_hartree) const override
+    {
+        EXPECT_EQ(functional, fde::KineticFunctional::Pw91k);
+        EXPECT_GT(density_floor, 0.0);
+        potential.assign(density.size(), 2.0);
+        energy_hartree = 0.0;
+        for (std::size_t index = 0; index < density.size(); ++index)
+        {
+            energy_hartree += density[index] * volume_element;
+        }
+        ++resident_calls_;
+        return true;
+    }
+
+    int resident_calls() const { return resident_calls_; }
+
+  private:
+    mutable int resident_calls_;
+};
+
 } // namespace
 
 TEST(FdeSemilocalFunctional, ZeroFrozenDensityHasZeroNonadditiveTerms)
@@ -321,6 +355,28 @@ TEST(FdeSemilocalFunctional, EvaluatesAProcessorLocalSlabThroughInjectedDerivati
     EXPECT_TRUE(std::isfinite(result.energy_ry));
     EXPECT_EQ(differential.gradient_calls(), 6);
     EXPECT_EQ(differential.divergence_calls(), 6);
+}
+
+TEST(FdeSemilocalFunctional, ResidentKineticPathSkipsHostGradientStaging)
+{
+    const fde::SpinDensity active{{0.5, 0.4}, {0.5, 0.4}};
+    const fde::SpinDensity frozen{{0.2, 0.3}, {0.2, 0.3}};
+    const fde::UniformGrid global_grid{4, 1, 1, 0.5, 1.0, 1.0};
+    ResidentKineticDifferential differential(2);
+
+    const fde::NonadditiveFunctionalResult result
+        = fde::SemilocalFunctional::nonadditive_kinetic(
+            active,
+            frozen,
+            global_grid,
+            fde::KineticFunctional::Pw91k,
+            1.0e-12,
+            &differential);
+
+    EXPECT_TRUE(std::isfinite(result.energy_ry));
+    EXPECT_EQ(differential.resident_calls(), 3);
+    EXPECT_EQ(differential.gradient_calls(), 0);
+    EXPECT_EQ(differential.divergence_calls(), 0);
 }
 
 TEST(FdeSemilocalFunctional, ThomasFermiSkipsGradientAndDivergenceOperations)

@@ -246,15 +246,15 @@ removing density I/O alone cannot eliminate ordinary ABACUS initialization.
   normal KPT mesh. K-point pools and periodic determinant coupling remain out
   of scope.
 - On a CUDA build, Gint, cuSOLVER, and pointwise TF/PW91k/revAPBEk kernels run
-  on GPU. A one-rank job also uses cuFFT for FDE gradients/divergences.
+  on GPU. A one-rank job also fuses FDE gradients, pointwise NAKE, divergence,
+  and potential assembly inside a persistent cuFFT/device workspace.
 - A multi-rank GPU job currently keeps the distributed FDE PW FFT on CPU; the
   pointwise NAKE and LCAO GPU work remain accelerated. Use one rank per
   allocated GPU and measure transfers/timers before assuming a speedup.
-- PBE is the supported native FDE XC. Meta-GGA and hybrid fragment solvers are
-  rejected because the frozen artifact/operator lacks pointwise `tau` or the
-  nonlocal interfragment exact-exchange contribution. Running isolated SCAN
-  or PBE0 fragments while leaving those terms out is not a consistent
-  SCAN-in-PBE or PBE0-in-PBE FDE energy/coupling.
+- PBE is the supported nonadditive embedding XC. Fragment-local PBE0 and SCAN
+  are supported as PBE0-in-PBE and SCAN-in-PBE: exact exchange or kinetic
+  energy density stays inside the active fragment solver, while no
+  interfragment exact exchange or nonadditive meta-GGA `tau` term is implied.
 
 ## Scratch organization and retention
 

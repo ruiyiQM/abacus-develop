@@ -192,6 +192,13 @@ The GPU path covers more than diagonalization:
   energy, potential, and flux expressions;
 - with one MPI rank, the FDE spectral gradients and divergences use cuFFT.
 
+The one-rank GGA kinetic path retains its reciprocal metadata, cuFFT plan, and
+working buffers for the lifetime of the embedded session. Density
+regularization, gradients, pointwise NAKE, flux divergence, and final assembly
+are fused on the device, reducing each scalar functional evaluation to one
+density upload and one final-potential download. The workspace also maintains
+transfer and evaluation counters for focused CUDA regression checks.
+
 For multiple MPI ranks, the gradient/divergence remains on ABACUS' distributed
 CPU PW FFT because the current GPU PW transform supports only a single pool
 rank.  Pointwise NAKE work still runs on each rank's GPU.  Libxc PBE evaluation,

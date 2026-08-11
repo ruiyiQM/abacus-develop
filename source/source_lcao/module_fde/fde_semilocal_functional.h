@@ -67,6 +67,26 @@ class GridDifferentialOperator
     {
         return local_condition;
     }
+    /**
+     * Evaluate a scalar kinetic functional without staging intermediate
+     * gradients or fluxes through host memory. Return false when unavailable.
+     */
+    virtual bool evaluate_kinetic_on_gpu(
+        const std::vector<double>& density,
+        KineticFunctional functional,
+        double density_floor,
+        double volume_element,
+        std::vector<double>& potential,
+        double& energy_hartree) const
+    {
+        (void)density;
+        (void)functional;
+        (void)density_floor;
+        (void)volume_element;
+        (void)potential;
+        (void)energy_hartree;
+        return false;
+    }
     virtual void gradient(const std::vector<double>& values,
                           std::vector<double>& gradient_x,
                           std::vector<double>& gradient_y,
