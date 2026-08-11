@@ -14,8 +14,9 @@
 set -Eeuo pipefail
 
 input=${1:?usage: run_fde_workflow.sbatch SPEC_OR_MANIFEST [WORKFLOW_TOOL] [RUNTIME_ENV] [SPEC_COLUMN] [WORKFLOW_SHA256]}
-workflow_tool=${2:-/cluster/home/zhourui/abacus-develop/tools/fde/fde_workflow.py}
-runtime_env=${3:-/cluster/home/zhourui/abacus-develop/euler/abacus_gcc_openmpi_env.sh}
+source_root=/cluster/home/${SLURM_JOB_USER:?}/abacus-develop
+workflow_tool=${2:-${source_root}/tools/fde/fde_workflow.py}
+runtime_env=${3:-${source_root}/euler/abacus_gcc_openmpi_env.sh}
 spec_column=${4:-auto}
 expected_workflow_sha256=${5:-}
 

@@ -12,7 +12,7 @@
 set -Eeuo pipefail
 
 readonly BUDGET_ROOT=${1:?usage: summarize_error_budget.sbatch BUDGET_ROOT [SOURCE_ROOT]}
-readonly SOURCE_ROOT=${2:-/cluster/home/zhourui/abacus-develop}
+readonly SOURCE_ROOT=${2:-/cluster/home/${SLURM_JOB_USER:?}/abacus-develop}
 readonly SUMMARY_TOOL=${SOURCE_ROOT}/examples/fdedft/01_f_ch3_cl_uks/summarize_error_budget.py
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

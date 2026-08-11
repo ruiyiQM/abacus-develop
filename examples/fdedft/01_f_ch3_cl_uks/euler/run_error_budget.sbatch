@@ -13,7 +13,7 @@
 
 set -Eeuo pipefail
 
-readonly SOURCE_ROOT=${1:-/cluster/home/zhourui/abacus-develop}
+readonly SOURCE_ROOT=${1:-/cluster/home/${SLURM_JOB_USER:?}/abacus-develop}
 readonly BUDGET_ROOT=${2:-/cluster/scratch/${SLURM_JOB_USER:?}/abacus_test/fde-scientific-budget-${SLURM_ARRAY_JOB_ID:?}}
 readonly CASE_SOURCE=${SOURCE_ROOT}/examples/fdedft/01_f_ch3_cl_uks
 readonly ABACUS_BIN=${ABACUS_FDE_BINARY:-${SOURCE_ROOT}/build-gcc-openmpi/install/bin/abacus}
