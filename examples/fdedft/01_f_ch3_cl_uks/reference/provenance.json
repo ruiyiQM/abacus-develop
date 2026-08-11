@@ -10,12 +10,22 @@
   "method": "PBE/PW91k (LibXC LC94) UKS FDE-FODFT",
   "basis": "SG15-v1.0 PBE plus StandardOrbitals-v2.0 DZP",
   "ecutwfc_ry": 40,
-  "abacus_source_commit": "3d2dfb0f7ccbc6e6e9fb575a5519b80f7d9ffe0b",
+  "abacus_source_commit": "411f963a0f8b2624fb83796afc83b4512601b9ad",
+  "abacus_binary_sha256": "72750ef9e7737ba2457fe85f4b8aed109b65d212bccd6f8138674014d275db05",
+  "workflow_source_commit": "894ab472bcde4a31a902c96abba5836145ed7103",
   "resource_source_commit": "3b634f1618f5c56baa97084a41ae17e801d46ab9",
   "execution": {
     "cluster": "ETH Euler",
+    "slurm_job": "10378084_0",
     "mpi_ranks": 20,
     "openmp_threads_per_rank": 4,
     "occupation_control": "fde_task embedded_scf forces internal two-Fermi UKS; nelec and nupdown are set per fragment"
+  },
+  "validation": {
+    "tight_scf_slurm_job": "10378084_1",
+    "scientific_error_budget_passed": true,
+    "maximum_state_energy_delta_ry": 2.0876334218655757e-05,
+    "maximum_energy_gap_delta_ry": 2.9076607191313997e-05,
+    "maximum_coupling_delta_ry": 7.808269730640266e-06
   }
 }

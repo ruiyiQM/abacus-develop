@@ -1,2 +1,2 @@
-geometry	coordinate_angstrom	reactant_energy_ry	product_energy_ry	overlap	h12_ry	orthogonalized_coupling_ry
-uks_two_fermi	-0.073684210526315796	-92.931559903210342	-92.523785149557668	0.00029779452068161126	-0.028231683413274773	-0.00061789067415435708
+geometry	coordinate_angstrom	reactant_energy_ry	product_energy_ry	overlap	h12_ry	orthogonalized_coupling_ry	coupling_provider	overlap_reciprocity_error	maximum_transition_density_trace_error	transition_energy_asymmetry_ry	estimated_coupling_uncertainty_ry
+uks_two_fermi	-0.073684210526315574	-92.931811287277014	-92.524007210322964	-0.00029627782411512652	0.028087964589431417	0.00061474145641438147	symmetric_linearized	1.1926223897340549e-18	2.1316282072803006e-14	0.016418223144171407	2.4321777144958578e-06

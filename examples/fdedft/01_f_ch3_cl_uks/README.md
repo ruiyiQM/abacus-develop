@@ -193,13 +193,14 @@ two exclusive subsystem MPI steps.  On a single 80-core node use
 oversubscribe the node.  Strict cycles never mix, so the final energies and
 coupling remain tied to the final raw fragment SCFs.
 
-The reference calculation converged the reactant and product states in five
-and six freeze--thaw cycles, respectively.  Its orthogonalized coupling is
-`-0.0006178906742 Ry` (`-8.406830896 meV`).  Compact reference files are under
+The reference calculation converged both the reactant and product states in
+six freeze--thaw cycles. Its signed orthogonalized coupling in the committed
+determinant phase is `0.0006147414564 Ry`, with a phase-independent magnitude
+of `8.363983606 meV`. Compact reference files are under
 `reference/`.  Floating-point values may vary slightly with MPI layout,
 libraries, and compiler, so they are comparison targets rather than bitwise
 golden files.  `reference/provenance.json` records the exact source and Euler
-layout used to produce them.
+layout used to produce them, plus the independently tightened validation run.
 
 The sign of an occupied orbital is arbitrary. A consistent determinant-phase
 change flips overlap, H12, and the signed coupling together without changing
