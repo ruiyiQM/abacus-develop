@@ -26,6 +26,10 @@ are explicit and shell quoting is not reinterpreted.  The workflow contains no
 polling sleeps.  Time spent by a separate queue-monitoring script is not part of
 the calculation.
 
+For the tested ETH Euler build, single-point and array runners, launcher
+configuration, compact result collection, convergence playbook, and scratch
+retention policy, see `tools/fde/euler/README.md`.
+
 ## Performance records
 
 Every active-fragment directory contains `fde_performance.json` with:

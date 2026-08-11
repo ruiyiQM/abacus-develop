@@ -54,6 +54,21 @@ python3 prepare_example.py --abacus /absolute/path/to/abacus --mpi-ranks 2
 python3 ../../../tools/fde/fde_workflow.py validate workflow.json
 ```
 
+On ETH Euler, fetch the pinned resources once on the login node and submit the
+scratch-isolated batch wrapper:
+
+```bash
+python3 fetch_default_resources.py
+sbatch euler/run_single_point.sbatch
+```
+
+It uses the GCC/OpenMPI runtime under `/cluster/home/zhourui/abacus-develop`,
+copies this example to a new `/cluster/scratch/$USER/fdedft-example-$JOBID`
+directory, and configures each embedded SCF as 20 MPI ranks x 4 OpenMP threads.
+Pass a different source root and run root as the first and second positional
+arguments when needed. The more general single-point/array runner and compact
+result collector are described in `tools/fde/euler/README.md`.
+
 To prepare independent comparisons of all three NAKE choices, reuse the same
 ABACUS executable and run:
 

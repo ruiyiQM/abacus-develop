@@ -19,3 +19,8 @@ this optimization is automatic and requires no example INPUT keyword.
 The workflow also provides explicit Gauss--Seidel/Jacobi updates and optional
 outer linear/Anderson density mixing; the case README documents safe defaults
 and MPI resource requirements.
+
+The case now includes `euler/run_single_point.sbatch`, a scratch-isolated
+20-rank x 4-thread Euler launch example. Reusable array and collection tools,
+including the tested scratch layout and operational checklist, are documented
+in `tools/fde/euler/README.md`.

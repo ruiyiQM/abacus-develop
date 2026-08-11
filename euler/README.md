@@ -90,3 +90,7 @@ sbatch euler/verify_abacus_gcc_openmpi.sbatch
 For hybrid calculations, set `OMP_NUM_THREADS` to match
 `--cpus-per-task`. OpenBLAS remains single-threaded to avoid nested
 oversubscription.
+
+For end-to-end FDE preparation, convergence recovery, single-point/array
+submission, compact result collection, GPU boundaries, and scratch retention,
+continue with `tools/fde/euler/README.md`.
