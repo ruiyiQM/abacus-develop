@@ -23,6 +23,8 @@
     "spin_mode": "uks",
     "fragment_xc": "pbe",
     "embedding_xc": "pbe",
+    "coupling_provider": "symmetric_linearized",
+    "transition_density_trace_tolerance": 1e-8,
     "kedf": "pw91k",
     "device": "cpu",
     "ks_solver": "genelpa",

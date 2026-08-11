@@ -134,6 +134,12 @@ work/fde_pes.tsv
 work/fde_performance.json
 ```
 
+The default coupling provider is `symmetric_linearized`. Its pair rows include
+overlap/transition-density validation residuals plus the forward/reverse
+linearization asymmetry and a coupling-sensitivity estimate. Inspect these
+columns before interpreting a large coupling; the estimate is diagnostic, not
+a statistical confidence interval.
+
 Each state also has `performance.json` and `performance.jsonl`, and every
 active-fragment job has an `fde_performance.json`.  These files separate ABACUS
 electronic-step time from process/setup overhead and record the exact SCF

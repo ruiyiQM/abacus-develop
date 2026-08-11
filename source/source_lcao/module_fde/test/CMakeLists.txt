@@ -33,6 +33,7 @@ AddTest(
   SOURCES fde_runtime_config_test.cpp
     ../fde_runtime_config.cpp
     ../fde_state.cpp
+    ../coupling/fde_coupling_policy.cpp
     ../functionals/fde_xc_policy.cpp
 )
 
@@ -100,6 +101,8 @@ AddTest(
     ../fde_linearized_state.cpp
     ../fde_multistate_solver.cpp
     ../fde_runtime_config.cpp
+    ../coupling/fde_coupling_policy.cpp
+    ../coupling/fde_coupling_provider_factory.cpp
     ../functionals/fde_xc_policy.cpp
     ../fde_state.cpp
 )
@@ -310,6 +313,7 @@ AddTest(
   SOURCES fde_session_contract_test.cpp
     ../runtime/fde_session_contract.cpp
     ../fde_runtime_config.cpp
+    ../coupling/fde_coupling_policy.cpp
     ../functionals/fde_xc_policy.cpp
     ../fde_state.cpp
     ../fde_semilocal_functional.cpp

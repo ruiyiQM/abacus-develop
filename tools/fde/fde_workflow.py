@@ -58,6 +58,16 @@ def canonical_embedding_xc_name(value: object) -> str:
     return name
 
 
+def canonical_coupling_provider_name(value: object) -> str:
+    name = _token(value, "coupling_provider").lower()
+    if name == "linearized":
+        name = "symmetric_linearized"
+    if name != "symmetric_linearized":
+        raise WorkflowError(
+            "coupling_provider must be symmetric_linearized")
+    return name
+
+
 def _token(value: object, description: str) -> str:
     text = str(value)
     if not text or any(character.isspace() for character in text):
@@ -201,6 +211,8 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     canonical_kedf_name(controls.get("kedf", "pw91k"))
     canonical_fragment_xc_name(controls.get("fragment_xc", "pbe"))
     canonical_embedding_xc_name(controls.get("embedding_xc", "pbe"))
+    canonical_coupling_provider_name(
+        controls.get("coupling_provider", "symmetric_linearized"))
     execution_mode = _token(
         controls.get("execution_mode", "process"), "execution_mode")
     if execution_mode not in ("process", "persistent_session"):
@@ -284,7 +296,8 @@ def validate_spec(spec: Mapping[str, object]) -> None:
         raise WorkflowError(
             "maximum_freeze_thaw_cycles cannot fit the inexact and strict-confirmation stages")
     for name, default in (("scf_density_tolerance", 1e-8),
-                          ("inexact_scf_density_tolerance", 1e-3)):
+                          ("inexact_scf_density_tolerance", 1e-3),
+                          ("transition_density_trace_tolerance", 1e-8)):
         value = controls.get(name, default)
         if (isinstance(value, bool) or not isinstance(value, (int, float))
                 or not math.isfinite(float(value)) or float(value) <= 0.0):
@@ -1125,6 +1138,8 @@ def write_runtime_config(path: Path,
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
                   f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
                   f"EMBEDDING_XC {canonical_embedding_xc_name(controls.get('embedding_xc', 'pbe'))}",
+                  f"COUPLING_PROVIDER {canonical_coupling_provider_name(controls.get('coupling_provider', 'symmetric_linearized'))}",
+                  f"TRANSITION_DENSITY_TRACE_TOLERANCE {controls.get('transition_density_trace_tolerance', 1e-8)}",
                   f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
                   f"DENSITY_FLOOR_BOHR3 {controls.get('density_floor_bohr3', 1e-12)}",
                   f"MAX_SCF_ITERATIONS {maximum_scf_iterations}",
@@ -1852,6 +1867,8 @@ def write_postprocess_inputs(spec: Mapping[str, object],
                   "OUTPUT_PREFIX fde_diabatic",
                   f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
                   f"EMBEDDING_XC {canonical_embedding_xc_name(controls.get('embedding_xc', 'pbe'))}",
+                  f"COUPLING_PROVIDER {canonical_coupling_provider_name(controls.get('coupling_provider', 'symmetric_linearized'))}",
+                  f"TRANSITION_DENSITY_TRACE_TOLERANCE {controls.get('transition_density_trace_tolerance', 1e-8)}",
                   f"KEDF {canonical_kedf_name(controls.get('kedf', 'pw91k'))}",
                   "DENSITY_FLOOR_BOHR3 1e-12",
                   "MAX_SCF_ITERATIONS 100", "SCF_DENSITY_TOLERANCE 1e-8",
@@ -1923,12 +1940,28 @@ def run_workflow(spec_path: Path) -> None:
         result_path = postprocess_directory / "fde_diabatic.fde_diabatic"
         if result_path.is_file():
             records = _records(result_path)
-            row["pairs"] = [{"first_state_index": int(fields[0]),
-                             "second_state_index": int(fields[1]),
-                             "overlap": float(fields[2]),
-                             "h12_ry": float(fields[3]),
-                             "orthogonalized_coupling_ry": float(fields[4])}
-                            for fields in records.get("PAIR", [])]
+            provider_records = records.get("COUPLING_PROVIDER", [])
+            row["coupling_provider"] = (
+                provider_records[0][0] if provider_records else "legacy_unspecified")
+            pairs = []
+            for fields in records.get("PAIR", []):
+                if len(fields) not in (5, 9):
+                    raise WorkflowError(
+                        "FDE PAIR record must contain 5 legacy or 9 audited fields")
+                pair = {"first_state_index": int(fields[0]),
+                        "second_state_index": int(fields[1]),
+                        "overlap": float(fields[2]),
+                        "h12_ry": float(fields[3]),
+                        "orthogonalized_coupling_ry": float(fields[4])}
+                if len(fields) == 9:
+                    pair.update({
+                        "overlap_reciprocity_error": float(fields[5]),
+                        "maximum_transition_density_trace_error": float(fields[6]),
+                        "transition_energy_asymmetry_ry": float(fields[7]),
+                        "estimated_coupling_uncertainty_ry": float(fields[8]),
+                    })
+                pairs.append(pair)
+            row["pairs"] = pairs
             adiabatic = records.get("ADIABATIC_ENERGIES_RY", [["0"]])[0]
             row["adiabatic_energies_ry"] = [float(value) for value in adiabatic[1:]]
         pes_rows.append(row)
@@ -1936,7 +1969,11 @@ def run_workflow(spec_path: Path) -> None:
     state_labels = [state["label"] for state in spec["states"]]
     table_lines = ["geometry\tcoordinate_angstrom\t" + "\t".join(
         f"{label}_energy_ry" for label in state_labels)
-        + "\toverlap\th12_ry\torthogonalized_coupling_ry"]
+        + "\toverlap\th12_ry\torthogonalized_coupling_ry"
+        + "\tcoupling_provider\toverlap_reciprocity_error"
+        + "\tmaximum_transition_density_trace_error"
+        + "\ttransition_energy_asymmetry_ry"
+        + "\testimated_coupling_uncertainty_ry"]
     for row in pes_rows:
         pair = row.get("pairs", [{}])[0] if row.get("pairs") else {}
         coordinate = row.get("coordinate_angstrom")
@@ -1944,6 +1981,13 @@ def run_workflow(spec_path: Path) -> None:
         fields.extend(format(float(row["states"][label]), ".17g") for label in state_labels)
         fields.extend("" if key not in pair else format(float(pair[key]), ".17g")
                       for key in ("overlap", "h12_ry", "orthogonalized_coupling_ry"))
+        fields.append(str(row.get("coupling_provider", "")))
+        fields.extend(
+            "" if key not in pair else format(float(pair[key]), ".17g")
+            for key in ("overlap_reciprocity_error",
+                        "maximum_transition_density_trace_error",
+                        "transition_energy_asymmetry_ry",
+                        "estimated_coupling_uncertainty_ry"))
         table_lines.append("\t".join(fields))
     (root / "fde_pes.tsv").write_text("\n".join(table_lines) + "\n", encoding="utf-8")
     write_workflow_performance(root)

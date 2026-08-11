@@ -1,5 +1,7 @@
 #include "fde_diabatic_postprocess.h"
 
+#include "coupling/fde_coupling_provider_factory.h"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -137,6 +139,11 @@ void write_result(const std::string& prefix,
     }
     output << std::setprecision(17);
     output << "FDE_DIABATIC_RESULT 1\n";
+    if (result.assembly.pairs.empty())
+    {
+        throw std::runtime_error("FDE diabatic result contains no state pairs");
+    }
+    output << "COUPLING_PROVIDER " << result.assembly.pairs[0].provider << '\n';
     output << "STATES " << result.assembly.problem.state_labels.size();
     for (std::size_t index = 0; index < result.assembly.problem.state_labels.size(); ++index)
     {
@@ -160,7 +167,11 @@ void write_result(const std::string& prefix,
         const DiabaticPairAssembly& pair = result.assembly.pairs[index];
         output << "PAIR " << pair.first_input_state << ' ' << pair.second_input_state << ' '
                << pair.normalized_overlap << ' ' << pair.hamiltonian_coupling_ry << ' '
-               << result.orthogonalized_pair_couplings[index].coupling_ry << '\n';
+               << result.orthogonalized_pair_couplings[index].coupling_ry << ' '
+               << pair.overlap_reciprocity_error << ' '
+               << pair.maximum_transition_density_trace_error << ' '
+               << pair.transition_energy_asymmetry_ry << ' '
+               << pair.estimated_coupling_uncertainty_ry << '\n';
     }
     output << "ADIABATIC_ENERGIES_RY " << result.adiabatic_solution.eigenvalues_ry.size();
     for (std::size_t index = 0; index < result.adiabatic_solution.eigenvalues_ry.size(); ++index)
@@ -187,19 +198,29 @@ void write_result(const std::string& prefix,
         throw std::runtime_error("Cannot create FDE diabatic table: " + table_path);
     }
     table << std::setprecision(17);
-    table << "kind\tfirst\tsecond\toverlap\th12_ry\torthogonalized_coupling_ry\n";
+    table << "kind\tfirst\tsecond\toverlap\th12_ry\torthogonalized_coupling_ry"
+          << "\tprovider\toverlap_reciprocity_error"
+          << "\tmaximum_transition_density_trace_error"
+          << "\ttransition_energy_asymmetry_ry"
+          << "\testimated_coupling_uncertainty_ry\n";
     for (std::size_t index = 0; index < result.assembly.pairs.size(); ++index)
     {
         const DiabaticPairAssembly& pair = result.assembly.pairs[index];
         table << "pair\t" << pair.first_input_state
               << '\t' << pair.second_input_state
               << '\t' << pair.normalized_overlap << '\t' << pair.hamiltonian_coupling_ry
-              << '\t' << result.orthogonalized_pair_couplings[index].coupling_ry << '\n';
+              << '\t' << result.orthogonalized_pair_couplings[index].coupling_ry
+              << '\t' << pair.provider
+              << '\t' << pair.overlap_reciprocity_error
+              << '\t' << pair.maximum_transition_density_trace_error
+              << '\t' << pair.transition_energy_asymmetry_ry
+              << '\t' << pair.estimated_coupling_uncertainty_ry << '\n';
     }
     for (std::size_t root = 0; root < result.adiabatic_solution.eigenvalues_ry.size(); ++root)
     {
         table << "adiabatic_root\t" << root << "\t-\t-\t"
-              << result.adiabatic_solution.eigenvalues_ry[root] << "\t-\n";
+              << result.adiabatic_solution.eigenvalues_ry[root]
+              << "\t-\t-\t-\t-\t-\t-\n";
     }
 }
 
@@ -259,15 +280,23 @@ DiabaticPostprocessResult DiabaticPostprocessor::evaluate(
         = config.m_fragment_labels.empty() ? all_fragment_labels(config)
                                            : config.m_fragment_labels;
 
-    const LinearizedTransitionEnergy transition_energy(linearized_states,
-                                                        ao_overlap,
-                                                        config.singular_value_tolerance);
+    const std::unique_ptr<TransitionEnergyProvider> transition_energy
+        = FdeCouplingProviderFactory::create(config.coupling_provider,
+                                             linearized_states,
+                                             ao_overlap,
+                                             config.singular_value_tolerance);
+    CouplingValidationControls coupling_validation;
+    coupling_validation.overlap_reciprocity_tolerance
+        = config.symmetry_tolerance;
+    coupling_validation.transition_density_trace_tolerance
+        = config.transition_density_trace_tolerance;
     DiabaticPostprocessResult result;
     result.assembly = FdeDiabaticAssembler::assemble(determinants,
                                                      diagonal_energies,
                                                      ao_overlap,
                                                      approximation,
-                                                     transition_energy,
+                                                     *transition_energy,
+                                                     coupling_validation,
                                                      config.singular_value_tolerance);
     NonorthogonalSolverControls solver_controls;
     solver_controls.overlap_eigenvalue_cutoff = config.overlap_eigenvalue_cutoff;

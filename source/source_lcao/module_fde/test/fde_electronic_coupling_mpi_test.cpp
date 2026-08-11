@@ -38,6 +38,11 @@ fde::DiabaticDeterminantArtifact determinant(const std::string& state,
 class DirectionalEnergy : public fde::TransitionEnergyProvider
 {
   public:
+    std::string name() const override
+    {
+        return "mpi_directional";
+    }
+
     double evaluate_ry(const fde::DiabaticDeterminantArtifact& bra,
                        const fde::DiabaticDeterminantArtifact&,
                        const fde::SpinTransitionDensityMatrix& density,
@@ -77,12 +82,14 @@ TEST(FdeElectronicCouplingMpi, TwoRanksProduceIdenticalResults)
     try
     {
         const DirectionalEnergy energy;
+        const fde::CouplingValidationControls validation{1.0e-12, 1.0e-12};
         const fde::ElectronicCouplingResult result
             = fde::ElectronicCoupling::evaluate_symmetric(
                 determinant("reactant", {1.0, 0.0}),
                 determinant("product", {0.8, 0.6}),
                 {1.0, 0.0, 0.0, 1.0},
                 energy,
+                validation,
                 1.0e-12);
         local_values[0] = result.normalized_overlap;
         local_values[1] = result.forward_transition_energy_ry;

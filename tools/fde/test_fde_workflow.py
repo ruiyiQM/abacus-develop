@@ -74,6 +74,21 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(fde_workflow.WorkflowError, "embedding_xc"):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_coupling_provider_and_trace_tolerance(self):
+        spec = self.spec()
+        spec["controls"] = {
+            "coupling_provider": "linearized",
+            "transition_density_trace_tolerance": 2e-9,
+        }
+        fde_workflow.validate_spec(spec)
+        self.assertEqual(
+            fde_workflow.canonical_coupling_provider_name("linearized"),
+            "symmetric_linearized")
+        spec["controls"]["coupling_provider"] = "unknown"
+        with self.assertRaisesRegex(fde_workflow.WorkflowError,
+                                    "coupling_provider"):
+            fde_workflow.validate_spec(spec)
+
     def test_runtime_config_records_xc_split(self):
         spec = self.spec()
         spec["controls"] = {"fragment_xc": "SCAN", "embedding_xc": "PBE"}
@@ -88,6 +103,8 @@ class FdeWorkflowTest(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn("FRAGMENT_XC scan\n", text)
             self.assertIn("EMBEDDING_XC pbe\n", text)
+            self.assertIn("COUPLING_PROVIDER symmetric_linearized\n", text)
+            self.assertIn("TRANSITION_DENSITY_TRACE_TOLERANCE 1e-08\n", text)
 
     def test_rks_accepts_only_closed_shell_fragment_assignments(self):
         parameters = fde_workflow.embedded_scf_spin_parameters(

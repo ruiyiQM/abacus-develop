@@ -72,6 +72,8 @@ struct FdeRuntimeConfig
     std::vector<std::string> k_state_labels;
     std::vector<std::string> l_fragment_labels;
     std::vector<std::string> m_fragment_labels;
+    std::string coupling_provider;
+    double transition_density_trace_tolerance;
     double singular_value_tolerance;
     double overlap_eigenvalue_cutoff;
     double symmetry_tolerance;

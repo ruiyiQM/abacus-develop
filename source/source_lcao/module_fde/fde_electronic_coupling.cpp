@@ -312,6 +312,7 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric(
     const DiabaticDeterminantArtifact& second,
     const std::vector<double>& ao_overlap,
     const TransitionEnergyProvider& energy_provider,
+    const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
     const FullOccupiedOverlapPolicy full_overlap;
@@ -320,6 +321,7 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric(
                                                               ao_overlap,
                                                               full_overlap,
                                                               energy_provider,
+                                                              validation,
                                                               singular_value_tolerance);
 }
 
@@ -329,8 +331,24 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
     const std::vector<double>& ao_overlap,
     const OccupiedOverlapPolicy& overlap_policy,
     const TransitionEnergyProvider& energy_provider,
+    const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
+    if (!std::isfinite(validation.overlap_reciprocity_tolerance)
+        || validation.overlap_reciprocity_tolerance < 0.0
+        || !std::isfinite(validation.transition_density_trace_tolerance)
+        || validation.transition_density_trace_tolerance <= 0.0)
+    {
+        throw std::invalid_argument(
+            "FDE coupling validation tolerances are invalid");
+    }
+    const std::string provider_name = energy_provider.name();
+    if (provider_name.empty()
+        || provider_name.find_first_of(" \t\r\n") != std::string::npos)
+    {
+        throw std::invalid_argument(
+            "FDE transition-energy provider name must be a nonempty token");
+    }
     const DeterminantTransition forward
         = ElectronicCoupling::transition_with_policy(first,
                                                      second,
@@ -343,14 +361,51 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
                                                      ao_overlap,
                                                      overlap_policy,
                                                      singular_value_tolerance);
-    if (std::fabs(forward.normalized_overlap - reverse.normalized_overlap) > 1.0e-10)
+    const double overlap_reciprocity_error
+        = std::fabs(forward.normalized_overlap - reverse.normalized_overlap);
+    if (overlap_reciprocity_error > validation.overlap_reciprocity_tolerance)
     {
         throw std::runtime_error("FDE forward and reverse determinant overlaps disagree");
     }
 
+    const std::size_t alpha_count
+        = DeterminantArtifactIO::occupied_count(first.alpha,
+                                                first.ao_dimension);
+    const std::size_t beta_count
+        = DeterminantArtifactIO::occupied_count(first.beta,
+                                                first.ao_dimension);
+    double maximum_trace_error = 0.0;
+    const SpinTransitionDensityMatrix* densities[2]
+        = {&forward.density_matrix, &reverse.density_matrix};
+    for (std::size_t direction = 0; direction < 2; ++direction)
+    {
+        maximum_trace_error = std::max(
+            maximum_trace_error,
+            std::fabs(ElectronicCoupling::electron_count(
+                          densities[direction]->alpha,
+                          ao_overlap,
+                          first.ao_dimension)
+                      - static_cast<double>(alpha_count)));
+        maximum_trace_error = std::max(
+            maximum_trace_error,
+            std::fabs(ElectronicCoupling::electron_count(
+                          densities[direction]->beta,
+                          ao_overlap,
+                          first.ao_dimension)
+                      - static_cast<double>(beta_count)));
+    }
+    if (maximum_trace_error > validation.transition_density_trace_tolerance)
+    {
+        throw std::runtime_error(
+            "FDE transition-density electron trace exceeds its tolerance");
+    }
+
     ElectronicCouplingResult result;
+    result.provider = provider_name;
     result.normalized_overlap
         = 0.5 * (forward.normalized_overlap + reverse.normalized_overlap);
+    result.overlap_reciprocity_error = overlap_reciprocity_error;
+    result.maximum_transition_density_trace_error = maximum_trace_error;
     result.forward_transition_energy_ry
         = energy_provider.evaluate_ry(first,
                                       second,
@@ -370,6 +425,12 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
         = 0.5 * result.normalized_overlap
           * (result.forward_transition_energy_ry
              + result.reverse_transition_energy_ry);
+    result.transition_energy_asymmetry_ry
+        = std::fabs(result.forward_transition_energy_ry
+                    - result.reverse_transition_energy_ry);
+    result.estimated_coupling_uncertainty_ry
+        = 0.5 * std::fabs(result.normalized_overlap)
+          * result.transition_energy_asymmetry_ry;
     result.forward_density_matrix = forward.density_matrix;
     result.reverse_density_matrix = reverse.density_matrix;
     return result;

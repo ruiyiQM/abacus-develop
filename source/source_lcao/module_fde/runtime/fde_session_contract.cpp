@@ -172,6 +172,11 @@ void FdeSessionContract::validate_compatible(
             "fragment_xc");
     require(initialized.embedding_xc == requested.embedding_xc,
             "embedding_xc");
+    require(initialized.coupling_provider == requested.coupling_provider,
+            "coupling_provider");
+    require(initialized.transition_density_trace_tolerance
+                == requested.transition_density_trace_tolerance,
+            "transition_density_trace_tolerance");
     require(initialized.kinetic_functional == requested.kinetic_functional,
             "kinetic_functional");
     require(initialized.density_floor_bohr3 == requested.density_floor_bohr3,

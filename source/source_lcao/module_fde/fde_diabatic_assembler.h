@@ -35,6 +35,11 @@ struct DiabaticPairAssembly
     std::size_t second_input_state;
     double normalized_overlap;
     double hamiltonian_coupling_ry;
+    double overlap_reciprocity_error;
+    double maximum_transition_density_trace_error;
+    double transition_energy_asymmetry_ry;
+    double estimated_coupling_uncertainty_ry;
+    std::string provider;
 };
 
 struct FdeDiabaticAssemblyResult
@@ -66,6 +71,7 @@ class FdeDiabaticAssembler
         const std::vector<double>& ao_overlap,
         const FdeDiabApproximationSpec& approximation,
         const TransitionEnergyProvider& transition_energy_provider,
+        const CouplingValidationControls& validation,
         double singular_value_tolerance);
 };
 

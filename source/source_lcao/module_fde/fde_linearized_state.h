@@ -42,6 +42,8 @@ class LinearizedTransitionEnergy : public TransitionEnergyProvider
                                const std::vector<double>& ao_overlap,
                                double singular_value_tolerance);
 
+    std::string name() const override;
+
     double evaluate_ry(const DiabaticDeterminantArtifact& bra,
                        const DiabaticDeterminantArtifact& ket,
                        const SpinTransitionDensityMatrix& transition_density,

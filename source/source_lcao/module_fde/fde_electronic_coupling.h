@@ -44,10 +44,18 @@ class TransitionEnergyProvider
   public:
     virtual ~TransitionEnergyProvider() {}
 
+    virtual std::string name() const = 0;
+
     virtual double evaluate_ry(const DiabaticDeterminantArtifact& bra,
                                const DiabaticDeterminantArtifact& ket,
                                const SpinTransitionDensityMatrix& transition_density,
                                std::size_t ao_dimension) const = 0;
+};
+
+struct CouplingValidationControls
+{
+    double overlap_reciprocity_tolerance;
+    double transition_density_trace_tolerance;
 };
 
 struct ElectronicCouplingResult
@@ -56,6 +64,11 @@ struct ElectronicCouplingResult
     double forward_transition_energy_ry;
     double reverse_transition_energy_ry;
     double hamiltonian_coupling_ry;
+    double overlap_reciprocity_error;
+    double maximum_transition_density_trace_error;
+    double transition_energy_asymmetry_ry;
+    double estimated_coupling_uncertainty_ry;
+    std::string provider;
     SpinTransitionDensityMatrix forward_density_matrix;
     SpinTransitionDensityMatrix reverse_density_matrix;
 };
@@ -81,6 +94,7 @@ class ElectronicCoupling
         const DiabaticDeterminantArtifact& second,
         const std::vector<double>& ao_overlap,
         const TransitionEnergyProvider& energy_provider,
+        const CouplingValidationControls& validation,
         double singular_value_tolerance);
 
     static ElectronicCouplingResult evaluate_symmetric_with_policy(
@@ -89,6 +103,7 @@ class ElectronicCoupling
         const std::vector<double>& ao_overlap,
         const OccupiedOverlapPolicy& overlap_policy,
         const TransitionEnergyProvider& energy_provider,
+        const CouplingValidationControls& validation,
         double singular_value_tolerance);
 
     static double electron_count(const std::vector<double>& transition_density,

@@ -73,6 +73,8 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(config.maximum_scf_iterations, 120);
     EXPECT_EQ(config.fragment_xc, "pbe");
     EXPECT_EQ(config.embedding_xc, "pbe");
+    EXPECT_EQ(config.coupling_provider, "symmetric_linearized");
+    EXPECT_DOUBLE_EQ(config.transition_density_trace_tolerance, 1.0e-8);
     EXPECT_DOUBLE_EQ(config.mixing_beta, 0.25);
     EXPECT_TRUE(config.calculate_force);
     ASSERT_EQ(config.linearized_state_artifacts.size(), 2);
@@ -102,6 +104,18 @@ TEST(FdeRuntimeConfig, RejectsNonPbeEmbeddingXc)
     text.insert(text.find("KEDF pw91k"), "EMBEDDING_XC pbe0\n");
     std::istringstream input(text);
     EXPECT_THROW(fde::FdeRuntimeConfigIO::read(input), std::invalid_argument);
+}
+
+TEST(FdeRuntimeConfig, CanonicalizesCouplingProviderAndTraceTolerance)
+{
+    std::string text(fluoride_substitution_config());
+    text.insert(text.find("KEDF pw91k"),
+                "COUPLING_PROVIDER linearized\n"
+                "TRANSITION_DENSITY_TRACE_TOLERANCE 2e-9\n");
+    std::istringstream input(text);
+    const fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_EQ(config.coupling_provider, "symmetric_linearized");
+    EXPECT_DOUBLE_EQ(config.transition_density_trace_tolerance, 2.0e-9);
 }
 
 TEST(FdeRuntimeConfig, RoundTripsDeterministically)

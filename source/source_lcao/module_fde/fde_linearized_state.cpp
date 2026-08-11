@@ -207,6 +207,11 @@ LinearizedTransitionEnergy::LinearizedTransitionEnergy(
     }
 }
 
+std::string LinearizedTransitionEnergy::name() const
+{
+    return "symmetric_linearized";
+}
+
 double LinearizedTransitionEnergy::evaluate_ry(
     const DiabaticDeterminantArtifact& bra,
     const DiabaticDeterminantArtifact& ket,

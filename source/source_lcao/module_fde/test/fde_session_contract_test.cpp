@@ -87,4 +87,14 @@ TEST(FdeSessionContract, RejectsChangedFunctionalModel)
         std::invalid_argument);
 }
 
+TEST(FdeSessionContract, RejectsChangedCouplingValidationModel)
+{
+    const fde::FdeRuntimeConfig initialized = config();
+    fde::FdeRuntimeConfig requested = initialized;
+    requested.transition_density_trace_tolerance = 1.0e-10;
+    EXPECT_THROW(
+        fde::FdeSessionContract::validate_compatible(initialized, requested),
+        std::invalid_argument);
+}
+
 } // namespace

@@ -88,6 +88,12 @@ TEST(FdeDiabaticPostprocess, ProducesCouplingAndNonorthogonalRoots)
 
     ASSERT_EQ(result.assembly.pairs.size(), 1);
     EXPECT_NEAR(result.assembly.pairs[0].normalized_overlap, 0.8, 1.0e-12);
+    EXPECT_EQ(result.assembly.pairs[0].provider, "symmetric_linearized");
+    EXPECT_LE(result.assembly.pairs[0].overlap_reciprocity_error, 1.0e-12);
+    EXPECT_LE(result.assembly.pairs[0].maximum_transition_density_trace_error,
+              1.0e-12);
+    EXPECT_TRUE(std::isfinite(
+        result.assembly.pairs[0].estimated_coupling_uncertainty_ry));
     ASSERT_EQ(result.orthogonalized_pair_couplings.size(), 1);
     EXPECT_TRUE(std::isfinite(result.orthogonalized_pair_couplings[0].coupling_ry));
     ASSERT_EQ(result.adiabatic_solution.eigenvalues_ry.size(), 2);

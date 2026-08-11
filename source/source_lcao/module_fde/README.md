@@ -11,6 +11,8 @@ Current boundary:
 - `restart/`: resident AO density-matrix/orbital warm-start policy;
 - `functionals/`: the fragment/embedding XC policy and future provider
   factories;
+- `coupling/`: runtime provider selection/factory and coupling validation
+  policy;
 - root artifact and state files: versioned density, determinant, band,
   fragment, and linearized-state formats;
 - root embedding files: grid partitioning, semilocal functionals, `PotFde`,
@@ -18,7 +20,7 @@ Current boundary:
 - root coupling/energy files: diabatic assembly, coupling, canonical ledgers,
   freeze--thaw maps, and PES utilities.
 
-Planned migrations use `coupling/`, `gpu/`, and `workflow/` only when the
+Planned migrations use `gpu/` and `workflow/` only when the
 corresponding implementation is changed. Do not
 move unrelated files merely for directory symmetry: every move must preserve
 the old include path or update all consumers and tests in one commit.
@@ -62,3 +64,19 @@ or nonadditive meta-GGA tau term is implied.
 Both choices are immutable within a persistent session and are recorded in
 every density artifact. Mixing density artifacts from different fragment XC
 models is rejected before an SCF starts.
+
+## Coupling provider boundary
+
+`COUPLING_PROVIDER symmetric_linearized` selects the maintained
+state-specific first-order transition-energy model through
+`coupling/FdeCouplingProviderFactory`. The legacy spelling `linearized` is
+accepted and serialized canonically. Provider construction is now separate
+from determinant overlap, K/L/M selection, and nonorthogonal diagonalization,
+so a future higher-level provider can be added without changing those layers.
+
+Every pair is evaluated in both bra/ket directions. The coupling layer checks
+overlap reciprocity and the alpha/beta transition-density electron traces,
+then records the directional transition-energy asymmetry and
+`0.5 |S12| |E12(forward)-E21(reverse)|` as a linearization-sensitivity
+estimate. That estimate is a diagnostic of the current first-order model, not
+a statistical error bar.

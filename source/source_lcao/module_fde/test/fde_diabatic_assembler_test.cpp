@@ -79,6 +79,11 @@ std::vector<fde::DiabaticDeterminantArtifact> determinants()
 class CountingTransitionEnergy : public fde::TransitionEnergyProvider
 {
   public:
+    std::string name() const override
+    {
+        return "counting";
+    }
+
     double evaluate_ry(const fde::DiabaticDeterminantArtifact& bra,
                        const fde::DiabaticDeterminantArtifact&,
                        const fde::SpinTransitionDensityMatrix&,
@@ -97,12 +102,14 @@ TEST(FdeDiabaticAssembler, AppliesExplicitKLMSelectionsAndBuildsSymmetricMatrice
 {
     const CountingTransitionEnergy energy;
     const fde::FdeDiabApproximationSpec approximation{{0, 2}, {"A"}, {"A", "B", "C"}};
+    const fde::CouplingValidationControls validation{1.0e-12, 1.0e-12};
     const fde::FdeDiabaticAssemblyResult result
         = fde::FdeDiabaticAssembler::assemble(determinants(),
                                               {1.0, 2.0, 3.0},
                                               ao_overlap(),
                                               approximation,
                                               energy,
+                                              validation,
                                               1.0e-12);
 
     EXPECT_EQ(result.problem.state_labels,
@@ -125,6 +132,9 @@ TEST(FdeDiabaticAssembler, AppliesExplicitKLMSelectionsAndBuildsSymmetricMatrice
     ASSERT_EQ(result.pairs.size(), 1);
     EXPECT_EQ(result.pairs[0].first_input_state, 0);
     EXPECT_EQ(result.pairs[0].second_input_state, 2);
+    EXPECT_EQ(result.pairs[0].provider, "counting");
+    EXPECT_LE(result.pairs[0].maximum_transition_density_trace_error,
+              1.0e-12);
 }
 
 TEST(FdeDiabaticAssembler, ImplementsPaperLBlockRetentionRule)
@@ -140,11 +150,13 @@ TEST(FdeDiabaticAssembler, RejectsLFragmentsOutsideMSelection)
 {
     const CountingTransitionEnergy energy;
     const fde::FdeDiabApproximationSpec invalid{{0, 1}, {"C"}, {"A", "B"}};
+    const fde::CouplingValidationControls validation{1.0e-12, 1.0e-12};
     EXPECT_THROW(fde::FdeDiabaticAssembler::assemble(determinants(),
                                                      {1.0, 2.0, 3.0},
                                                      ao_overlap(),
                                                      invalid,
                                                      energy,
+                                                     validation,
                                                      1.0e-12),
                  std::invalid_argument);
 }

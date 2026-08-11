@@ -145,6 +145,7 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
     const std::vector<double>& ao_overlap,
     const FdeDiabApproximationSpec& approximation,
     const TransitionEnergyProvider& transition_energy_provider,
+    const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
     if (determinants.size() < 2 || diagonal_energies_ry.size() != determinants.size()
@@ -277,6 +278,7 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
                     ao_overlap,
                     overlap_policy,
                     transition_energy_provider,
+                    validation,
                     singular_value_tolerance);
             result.problem.overlap[first + second * k] = coupling.normalized_overlap;
             result.problem.overlap[second + first * k] = coupling.normalized_overlap;
@@ -287,7 +289,12 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
             result.pairs.push_back({approximation.state_indices[first],
                                     approximation.state_indices[second],
                                     coupling.normalized_overlap,
-                                    coupling.hamiltonian_coupling_ry});
+                                    coupling.hamiltonian_coupling_ry,
+                                    coupling.overlap_reciprocity_error,
+                                    coupling.maximum_transition_density_trace_error,
+                                    coupling.transition_energy_asymmetry_ry,
+                                    coupling.estimated_coupling_uncertainty_ry,
+                                    coupling.provider});
         }
     }
     return result;

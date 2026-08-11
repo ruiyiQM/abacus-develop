@@ -3,6 +3,8 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gint_integrator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_analytic_force.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_ao_projection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_coupling_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_coupling_provider_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_density_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_determinant_artifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_diabatic_assembler.cpp

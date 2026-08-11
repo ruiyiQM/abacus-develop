@@ -1,4 +1,5 @@
 import importlib.util
+import csv
 import json
 import os
 from pathlib import Path
@@ -67,7 +68,8 @@ if task == "diabatic_postprocess":
         raise RuntimeError("postprocess config is incomplete")
     (cwd / "fde_diabatic.fde_diabatic").write_text(
         "FDE_DIABATIC_RESULT 1\n"
-        "PAIR 0 1 0.8 -22.7 0.25\n"
+        "COUPLING_PROVIDER symmetric_linearized\n"
+        "PAIR 0 1 0.8 -22.7 0.25 1e-16 2e-16 0.04 0.016\n"
         "ADIABATIC_ENERGIES_RY 2 -23.5 -22.3\nEND\n",
         encoding="utf-8")
     raise SystemExit(0)
@@ -385,13 +387,21 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
             self.assertAlmostEqual(point["states"]["product"], -22.4)
             self.assertAlmostEqual(point["pairs"][0]["orthogonalized_coupling_ry"],
                                    0.25)
+            self.assertEqual(point["coupling_provider"],
+                             "symmetric_linearized")
+            self.assertAlmostEqual(
+                point["pairs"][0]["estimated_coupling_uncertainty_ry"],
+                0.016)
             self.assertEqual(point["adiabatic_energies_ry"], [-23.5, -22.3])
             table = (work / "fde_pes.tsv").read_text(encoding="utf-8")
             self.assertIn("reactant_energy_ry\tproduct_energy_ry", table)
-            table_values = table.splitlines()[1].split("\t")
-            self.assertAlmostEqual(float(table_values[-3]), 0.8)
-            self.assertAlmostEqual(float(table_values[-2]), -22.7)
-            self.assertAlmostEqual(float(table_values[-1]), 0.25)
+            table_row = next(csv.DictReader(table.splitlines(), delimiter="\t"))
+            self.assertAlmostEqual(float(table_row["overlap"]), 0.8)
+            self.assertAlmostEqual(float(table_row["h12_ry"]), -22.7)
+            self.assertAlmostEqual(
+                float(table_row["orthogonalized_coupling_ry"]), 0.25)
+            self.assertEqual(table_row["coupling_provider"],
+                             "symmetric_linearized")
             for state in ("reactant", "product"):
                 checkpoint_path = work / "g0" / state / "checkpoint.json"
                 checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))

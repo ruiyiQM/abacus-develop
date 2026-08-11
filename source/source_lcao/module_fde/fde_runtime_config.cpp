@@ -1,6 +1,7 @@
 #include "fde_runtime_config.h"
 
 #include "functionals/fde_xc_policy.h"
+#include "coupling/fde_coupling_policy.h"
 
 #include <algorithm>
 #include <cmath>
@@ -107,6 +108,8 @@ FdeRuntimeConfig::FdeRuntimeConfig()
       maximum_freeze_thaw_cycles(20),
       freeze_thaw_density_tolerance(1.0e-7),
       energy_tolerance_ry(1.0e-8),
+      coupling_provider("symmetric_linearized"),
+      transition_density_trace_tolerance(1.0e-8),
       singular_value_tolerance(1.0e-10),
       overlap_eigenvalue_cutoff(1.0e-9),
       symmetry_tolerance(1.0e-10),
@@ -226,6 +229,7 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
     }
     FdeXcPolicy::canonical_fragment(config.fragment_xc);
     FdeXcPolicy::canonical_embedding(config.embedding_xc);
+    FdeCouplingPolicy::canonical_provider(config.coupling_provider);
     if (!finite_positive(config.density_floor_bohr3)
         || config.maximum_scf_iterations < 1
         || !finite_positive(config.scf_density_tolerance)
@@ -234,6 +238,7 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
         || config.mixing_beta > 1.0 || config.maximum_freeze_thaw_cycles < 1
         || !finite_positive(config.freeze_thaw_density_tolerance)
         || !finite_positive(config.energy_tolerance_ry)
+        || !finite_positive(config.transition_density_trace_tolerance)
         || !finite_positive(config.singular_value_tolerance)
         || !finite_positive(config.overlap_eigenvalue_cutoff)
         || !finite_positive(config.symmetry_tolerance)
@@ -441,6 +446,18 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
             config.embedding_xc = FdeXcPolicy::canonical_embedding(
                 read_value<std::string>(line, line_number, "embedding XC"));
         }
+        else if (key == "COUPLING_PROVIDER")
+        {
+            config.coupling_provider = FdeCouplingPolicy::canonical_provider(
+                read_value<std::string>(line, line_number, "coupling provider"));
+        }
+        else if (key == "TRANSITION_DENSITY_TRACE_TOLERANCE")
+        {
+            config.transition_density_trace_tolerance
+                = read_value<double>(line,
+                                     line_number,
+                                     "transition-density trace tolerance");
+        }
         else if (key == "DENSITY_FLOOR_BOHR3")
         {
             config.density_floor_bohr3 = read_value<double>(line, line_number, "density floor");
@@ -600,6 +617,11 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
            << '\n';
     output << "EMBEDDING_XC " << FdeXcPolicy::canonical_embedding(config.embedding_xc)
            << '\n';
+    output << "COUPLING_PROVIDER "
+           << FdeCouplingPolicy::canonical_provider(config.coupling_provider)
+           << '\n';
+    output << "TRANSITION_DENSITY_TRACE_TOLERANCE "
+           << config.transition_density_trace_tolerance << '\n';
     output << "KEDF " << kinetic_functional_name(config.kinetic_functional) << '\n';
     output << "DENSITY_FLOOR_BOHR3 " << config.density_floor_bohr3 << '\n';
     output << "MAX_SCF_ITERATIONS " << config.maximum_scf_iterations << '\n';

@@ -103,6 +103,36 @@ contract. Seeds and freeze--thaw checkpoints cannot be reused across different
 `fragment_xc` values. Preparing a non-PBE fragment example automatically uses
 a separate `*-pbe0-in-pbe` or `*-scan-in-pbe` work path.
 
+## Coupling provider and validation
+
+The maintained coupling path is explicit in every workflow:
+
+```json
+"coupling_provider": "symmetric_linearized",
+"transition_density_trace_tolerance": 1e-8
+```
+
+`symmetric_linearized` evaluates the state-specific first-order transition
+energy in both bra/ket directions and averages the resulting Hamiltonian
+matrix elements. `linearized` remains an accepted alias. The provider factory
+is isolated under `module_fde/coupling/`; unsupported names fail before any
+postprocessing rather than silently selecting a fallback.
+
+For each state pair, ABACUS validates determinant-overlap reciprocity and both
+spin-channel electron traces. The text result, pair TSV, `fde_pes.json`, and
+`fde_pes.tsv` expose:
+
+- `overlap_reciprocity_error`;
+- `maximum_transition_density_trace_error`;
+- `transition_energy_asymmetry_ry`;
+- `estimated_coupling_uncertainty_ry`, defined as half the directional
+  Hamiltonian-matrix-element difference.
+
+The last value measures sensitivity to the two state-specific
+linearizations. It is useful for flagging unreliable geometries but is not a
+formal statistical uncertainty or a substitute for comparison to a
+higher-level electronic-structure method.
+
 ## Nonadditive kinetic functional
 
 Select the NAKE approximation with `controls.kedf`.  `thomas_fermi` is the
