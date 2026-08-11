@@ -18,10 +18,14 @@ _shared = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(_shared)
 
 sha256 = _shared.sha256
-load_manifest = _shared.load_manifest
 raw_url = _shared.raw_url
 copy_stream = _shared.copy_stream
 install_resources = _shared.install_resources
+
+
+def load_manifest(path: Path = DEFAULT_MANIFEST):
+    """Load this example's manifest unless an explicit path is supplied."""
+    return _shared.load_manifest(path)
 
 
 def main() -> int:
