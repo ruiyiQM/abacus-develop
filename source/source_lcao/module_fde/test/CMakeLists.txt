@@ -315,3 +315,9 @@ AddTest(
   SOURCES fde_session_protocol_test.cpp
     ../runtime/fde_session_protocol.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_warm_start
+  SOURCES fde_warm_start_test.cpp
+    ../restart/fde_warm_start.cpp
+)

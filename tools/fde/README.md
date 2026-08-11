@@ -49,8 +49,10 @@ may remove the initialization speedup for sequential Gauss--Seidel updates.
 
 Every per-call `fde_performance.json` records `session_reused`, the worker PID,
 request index, startup time charged to the first request, request wall time,
-and the persistent worker directory. Session logs live outside prunable FT
-cycle directories under `<state>/session-workers/`.
+the persistent worker directory, `warm_start_mode`, and `abacus_ionic_step`.
+The first request uses `density_seed`; later compatible requests use
+`resident_ao_density_matrix_and_orbitals`. Session logs live outside prunable
+FT cycle directories under `<state>/session-workers/`.
 
 ## Performance records
 

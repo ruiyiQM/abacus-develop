@@ -8,6 +8,7 @@ Current boundary:
 
 - `runtime/`: persistent worker protocol, immutable-session contract, and
   future task-local lifecycle helpers;
+- `restart/`: resident AO density-matrix/orbital warm-start policy;
 - root artifact and state files: versioned density, determinant, band,
   fragment, and linearized-state formats;
 - root embedding files: grid partitioning, semilocal functionals, `PotFde`,
@@ -15,7 +16,7 @@ Current boundary:
 - root coupling/energy files: diabatic assembly, coupling, canonical ledgers,
   freeze--thaw maps, and PES utilities.
 
-Planned migrations use `restart/`, `functionals/`, `coupling/`, `gpu/`, and
+Planned migrations use `functionals/`, `coupling/`, `gpu/`, and
 `workflow/` only when the corresponding implementation is changed. Do not
 move unrelated files merely for directory symmetry: every move must preserve
 the old include path or update all consumers and tests in one commit.
@@ -32,3 +33,10 @@ operator. The workflow creates a new worker whenever the signature changes.
 
 This boundary is deliberate: reusing a wavefunction or mixing history across
 different active AO spaces would be fast but scientifically invalid.
+
+After the first compatible request, `restart/FdeWarmStart` maps the next
+request to a positive ABACUS ionic step. LCAO therefore rebuilds request-local
+Hamiltonian/grid state while retaining the resident DMK/DMR and orbital
+coefficients. The new FDE density artifact remains the authoritative real-space
+charge seed. ABACUS resets charge-mixing history at electronic iteration one,
+so Broyden/DIIS vectors do not cross request boundaries.

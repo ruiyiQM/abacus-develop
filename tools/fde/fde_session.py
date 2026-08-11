@@ -122,15 +122,33 @@ class FdeSessionProcess:
             self.process.stdin.flush()
             marker = self._wait_marker(
                 f"FDE_SESSION_DONE {request_id}", None)
-            if marker != f"FDE_SESSION_DONE {request_id}":
+            fields = marker.split()
+            if (len(fields) != 4
+                    or fields[:2] != ["FDE_SESSION_DONE", request_id]):
                 raise FdeSessionError(
                     f"unexpected FDE session completion marker: {marker}")
+            try:
+                ionic_step = int(fields[3])
+            except ValueError as error:
+                raise FdeSessionError(
+                    f"invalid ABACUS step in completion marker: {marker}") from error
+            if ionic_step != self.request_count:
+                raise FdeSessionError(
+                    f"out-of-order FDE session completion marker: {marker}")
+            warm_start_mode = fields[2]
+            expected_mode = ("density_seed" if self.request_count == 0
+                             else "resident_ao_density_matrix_and_orbitals")
+            if warm_start_mode != expected_mode:
+                raise FdeSessionError(
+                    f"unexpected FDE warm-start mode: {marker}")
             self.request_count += 1
             return {
                 "execution_mode": "persistent_session",
                 "session_pid": self.process.pid,
                 "session_request_index": self.request_count,
                 "session_reused": reused,
+                "warm_start_mode": warm_start_mode,
+                "abacus_ionic_step": ionic_step,
                 "session_startup_seconds": self.startup_seconds if not reused else 0.0,
                 "wall_time_seconds": time.monotonic() - request_started,
             }

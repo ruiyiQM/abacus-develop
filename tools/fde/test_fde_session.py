@@ -14,6 +14,7 @@ FAKE_WORKER = """\
 import sys
 
 print("FDE_SESSION_READY 1", flush=True)
+request_index = 0
 for line in sys.stdin:
     fields = line.split()
     if fields == ["STOP"]:
@@ -23,7 +24,11 @@ for line in sys.stdin:
         if fields[1] == "fail":
             print("FDE_SESSION_ERROR fail requested failure", flush=True)
             break
-        print("FDE_SESSION_DONE " + fields[1], flush=True)
+        mode = ("density_seed" if request_index == 0
+                else "resident_ao_density_matrix_and_orbitals")
+        print("FDE_SESSION_DONE " + fields[1] + " " + mode + " "
+              + str(request_index), flush=True)
+        request_index += 1
 """
 
 
@@ -47,6 +52,11 @@ class FdeSessionProcessTest(unittest.TestCase):
             session.close()
             self.assertFalse(first["session_reused"])
             self.assertTrue(second["session_reused"])
+            self.assertEqual(first["warm_start_mode"], "density_seed")
+            self.assertEqual(
+                second["warm_start_mode"],
+                "resident_ao_density_matrix_and_orbitals")
+            self.assertEqual(second["abacus_ionic_step"], 1)
             self.assertEqual(first["session_pid"], second["session_pid"])
             log = (root / "session" / "fde_session.log").read_text(
                 encoding="utf-8")

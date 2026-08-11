@@ -67,7 +67,8 @@ copies this example to a new `/cluster/scratch/$USER/fdedft-example-$JOBID`
 directory, and configures each embedded SCF as 20 MPI ranks x 4 OpenMP threads.
 The committed workflow uses persistent sessions: two fixed-fragment workers
 remain resident per state and alternate on overlapping Slurm steps. This
-retains NAO/PW initialization between compatible FT cycles; use
+retains NAO/PW initialization plus AO density matrices and orbitals between
+compatible FT cycles, while resetting SCF mixing history per request; use
 `maximum_persistent_sessions: 1` if node memory is more important than reuse.
 Pass a different source root and run root as the first and second positional
 arguments when needed. The more general single-point/array runner and compact

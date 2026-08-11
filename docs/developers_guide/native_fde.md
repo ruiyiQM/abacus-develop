@@ -227,6 +227,15 @@ memory. Set `maximum_persistent_sessions` to one to cap memory at the cost of
 restarting when the active fragment changes. Python waits for READY/DONE
 markers through a reader queue; the protocol contains no polling sleep.
 
+The first request reports warm-start mode `density_seed`. Later compatible
+requests report `resident_ao_density_matrix_and_orbitals`: a positive ABACUS
+ionic-step index retains the distributed LCAO density matrix and orbital
+coefficients, while the newly loaded FDE artifact replaces the real-space
+charge seed. `chgmixing_ks_lcao` resets Broyden/DIIS storage at iteration one
+of every request, so only the electronic state—not stale mixing history—is
+reused. The completion marker and each `fde_performance.json` record both this
+mode and the ABACUS step index.
+
 At runtime `FdeLcaoDriver` checks `nelec` and `nupdown` against that explicit
 fragment assignment, loads the active warm-start density and all environment
 density artifacts, and appends `PotFde` only after the ordinary potential

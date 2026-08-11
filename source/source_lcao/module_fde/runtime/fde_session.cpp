@@ -1,5 +1,6 @@
 #include "fde_session.h"
 #include "fde_session_protocol.h"
+#include "source_lcao/module_fde/restart/fde_warm_start.h"
 
 #include "source_esolver/esolver.h"
 #include "source_esolver/esolver_ks_lcao.h"
@@ -75,7 +76,7 @@ template <typename TK, typename TR>
 bool run_request(ModuleESolver::ESolver& solver,
                  UnitCell& unit_cell,
                  const FdeSessionCommand& command,
-                 const int request_index)
+                 const FdeWarmStartPlan& warm_start)
 {
     ModuleESolver::ESolver_KS_LCAO<TK, TR>* lcao
         = dynamic_cast<ModuleESolver::ESolver_KS_LCAO<TK, TR>*>(&solver);
@@ -84,7 +85,7 @@ bool run_request(ModuleESolver::ESolver& solver,
         return false;
     }
     lcao->reload_fde_session(command.config_path, unit_cell);
-    lcao->runner(unit_cell, request_index);
+    lcao->runner(unit_cell, warm_start.ionic_step);
     return true;
 }
 
@@ -108,7 +109,7 @@ void FdeSession::serve(ModuleESolver::ESolver& solver,
         std::cout << "FDE_SESSION_READY 1" << std::endl;
     }
 
-    int request_index = 0;
+    std::size_t request_index = 0;
     while (true)
     {
         std::string line;
@@ -144,17 +145,19 @@ void FdeSession::serve(ModuleESolver::ESolver& solver,
 
         std::string local_error;
         bool handled = false;
+        FdeWarmStartPlan warm_start;
         try
         {
+            warm_start = FdeWarmStart::plan(request_index);
             handled = run_request<double, double>(solver,
                                                    unit_cell,
                                                    command,
-                                                   request_index)
+                                                   warm_start)
                       || run_request<std::complex<double>, double>(
-                          solver, unit_cell, command, request_index)
+                          solver, unit_cell, command, warm_start)
                       || run_request<std::complex<double>,
                                      std::complex<double> >(
-                          solver, unit_cell, command, request_index);
+                          solver, unit_cell, command, warm_start);
             if (!handled)
             {
                 throw std::runtime_error(
@@ -194,7 +197,9 @@ void FdeSession::serve(ModuleESolver::ESolver& solver,
 #endif
         if (rank == 0)
         {
-            std::cout << "FDE_SESSION_DONE " << command.request_id << std::endl;
+            std::cout << "FDE_SESSION_DONE " << command.request_id << ' '
+                      << warm_start.mode << ' ' << warm_start.ionic_step
+                      << std::endl;
         }
         ++request_index;
     }

@@ -37,6 +37,7 @@ task = ("embedded_scf" if request_config is not None
 print("OMP_NUM_THREADS=" + os.environ.get("OMP_NUM_THREADS", ""))
 if task == "embedded_session":
     print("FDE_SESSION_READY 1", flush=True)
+    request_index = 0
     for command in sys.stdin:
         fields = command.split()
         if fields == ["STOP"]:
@@ -53,7 +54,11 @@ if task == "embedded_session":
         if completed.returncode != 0:
             print("FDE_SESSION_ERROR " + fields[1] + " child failed", flush=True)
             raise SystemExit(2)
-        print("FDE_SESSION_DONE " + fields[1], flush=True)
+        mode = ("density_seed" if request_index == 0
+                else "resident_ao_density_matrix_and_orbitals")
+        print("FDE_SESSION_DONE " + fields[1] + " " + mode + " "
+              + str(request_index), flush=True)
+        request_index += 1
     raise SystemExit(0)
 if task == "diabatic_postprocess":
     config = Path(value(cwd / "INPUT", "fde_config"))
@@ -300,6 +305,10 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 self.assertTrue(performance["session_reused"])
                 self.assertEqual(performance["execution_mode"],
                                  "persistent_session")
+                self.assertEqual(
+                    performance["warm_start_mode"],
+                    "resident_ao_density_matrix_and_orbitals")
+                self.assertEqual(performance["abacus_ionic_step"], 1)
 
     def test_gpu_controls_reach_every_fragment_input(self):
         with tempfile.TemporaryDirectory() as directory:
