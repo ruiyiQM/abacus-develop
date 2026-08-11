@@ -25,7 +25,7 @@
 #include "source_io/module_output/print_info.h"
 #include "source_lcao/rho_tau_lcao.h" // mohan add 20251024
 #include "source_lcao/LCAO_set.h" // mohan add 20251111
-#include "source_lcao/module_fde/fde_lcao_driver.h"
+#include "source_lcao/module_fde/embedding/fde_lcao_driver.h"
 #include "source_psi/setup_psi.h" // use Setup_Psi for deallocate_psi
 
 #include <stdexcept>

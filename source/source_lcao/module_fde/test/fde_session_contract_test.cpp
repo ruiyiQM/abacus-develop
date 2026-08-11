@@ -1,5 +1,5 @@
 #include "../runtime/fde_session_contract.h"
-#include "../fde_runtime_config.h"
+#include "../runtime/fde_runtime_config.h"
 
 #include <gtest/gtest.h>
 

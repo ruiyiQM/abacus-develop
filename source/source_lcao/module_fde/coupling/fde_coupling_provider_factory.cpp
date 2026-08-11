@@ -1,7 +1,7 @@
 #include "fde_coupling_provider_factory.h"
 
 #include "fde_coupling_policy.h"
-#include "../fde_linearized_state.h"
+#include "fde_linearized_state.h"
 
 #include <stdexcept>
 

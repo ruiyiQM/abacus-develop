@@ -1,8 +1,8 @@
 #ifndef FDE_COUPLING_PROVIDER_FACTORY_H
 #define FDE_COUPLING_PROVIDER_FACTORY_H
 
-#include "../fde_electronic_coupling.h"
-#include "../fde_linearized_state.h"
+#include "fde_electronic_coupling.h"
+#include "fde_linearized_state.h"
 
 #include <memory>
 #include <string>

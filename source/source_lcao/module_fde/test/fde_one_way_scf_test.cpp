@@ -1,4 +1,4 @@
-#include "../fde_one_way_scf.h"
+#include "../embedding/fde_one_way_scf.h"
 
 #include <gtest/gtest.h>
 

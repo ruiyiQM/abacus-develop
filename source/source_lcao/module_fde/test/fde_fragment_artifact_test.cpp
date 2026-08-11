@@ -1,4 +1,4 @@
-#include "../fde_fragment_artifact.h"
+#include "../io/fde_fragment_artifact.h"
 
 #include <gtest/gtest.h>
 

@@ -1,0 +1,150 @@
+#ifndef FDE_EMBEDDING_SEMILOCAL_FUNCTIONAL_H
+#define FDE_EMBEDDING_SEMILOCAL_FUNCTIONAL_H
+
+#include <cstddef>
+#include <vector>
+
+namespace fde
+{
+
+enum class KineticFunctional
+{
+    ThomasFermi,
+    Pw91k,
+    RevApbek,
+    Lc94Pw91k = Pw91k
+};
+
+const char* kinetic_functional_name(KineticFunctional functional);
+
+struct UniformGrid
+{
+    std::size_t x;
+    std::size_t y;
+    std::size_t z;
+    double spacing_x_bohr;
+    double spacing_y_bohr;
+    double spacing_z_bohr;
+};
+
+struct SpinDensity
+{
+    std::vector<double> alpha_bohr3;
+    std::vector<double> beta_bohr3;
+};
+
+struct SpinPotential
+{
+    std::vector<double> alpha_ry;
+    std::vector<double> beta_ry;
+};
+
+struct NonadditiveFunctionalResult
+{
+    double energy_ry;
+    SpinPotential active_potential;
+    SpinPotential frozen_potential;
+};
+
+/** Frozen-only value reused while an active subsystem SCF changes its density. */
+struct FrozenSemilocalCache
+{
+    double energy_ry;
+    SpinPotential potential_ry;
+};
+
+/** Derivatives on the local part of a real-space grid. */
+class GridDifferentialOperator
+{
+  public:
+    virtual ~GridDifferentialOperator() {}
+
+    virtual std::size_t local_size() const = 0;
+    /** True when pointwise semilocal work should use the CUDA backend. */
+    virtual bool uses_gpu() const { return false; }
+    /** Return true only when every rank participating in grid transforms agrees. */
+    virtual bool all_processes(bool local_condition) const
+    {
+        return local_condition;
+    }
+    /**
+     * Evaluate a scalar kinetic functional without staging intermediate
+     * gradients or fluxes through host memory. Return false when unavailable.
+     */
+    virtual bool evaluate_kinetic_on_gpu(
+        const std::vector<double>& density,
+        KineticFunctional functional,
+        double density_floor,
+        double volume_element,
+        std::vector<double>& potential,
+        double& energy_hartree) const
+    {
+        (void)density;
+        (void)functional;
+        (void)density_floor;
+        (void)volume_element;
+        (void)potential;
+        (void)energy_hartree;
+        return false;
+    }
+    virtual void gradient(const std::vector<double>& values,
+                          std::vector<double>& gradient_x,
+                          std::vector<double>& gradient_y,
+                          std::vector<double>& gradient_z) const = 0;
+    virtual std::vector<double> divergence(const std::vector<double>& vector_x,
+                                           const std::vector<double>& vector_y,
+                                           const std::vector<double>& vector_z) const = 0;
+};
+
+class SemilocalFunctional
+{
+  public:
+    static FrozenSemilocalCache prepare_frozen_kinetic(
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const KineticFunctional functional,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator);
+
+    static NonadditiveFunctionalResult nonadditive_kinetic(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const KineticFunctional functional,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator = nullptr);
+
+    static NonadditiveFunctionalResult nonadditive_kinetic_cached(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const KineticFunctional functional,
+        const double density_floor_bohr3,
+        const FrozenSemilocalCache& frozen_cache,
+        const GridDifferentialOperator* differential_operator);
+
+    static FrozenSemilocalCache prepare_frozen_dirac_exchange(
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator);
+
+    static NonadditiveFunctionalResult nonadditive_dirac_exchange(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const double density_floor_bohr3,
+        const GridDifferentialOperator* differential_operator = nullptr);
+
+    static NonadditiveFunctionalResult nonadditive_dirac_exchange_cached(
+        const SpinDensity& active,
+        const SpinDensity& frozen,
+        const UniformGrid& grid,
+        const double density_floor_bohr3,
+        const FrozenSemilocalCache& frozen_cache,
+        const GridDifferentialOperator* differential_operator);
+};
+
+} // namespace fde
+
+#endif // FDE_EMBEDDING_SEMILOCAL_FUNCTIONAL_H

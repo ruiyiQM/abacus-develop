@@ -1,4 +1,4 @@
-#include "../fde_finite_difference.h"
+#include "../orchestration/fde_finite_difference.h"
 
 #include <gtest/gtest.h>
 

@@ -1,4 +1,4 @@
-#include "../fde_density_artifact.h"
+#include "../io/fde_density_artifact.h"
 
 #include <gtest/gtest.h>
 

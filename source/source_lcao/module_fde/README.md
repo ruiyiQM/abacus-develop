@@ -1,30 +1,36 @@
 # Native FDE module boundaries
 
-`module_fde` is being split incrementally by responsibility. Existing public
-headers remain at the module root so downstream includes do not churn while
-new lifecycle-sensitive code is placed in focused subdirectories.
+`module_fde` is organized as four primary responsibilities plus one auxiliary
+orchestration layer. The directory name describes the scientific/lifecycle
+owner of a file; CPU and GPU implementations of the same operation deliberately
+live together.
 
-Current boundary:
+## Four primary areas and one auxiliary area
 
-- `runtime/`: persistent worker protocol, immutable-session contract, and
-  future task-local lifecycle helpers;
-- `restart/`: resident AO density-matrix/orbital warm-start policy;
-- `functionals/`: the fragment/embedding XC policy and future provider
-  factories;
-- `coupling/`: runtime provider selection/factory and coupling validation
-  policy;
-- `gpu/`: CUDA kernels and the per-`PotFde` resident density/FFT workspace;
-- root artifact and state files: versioned density, determinant, band,
-  fragment, and linearized-state formats;
-- root embedding files: grid partitioning, semilocal functionals, `PotFde`,
-  projected Hamiltonians, and the ABACUS LCAO bridge;
-- root coupling/energy files: diabatic assembly, coupling, canonical ledgers,
-  freeze--thaw maps, and PES utilities.
+- `io/`: versioned density, determinant, fragment, and k-point band artifacts,
+  including validation and serialization. This layer owns durable formats, not
+  SCF policy.
+- `runtime/`: input/state configuration, solver selection, persistent-session
+  protocol and contract, and resident AO density-matrix/orbital warm starts.
+  This layer owns the lifetime of an embedded calculation.
+- `embedding/`: one embedded single-point calculation. It contains the ABACUS
+  LCAO/Gint bridge, AO projection and projected eigensolvers, grid partitioning,
+  spin-density handling, `PotFde`, NAKE/XC evaluators, forces, and their CUDA
+  kernels. There are intentionally no separate `functionals/` or `gpu/`
+  subdirectories: an implementation stays beside the scientific operation it
+  accelerates.
+- `coupling/`: determinant overlap and transition densities, coupling-provider
+  policy/factory, linearized state models, diabatic assembly/postprocessing,
+  and nonorthogonal multistate solution.
+- `orchestration/` (auxiliary): freeze--thaw scheduling and ledgers,
+  multi-fragment coordination, PES scans, and finite-difference control. It
+  composes primary areas but does not implement the electronic-structure
+  kernels itself.
 
-Planned migrations use `workflow/` only when the corresponding implementation
-is changed. Do not
-move unrelated files merely for directory symmetry: every move must preserve
-the old include path or update all consumers and tests in one commit.
+The module root contains only build/documentation files and compatibility
+headers for the two entry points historically included outside `module_fde`.
+New code should include the owning directory explicitly. Tests mirror the same
+paths, so an accidental cross-boundary move fails at compile time.
 
 ## Persistent-session invariant
 
@@ -45,7 +51,7 @@ SCF. A cached raw component pointer is never dereferenced after
 This boundary is deliberate: reusing a wavefunction or mixing history across
 different active AO spaces would be fast but scientifically invalid.
 
-After the first compatible request, `restart/FdeWarmStart` maps the next
+After the first compatible request, `runtime/FdeWarmStart` maps the next
 request to a positive ABACUS ionic step. LCAO therefore rebuilds request-local
 Hamiltonian/grid state while retaining the resident DMK/DMR and orbital
 coefficients. The new FDE density artifact remains the authoritative real-space

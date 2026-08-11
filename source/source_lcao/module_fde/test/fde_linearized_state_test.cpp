@@ -1,4 +1,4 @@
-#include "../fde_linearized_state.h"
+#include "../coupling/fde_linearized_state.h"
 
 #include <gtest/gtest.h>
 

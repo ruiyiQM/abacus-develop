@@ -1,4 +1,4 @@
-#include "../fde_analytic_force.h"
+#include "../embedding/fde_analytic_force.h"
 
 #include <gtest/gtest.h>
 

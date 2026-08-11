@@ -1,4 +1,4 @@
-#include "../fde_grid_partition.h"
+#include "../embedding/fde_grid_partition.h"
 
 #include <gtest/gtest.h>
 

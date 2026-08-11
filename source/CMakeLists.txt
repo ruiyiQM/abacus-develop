@@ -609,7 +609,7 @@ if(USE_CUDA)
     source_base/kernels/cuda/math_kernel_op.cu
     source_base/kernels/cuda/math_kernel_op_vec.cu
     source_hamilt/module_xc/kernels/cuda/xc_functional_op.cu
-    source_lcao/module_fde/gpu/fde_gpu_kernels.cu
+    source_lcao/module_fde/embedding/fde_gpu_kernels.cu
     source_pw/module_ofdft/kernels/cuda/kedf_wt_gpu.cu
     source_pw/module_pwdft/kernels/cuda/cal_density_real_op.cu
     source_pw/module_pwdft/kernels/cuda/mul_potential_op.cu

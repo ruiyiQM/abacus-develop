@@ -1,4 +1,4 @@
-#include "../fde_electronic_coupling.h"
+#include "../coupling/fde_electronic_coupling.h"
 
 #include <gtest/gtest.h>
 

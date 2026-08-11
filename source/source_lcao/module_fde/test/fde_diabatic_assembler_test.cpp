@@ -1,4 +1,4 @@
-#include "../fde_diabatic_assembler.h"
+#include "../coupling/fde_diabatic_assembler.h"
 
 #include <gtest/gtest.h>
 

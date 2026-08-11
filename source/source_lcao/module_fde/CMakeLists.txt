@@ -1,45 +1,45 @@
 set(FDE_LCAO_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gamma_backend.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_abacus_gint_integrator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_analytic_force.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_ao_projection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_abacus_gamma_backend.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_abacus_gint_integrator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_analytic_force.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_ao_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_coupling_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_coupling_provider_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_density_artifact.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_determinant_artifact.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_diabatic_assembler.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_diabatic_postprocess.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_electronic_coupling.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_energy_ledger.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_finite_difference.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_fragment_artifact.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_freeze_thaw.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_grid_partition.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_kpoint_band_artifact.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_libxc_pbe_provider.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_linearized_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_lcao_driver.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_energy.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_multi_fragment_freeze_thaw.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_multistate_solver.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_one_way_scf.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_pes_scan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_potential_evaluator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_projected_hamiltonian.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_pw_pool_collectives.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_pw_grid_differential.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_runtime_config.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_semilocal_functional.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_solver_policy.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_spin_density.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fde_subspace_solver.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/functionals/fde_xc_policy.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/pot_fde.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/restart/fde_warm_start.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_diabatic_assembler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_diabatic_postprocess.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_electronic_coupling.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_linearized_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_multistate_solver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_grid_partition.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_lcao_driver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_libxc_pbe_provider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_one_way_scf.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_potential_evaluator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_projected_hamiltonian.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_pw_grid_differential.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_pw_pool_collectives.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_semilocal_functional.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_spin_density.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_subspace_solver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_xc_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding/pot_fde.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/io/fde_density_artifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/io/fde_determinant_artifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/io/fde_fragment_artifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/io/fde_kpoint_band_artifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_energy_ledger.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_finite_difference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_freeze_thaw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_multi_fragment_energy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_multi_fragment_freeze_thaw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/orchestration/fde_pes_scan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_runtime_config.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session_contract.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_solver_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_warm_start.cpp
     PARENT_SCOPE
 )
 

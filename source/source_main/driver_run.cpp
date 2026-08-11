@@ -12,7 +12,7 @@
 #include "source_base/kernels/math_kernel_op.h"
 #include "source_hsolver/kernels/hegvd_op.h"
 #ifdef __LCAO
-#include "source_lcao/module_fde/fde_diabatic_postprocess.h"
+#include "source_lcao/module_fde/coupling/fde_diabatic_postprocess.h"
 #include "source_lcao/module_fde/runtime/fde_session.h"
 #endif
 

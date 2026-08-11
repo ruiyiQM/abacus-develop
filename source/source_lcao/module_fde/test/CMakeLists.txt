@@ -1,13 +1,13 @@
 AddTest(
   TARGET MODULE_FDE_ao_projection
-  SOURCES fde_ao_projection_test.cpp ../fde_ao_projection.cpp
+  SOURCES fde_ao_projection_test.cpp ../embedding/fde_ao_projection.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_abacus_gamma_backend
   LIBS parameter ${math_libs} psi base device
   SOURCES fde_abacus_gamma_backend_test.cpp
-    ../fde_abacus_gamma_backend.cpp
+    ../embedding/fde_abacus_gamma_backend.cpp
     ../../../source_hamilt/module_hcontainer/base_matrix.cpp
     ../../../source_hamilt/module_hcontainer/hcontainer.cpp
     ../../../source_hamilt/module_hcontainer/atom_pair.cpp
@@ -18,93 +18,93 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_analytic_force
   SOURCES fde_analytic_force_test.cpp
-    ../fde_analytic_force.cpp
-    ../fde_potential_evaluator.cpp
-    ../fde_semilocal_functional.cpp
+    ../embedding/fde_analytic_force.cpp
+    ../embedding/fde_potential_evaluator.cpp
+    ../embedding/fde_semilocal_functional.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_state
-  SOURCES fde_state_test.cpp ../fde_state.cpp
+  SOURCES fde_state_test.cpp ../runtime/fde_state.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_runtime_config
   SOURCES fde_runtime_config_test.cpp
-    ../fde_runtime_config.cpp
-    ../fde_state.cpp
+    ../runtime/fde_runtime_config.cpp
+    ../runtime/fde_state.cpp
     ../coupling/fde_coupling_policy.cpp
-    ../functionals/fde_xc_policy.cpp
+    ../embedding/fde_xc_policy.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_solver_policy
-  SOURCES fde_solver_policy_test.cpp ../fde_solver_policy.cpp
+  SOURCES fde_solver_policy_test.cpp ../runtime/fde_solver_policy.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_projected_hamiltonian
   SOURCES fde_projected_hamiltonian_test.cpp
-    ../fde_projected_hamiltonian.cpp
+    ../embedding/fde_projected_hamiltonian.cpp
     ../../../source_base/parallel_2d.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_density_artifact
-  SOURCES fde_density_artifact_test.cpp ../fde_density_artifact.cpp
+  SOURCES fde_density_artifact_test.cpp ../io/fde_density_artifact.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_kpoint_band_artifact
-  SOURCES fde_kpoint_band_artifact_test.cpp ../fde_kpoint_band_artifact.cpp
+  SOURCES fde_kpoint_band_artifact_test.cpp ../io/fde_kpoint_band_artifact.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_grid_partition
   SOURCES fde_grid_partition_test.cpp
-    ../fde_grid_partition.cpp
-    ../fde_density_artifact.cpp
+    ../embedding/fde_grid_partition.cpp
+    ../io/fde_density_artifact.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_fragment_artifact
   SOURCES fde_fragment_artifact_test.cpp
-    ../fde_fragment_artifact.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
+    ../io/fde_fragment_artifact.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_determinant_artifact
   SOURCES fde_determinant_artifact_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_diabatic_assembler
   SOURCES fde_diabatic_assembler_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
-    ../fde_diabatic_assembler.cpp
-    ../fde_electronic_coupling.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
+    ../coupling/fde_diabatic_assembler.cpp
+    ../coupling/fde_electronic_coupling.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_diabatic_postprocess
   SOURCES fde_diabatic_postprocess_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
-    ../fde_diabatic_assembler.cpp
-    ../fde_diabatic_postprocess.cpp
-    ../fde_electronic_coupling.cpp
-    ../fde_linearized_state.cpp
-    ../fde_multistate_solver.cpp
-    ../fde_runtime_config.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
+    ../coupling/fde_diabatic_assembler.cpp
+    ../coupling/fde_diabatic_postprocess.cpp
+    ../coupling/fde_electronic_coupling.cpp
+    ../coupling/fde_linearized_state.cpp
+    ../coupling/fde_multistate_solver.cpp
+    ../runtime/fde_runtime_config.cpp
     ../coupling/fde_coupling_policy.cpp
     ../coupling/fde_coupling_provider_factory.cpp
-    ../functionals/fde_xc_policy.cpp
-    ../fde_state.cpp
+    ../embedding/fde_xc_policy.cpp
+    ../runtime/fde_state.cpp
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -129,9 +129,9 @@ set_tests_properties(MODULE_FDE_band_folding PROPERTIES
 if(ENABLE_MPI)
   add_executable(MODULE_FDE_pw_pool_collectives_mpi
     fde_pw_pool_collectives_mpi_test.cpp
-    ../fde_grid_partition.cpp
-    ../fde_pw_pool_collectives.cpp
-    ../fde_spin_density.cpp
+    ../embedding/fde_grid_partition.cpp
+    ../embedding/fde_pw_pool_collectives.cpp
+    ../embedding/fde_spin_density.cpp
   )
   target_link_libraries(MODULE_FDE_pw_pool_collectives_mpi PRIVATE
     MPI::MPI_CXX GTest::gtest planewave device base parameter
@@ -153,7 +153,7 @@ if(ENABLE_MPI)
 
   add_executable(MODULE_FDE_projected_hamiltonian_mpi
     fde_projected_hamiltonian_mpi_test.cpp
-    ../fde_projected_hamiltonian.cpp
+    ../embedding/fde_projected_hamiltonian.cpp
     ../../../source_base/parallel_2d.cpp
   )
   target_link_libraries(MODULE_FDE_projected_hamiltonian_mpi PRIVATE
@@ -175,7 +175,7 @@ if(ENABLE_MPI)
 
   add_executable(MODULE_FDE_pw_grid_differential_mpi
     fde_pw_grid_differential_mpi_test.cpp
-    ../fde_pw_grid_differential.cpp
+    ../embedding/fde_pw_grid_differential.cpp
   )
   target_link_libraries(MODULE_FDE_pw_grid_differential_mpi PRIVATE
     MPI::MPI_CXX GTest::gtest planewave device base parameter
@@ -197,9 +197,9 @@ if(ENABLE_MPI)
 
   add_executable(MODULE_FDE_electronic_coupling_mpi
     fde_electronic_coupling_mpi_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
-    ../fde_electronic_coupling.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
+    ../coupling/fde_electronic_coupling.cpp
   )
   target_link_libraries(MODULE_FDE_electronic_coupling_mpi PRIVATE
     MPI::MPI_CXX GTest::gtest_main GTest::gmock_main
@@ -222,101 +222,101 @@ endif()
 AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
-    ../fde_electronic_coupling.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
+    ../coupling/fde_electronic_coupling.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_linearized_state
   SOURCES fde_linearized_state_test.cpp
-    ../fde_ao_projection.cpp
-    ../fde_determinant_artifact.cpp
-    ../fde_electronic_coupling.cpp
-    ../fde_linearized_state.cpp
+    ../embedding/fde_ao_projection.cpp
+    ../io/fde_determinant_artifact.cpp
+    ../coupling/fde_electronic_coupling.cpp
+    ../coupling/fde_linearized_state.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_semilocal_functional
-  SOURCES fde_semilocal_functional_test.cpp ../fde_semilocal_functional.cpp
+  SOURCES fde_semilocal_functional_test.cpp ../embedding/fde_semilocal_functional.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_subspace_solver
-  SOURCES fde_subspace_solver_test.cpp ../fde_subspace_solver.cpp ../fde_ao_projection.cpp
+  SOURCES fde_subspace_solver_test.cpp ../embedding/fde_subspace_solver.cpp ../embedding/fde_ao_projection.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_energy_ledger
-  SOURCES fde_energy_ledger_test.cpp ../fde_energy_ledger.cpp
+  SOURCES fde_energy_ledger_test.cpp ../orchestration/fde_energy_ledger.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_potential
   LIBS $<$<BOOL:${ENABLE_LIBXC}>:Libxc::xc>
   SOURCES fde_potential_test.cpp
-    ../fde_libxc_pbe_provider.cpp
-    ../fde_potential_evaluator.cpp
-    ../fde_semilocal_functional.cpp
+    ../embedding/fde_libxc_pbe_provider.cpp
+    ../embedding/fde_potential_evaluator.cpp
+    ../embedding/fde_semilocal_functional.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_one_way_scf
   SOURCES fde_one_way_scf_test.cpp
-    ../fde_one_way_scf.cpp
-    ../fde_density_artifact.cpp
-    ../fde_potential_evaluator.cpp
-    ../fde_semilocal_functional.cpp
-    ../fde_subspace_solver.cpp
-    ../fde_ao_projection.cpp
+    ../embedding/fde_one_way_scf.cpp
+    ../io/fde_density_artifact.cpp
+    ../embedding/fde_potential_evaluator.cpp
+    ../embedding/fde_semilocal_functional.cpp
+    ../embedding/fde_subspace_solver.cpp
+    ../embedding/fde_ao_projection.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_freeze_thaw
   SOURCES fde_freeze_thaw_test.cpp
-    ../fde_freeze_thaw.cpp
-    ../fde_density_artifact.cpp
-    ../fde_energy_ledger.cpp
+    ../orchestration/fde_freeze_thaw.cpp
+    ../io/fde_density_artifact.cpp
+    ../orchestration/fde_energy_ledger.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_multi_fragment_freeze_thaw
   SOURCES fde_multi_fragment_freeze_thaw_test.cpp
-    ../fde_density_artifact.cpp
-    ../fde_multi_fragment_energy.cpp
-    ../fde_multi_fragment_freeze_thaw.cpp
+    ../io/fde_density_artifact.cpp
+    ../orchestration/fde_multi_fragment_energy.cpp
+    ../orchestration/fde_multi_fragment_freeze_thaw.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_multistate_solver
-  SOURCES fde_multistate_solver_test.cpp ../fde_multistate_solver.cpp
+  SOURCES fde_multistate_solver_test.cpp ../coupling/fde_multistate_solver.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_pes_scan
   SOURCES fde_pes_scan_test.cpp
-    ../fde_pes_scan.cpp
-    ../fde_density_artifact.cpp
-    ../fde_energy_ledger.cpp
+    ../orchestration/fde_pes_scan.cpp
+    ../io/fde_density_artifact.cpp
+    ../orchestration/fde_energy_ledger.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_finite_difference
   SOURCES fde_finite_difference_test.cpp
-    ../fde_finite_difference.cpp
-    ../fde_density_artifact.cpp
-    ../fde_energy_ledger.cpp
+    ../orchestration/fde_finite_difference.cpp
+    ../io/fde_density_artifact.cpp
+    ../orchestration/fde_energy_ledger.cpp
 )
 
 AddTest(
   TARGET MODULE_FDE_session_contract
   SOURCES fde_session_contract_test.cpp
     ../runtime/fde_session_contract.cpp
-    ../fde_runtime_config.cpp
+    ../runtime/fde_runtime_config.cpp
     ../coupling/fde_coupling_policy.cpp
-    ../functionals/fde_xc_policy.cpp
-    ../fde_state.cpp
-    ../fde_semilocal_functional.cpp
+    ../embedding/fde_xc_policy.cpp
+    ../runtime/fde_state.cpp
+    ../embedding/fde_semilocal_functional.cpp
 )
 
 AddTest(
@@ -328,5 +328,5 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_warm_start
   SOURCES fde_warm_start_test.cpp
-    ../restart/fde_warm_start.cpp
+    ../runtime/fde_warm_start.cpp
 )

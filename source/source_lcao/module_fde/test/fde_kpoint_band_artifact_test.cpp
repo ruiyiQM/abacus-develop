@@ -1,4 +1,4 @@
-#include "../fde_kpoint_band_artifact.h"
+#include "../io/fde_kpoint_band_artifact.h"
 
 #include <gtest/gtest.h>
 

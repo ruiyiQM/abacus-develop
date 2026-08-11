@@ -1,4 +1,4 @@
-#include "../fde_runtime_config.h"
+#include "../runtime/fde_runtime_config.h"
 
 #include <gtest/gtest.h>
 

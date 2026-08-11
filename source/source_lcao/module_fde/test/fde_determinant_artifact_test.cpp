@@ -1,4 +1,4 @@
-#include "../fde_determinant_artifact.h"
+#include "../io/fde_determinant_artifact.h"
 
 #include <gtest/gtest.h>
 

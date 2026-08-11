@@ -1,4 +1,4 @@
-#include "../fde_solver_policy.h"
+#include "../runtime/fde_solver_policy.h"
 
 #ifdef __ELPA
 #include "source_hsolver/diago_elpa.h"

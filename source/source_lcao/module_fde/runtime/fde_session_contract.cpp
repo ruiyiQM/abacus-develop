@@ -1,6 +1,6 @@
 #include "fde_session_contract.h"
 
-#include "source_lcao/module_fde/fde_runtime_config.h"
+#include "source_lcao/module_fde/runtime/fde_runtime_config.h"
 
 #include <stdexcept>
 #include <string>

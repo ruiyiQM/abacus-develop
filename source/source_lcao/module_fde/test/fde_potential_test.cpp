@@ -1,4 +1,4 @@
-#include "../fde_potential_evaluator.h"
+#include "../embedding/fde_potential_evaluator.h"
 
 #include <gtest/gtest.h>
 

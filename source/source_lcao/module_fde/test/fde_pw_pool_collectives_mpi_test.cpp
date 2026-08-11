@@ -1,6 +1,6 @@
-#include "../fde_grid_partition.h"
-#include "../fde_pw_pool_collectives.h"
-#include "../fde_spin_density.h"
+#include "../embedding/fde_grid_partition.h"
+#include "../embedding/fde_pw_pool_collectives.h"
+#include "../embedding/fde_spin_density.h"
 #include "source_base/matrix3.h"
 #include "source_basis/module_pw/pw_basis.h"
 

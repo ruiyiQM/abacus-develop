@@ -1,4 +1,4 @@
-#include "../fde_multistate_solver.h"
+#include "../coupling/fde_multistate_solver.h"
 
 #include <gtest/gtest.h>
 

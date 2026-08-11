@@ -1,4 +1,4 @@
-#include "../fde_subspace_solver.h"
+#include "../embedding/fde_subspace_solver.h"
 
 #include <gtest/gtest.h>
 

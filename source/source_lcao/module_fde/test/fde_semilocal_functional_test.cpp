@@ -1,4 +1,4 @@
-#include "../fde_semilocal_functional.h"
+#include "../embedding/fde_semilocal_functional.h"
 
 #include <gtest/gtest.h>
 

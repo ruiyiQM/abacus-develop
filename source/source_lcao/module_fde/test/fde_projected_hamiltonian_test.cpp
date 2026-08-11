@@ -1,4 +1,4 @@
-#include "../fde_projected_hamiltonian.h"
+#include "../embedding/fde_projected_hamiltonian.h"
 
 #include <gtest/gtest.h>
 
