@@ -108,6 +108,7 @@ void ESolver_KS_LCAO<TK, TR>::before_all_runners(BaseCell& basecell, const Input
 
     ModuleBase::TITLE("ESolver_KS_LCAO", "before_all_runners");
     ModuleBase::timer::start("ESolver_KS_LCAO", "before_all_runners");
+    this->fde_session_mode_ = inp.fde_task == "embedded_session";
 
     // 0) init EXX - moved from constructor to ensure GlobalC::exx_info.info_global is already set
     this->exx_nao.init(ucell);
@@ -377,17 +378,19 @@ void ESolver_KS_LCAO<TK, TR>::after_all_runners(BaseCell& basecell)
     ESolver_KS::after_all_runners(ucell);
 
     auto* hamilt_lcao = dynamic_cast<hamilt::HamiltLCAO<TK, TR>*>(this->p_hamilt);
-    if(!hamilt_lcao)
+    if (!hamilt_lcao && !this->fde_session_mode_)
     {
 	    ModuleBase::WARNING_QUIT("ESolver_KS_LCAO::after_all_runners","p_hamilt does not exist");
     }
-
-    ModuleIO::ctrl_runner_lcao<TK, TR>(ucell,
-		    PARAM.inp, this->kv, this->pelec, this->dmat, this->pv, this->Pgrid, 
-		    this->gd, this->psi, this->chr, hamilt_lcao,
-		    this->two_center_bundle_,
-		    this->orb_, this->pw_rho, this->pw_rhod,
-		    this->sf, this->locpp.vloc, this->exx_nao, this->solvent);
+    if (hamilt_lcao)
+    {
+        ModuleIO::ctrl_runner_lcao<TK, TR>(ucell,
+                PARAM.inp, this->kv, this->pelec, this->dmat, this->pv, this->Pgrid,
+                this->gd, this->psi, this->chr, hamilt_lcao,
+                this->two_center_bundle_,
+                this->orb_, this->pw_rho, this->pw_rhod,
+                this->sf, this->locpp.vloc, this->exx_nao, this->solvent);
+    }
 
 
 #ifdef __MPI
@@ -398,6 +401,21 @@ void ESolver_KS_LCAO<TK, TR>::after_all_runners(BaseCell& basecell)
 #endif
 
     ModuleBase::timer::end("ESolver_KS_LCAO", "after_all_runners");
+}
+
+template <typename TK, typename TR>
+void ESolver_KS_LCAO<TK, TR>::reload_fde_session(
+    const std::string& config_path,
+    const UnitCell& unit_cell)
+{
+    if (!this->fde_driver_)
+    {
+        throw std::runtime_error(
+            "FDE session reload requires an initialized FdeLcaoDriver");
+    }
+    this->fde_driver_->reload_session_config(config_path,
+                                             unit_cell,
+                                             this->pv);
 }
 
 template <typename TK, typename TR>

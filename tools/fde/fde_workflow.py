@@ -15,7 +15,13 @@ import shutil
 import subprocess
 import sys
 import time
+import threading
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+
+_TOOLS_DIRECTORY = str(Path(__file__).resolve().parent)
+if _TOOLS_DIRECTORY not in sys.path:
+    sys.path.insert(0, _TOOLS_DIRECTORY)
+from fde_session import FdeSessionProcess, default_environment
 
 
 class WorkflowError(RuntimeError):
@@ -178,6 +184,28 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     if not isinstance(controls, dict):
         raise WorkflowError("controls must be a JSON object")
     canonical_kedf_name(controls.get("kedf", "pw91k"))
+    execution_mode = _token(
+        controls.get("execution_mode", "process"), "execution_mode")
+    if execution_mode not in ("process", "persistent_session"):
+        raise WorkflowError(
+            "execution_mode must be process or persistent_session")
+    if execution_mode == "persistent_session":
+        session_command = spec.get("session_command", command)
+        if (not isinstance(session_command, list) or not session_command
+                or not all(isinstance(token, str) and token
+                           for token in session_command)):
+            raise WorkflowError(
+                "session_command must be a nonempty JSON string array")
+        if (Path(session_command[0]).name == "srun"
+                and "--overlap" not in session_command):
+            raise WorkflowError(
+                "persistent Euler srun workers require --overlap in session_command")
+        for name, default in (("session_startup_timeout_seconds", 300.0),
+                              ("session_stop_timeout_seconds", 60.0)):
+            value = controls.get(name, default)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value)) or float(value) <= 0.0):
+                raise WorkflowError(f"{name} must be finite and positive")
     solver = _token(controls.get("ks_solver", "lapack"), "ks_solver")
     if solver not in ("lapack", "genelpa", "elpa", "scalapack_gvx",
                       "cusolver"):
@@ -253,11 +281,24 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     labels = [_label(fragment["label"], "fragment label") for fragment in fragments]
     if len(set(labels)) != len(labels):
         raise WorkflowError("fragment labels must be unique")
+    maximum_sessions = controls.get("maximum_persistent_sessions", len(labels))
+    if (isinstance(maximum_sessions, bool)
+            or not isinstance(maximum_sessions, int)
+            or maximum_sessions < 1):
+        raise WorkflowError(
+            "maximum_persistent_sessions must be a positive integer")
     update_order = controls.get("update_order", labels)
     if (not isinstance(update_order, list) or len(update_order) != len(labels)
             or not all(isinstance(label, str) for label in update_order)
             or set(update_order) != set(labels)):
         raise WorkflowError("update_order must be a permutation of fragment labels")
+    if (execution_mode == "persistent_session"
+            and str(controls.get("update_scheme", "auto")) == "jacobi"
+            and int(controls.get("jacobi_parallelism", 1)) > 1
+            and maximum_sessions < len(labels)):
+        raise WorkflowError(
+            "parallel Jacobi persistent sessions require one resident worker "
+            "per fragment")
     update_scheme = _token(
         controls.get("update_scheme", "auto"), "update_scheme").lower()
     if update_scheme not in ("auto", "gauss_seidel", "jacobi"):
@@ -1302,6 +1343,105 @@ def prune_completed_cycles(state_directory: Path,
             shutil.rmtree(candidate)
 
 
+class WorkflowSessionPool:
+    """Keep compatible fixed-fragment ABACUS workers alive across FT cycles."""
+
+    def __init__(self,
+                 spec: Mapping[str, object],
+                 state_directory: Path):
+        controls = dict(spec.get("controls", {}))
+        command = spec.get("session_command", spec["abacus_command"])
+        if not isinstance(command, list):
+            raise WorkflowError("session_command must be a JSON string array")
+        self.command = list(command)
+        self.state_directory = state_directory
+        self.maximum_sessions = int(controls.get(
+            "maximum_persistent_sessions", len(spec["fragments"])))
+        self.startup_timeout = float(controls.get(
+            "session_startup_timeout_seconds", 300.0))
+        self.stop_timeout = float(controls.get(
+            "session_stop_timeout_seconds", 60.0))
+        self.workers: Dict[str, Dict[str, object]] = {}
+        self.generations: Dict[str, int] = {}
+        self.clock = 0
+        self.lock = threading.Lock()
+
+    def _close_worker(self, label: str) -> None:
+        record = self.workers.pop(label)
+        worker = record["worker"]
+        assert isinstance(worker, FdeSessionProcess)
+        worker.close()
+
+    def _next_directory(self, label: str) -> Path:
+        generation = self.generations.get(label, 0)
+        root = self.state_directory / "session-workers"
+        while True:
+            generation += 1
+            candidate = root / f"{label}-generation-{generation:03d}"
+            if not candidate.exists():
+                self.generations[label] = generation
+                return candidate
+
+    def execute(self,
+                active_label: str,
+                signature: str,
+                request_id: str,
+                job_directory: Path,
+                config_path: Path) -> Dict[str, object]:
+        with self.lock:
+            existing = self.workers.get(active_label)
+            if existing is not None and existing["signature"] != signature:
+                self._close_worker(active_label)
+                existing = None
+            if existing is None:
+                if len(self.workers) >= self.maximum_sessions:
+                    evicted_label = min(
+                        self.workers,
+                        key=lambda label: int(self.workers[label]["last_used"]))
+                    self._close_worker(evicted_label)
+                session_directory = self._next_directory(active_label)
+                shutil.copytree(job_directory, session_directory)
+                worker = FdeSessionProcess(
+                    self.command,
+                    session_directory,
+                    default_environment(),
+                    self.startup_timeout,
+                    self.stop_timeout,
+                )
+                try:
+                    worker.start()
+                except BaseException:
+                    worker.close()
+                    raise
+                existing = {
+                    "signature": signature,
+                    "worker": worker,
+                    "directory": session_directory.resolve(),
+                    "last_used": self.clock,
+                }
+                self.workers[active_label] = existing
+            self.clock += 1
+            existing["last_used"] = self.clock
+            worker = existing["worker"]
+            session_directory = existing["directory"]
+        assert isinstance(worker, FdeSessionProcess)
+        metrics = worker.run(request_id, config_path.resolve())
+        metrics["session_worker_directory"] = str(session_directory)
+        return metrics
+
+    def close(self) -> None:
+        with self.lock:
+            labels = list(self.workers)
+            for label in labels:
+                self._close_worker(label)
+
+    def __enter__(self) -> "WorkflowSessionPool":
+        return self
+
+    def __exit__(self, _error_type, _error, _traceback) -> None:
+        self.close()
+
+
 def run_fragment_scf(
     spec: Mapping[str, object],
     geometry: Mapping[str, object],
@@ -1312,6 +1452,7 @@ def run_fragment_scf(
     cycle: int,
     schedule: Mapping[str, object],
     neutral_electrons: int,
+    session_pool: WorkflowSessionPool | None,
 ) -> Dict[str, object]:
     controls = dict(spec.get("controls", {}))
     assignment = state["fragments"][active_label]
@@ -1336,12 +1477,14 @@ def run_fragment_scf(
             shutil.rmtree(job_directory)
         shutil.copytree(Path(geometry["template_directory"]), job_directory)
         config_path = job_directory / "FDE_CONFIG"
+        output_prefix = (str((job_directory / "result").resolve())
+                         if session_pool is not None else "result")
         write_runtime_config(config_path,
                              spec,
                              state,
                              active_label,
                              attempt_densities,
-                             "result",
+                             output_prefix,
                              int(schedule["maximum_iterations"]),
                              float(schedule["density_tolerance"]))
         mixing = fragment_mixing_parameters(
@@ -1356,7 +1499,9 @@ def run_fragment_scf(
             "kpar": int(controls.get("kpar", 1)),
             "nelec": spin_parameters["nelec"],
             "nupdown": spin_parameters["nupdown"],
-            "fde_task": "embedded_scf", "fde_config": "FDE_CONFIG",
+            "fde_task": ("embedded_session" if session_pool is not None
+                         else "embedded_scf"),
+            "fde_config": "FDE_CONFIG",
             "scf_nmax": int(schedule["maximum_iterations"]),
             "scf_thr": float(schedule["density_tolerance"]),
         }
@@ -1365,27 +1510,45 @@ def run_fragment_scf(
         log_path = job_directory / "fde_abacus.log"
         environment = dict(os.environ)
         environment.setdefault("OMP_NUM_THREADS", "1")
-        launch_started = time.monotonic()
-        with log_path.open("w", encoding="utf-8") as log:
-            completed = subprocess.run(
-                list(spec["abacus_command"]), cwd=job_directory,
-                env=environment, stdout=log, stderr=subprocess.STDOUT,
-                check=False)
-        wall_time_seconds = time.monotonic() - launch_started
-        launch_metrics: Dict[str, object] = {
-            "schema_version": 1,
-            "retry": retry,
-            "returncode": completed.returncode,
-            "wall_time_seconds": wall_time_seconds,
+        launch_metrics: Dict[str, object]
+        if session_pool is None:
+            launch_started = time.monotonic()
+            with log_path.open("w", encoding="utf-8") as log:
+                completed = subprocess.run(
+                    list(spec["abacus_command"]), cwd=job_directory,
+                    env=environment, stdout=log, stderr=subprocess.STDOUT,
+                    check=False)
+            launch_metrics = {
+                "schema_version": 1,
+                "retry": retry,
+                "returncode": completed.returncode,
+                "wall_time_seconds": time.monotonic() - launch_started,
+            }
+            launch_metrics.update(read_abacus_scf_metrics(job_directory))
+        else:
+            signature = json.dumps(input_parameters,
+                                   sort_keys=True,
+                                   separators=(",", ":"))
+            request_id = f"cycle-{cycle:03d}-{active_label}-retry-{retry:02d}"
+            launch_metrics = session_pool.execute(
+                active_label,
+                signature,
+                request_id,
+                job_directory,
+                config_path,
+            )
+            launch_metrics.update({"schema_version": 1,
+                                   "retry": retry,
+                                   "returncode": 0})
+        launch_metrics.update({
             "maximum_iterations": int(schedule["maximum_iterations"]),
             "density_tolerance": float(schedule["density_tolerance"]),
             "device": str(controls.get("device", "cpu")).lower(),
             "ks_solver": str(controls.get("ks_solver", "lapack")),
             "mixing": mixing,
-        }
-        launch_metrics.update(read_abacus_scf_metrics(job_directory))
+        })
         _atomic_json(job_directory / "fde_performance.json", launch_metrics)
-        if completed.returncode != 0:
+        if int(launch_metrics["returncode"]) != 0:
             raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
         density_path, density_data = select_scf_density(
             job_directory, bool(controls.get("allow_partial_scf", False)))
@@ -1442,10 +1605,11 @@ def run_fragment_scf(
     }
 
 
-def run_state(spec: Mapping[str, object],
-              geometry: Mapping[str, object],
-              state: Mapping[str, object],
-              output_directory: Path) -> Dict[str, object]:
+def _run_state(spec: Mapping[str, object],
+               geometry: Mapping[str, object],
+               state: Mapping[str, object],
+               output_directory: Path,
+               session_pool: WorkflowSessionPool | None) -> Dict[str, object]:
     fragments = list(spec["fragments"])
     labels = [fragment["label"] for fragment in fragments]
     controls = dict(spec.get("controls", {}))
@@ -1506,7 +1670,8 @@ def run_state(spec: Mapping[str, object],
                                     input_paths,
                                     cycle,
                                     schedule,
-                                    neutral[active_label])
+                                    neutral[active_label],
+                                    session_pool)
 
         results: List[Dict[str, object]] = []
         if update_scheme == "gauss_seidel":
@@ -1606,6 +1771,22 @@ def run_state(spec: Mapping[str, object],
         previous_complete_energy = energy if strict_cycle_complete else None
         previous_density_rms = residual
     raise WorkflowError(f"state {state['label']} did not converge in {maximum_cycles} cycles")
+
+
+def run_state(spec: Mapping[str, object],
+              geometry: Mapping[str, object],
+              state: Mapping[str, object],
+              output_directory: Path) -> Dict[str, object]:
+    controls = dict(spec.get("controls", {}))
+    if str(controls.get("execution_mode", "process")) == "process":
+        return _run_state(spec, geometry, state, output_directory, None)
+    state_directory = output_directory / str(state["label"])
+    with WorkflowSessionPool(spec, state_directory) as session_pool:
+        return _run_state(spec,
+                          geometry,
+                          state,
+                          output_directory,
+                          session_pool)
 
 
 def write_postprocess_inputs(spec: Mapping[str, object],

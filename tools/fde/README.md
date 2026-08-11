@@ -30,6 +30,28 @@ For the tested ETH Euler build, single-point and array runners, launcher
 configuration, compact result collection, convergence playbook, and scratch
 retention policy, see `tools/fde/euler/README.md`.
 
+## Persistent subsystem sessions
+
+Set `controls.execution_mode` to `persistent_session` to retain one ABACUS
+worker for every compatible state/active-fragment pair. The workflow sends
+requests over standard input and waits on READY/DONE markers through a reader
+queue; it does not poll files or sleep. A worker is reused only while geometry,
+fragment/state assignment, AO/spin layout, KEDF, SCF limits, and all INPUT
+mixing values are identical. Adaptive-stage and recovery changes therefore
+start a new generation automatically.
+
+For a direct local executable, `session_command` may be omitted and
+`abacus_command` is reused. For Slurm it must be a separate resident-step
+command containing `srun --overlap --exact`; generate it with
+`configure_slurm_workflow.py --persistent-session`. The default resident limit
+is the fragment count. Reducing `maximum_persistent_sessions` saves memory but
+may remove the initialization speedup for sequential Gauss--Seidel updates.
+
+Every per-call `fde_performance.json` records `session_reused`, the worker PID,
+request index, startup time charged to the first request, request wall time,
+and the persistent worker directory. Session logs live outside prunable FT
+cycle directories under `<state>/session-workers/`.
+
 ## Performance records
 
 Every active-fragment directory contains `fde_performance.json` with:

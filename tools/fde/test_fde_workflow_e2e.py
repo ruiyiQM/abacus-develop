@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,8 @@ FAKE_ABACUS = r'''#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 
 
 def value(path, key):
@@ -27,9 +30,31 @@ def value(path, key):
     raise RuntimeError("missing " + key)
 
 
-cwd = Path.cwd()
-task = value(cwd / "INPUT", "fde_task")
+request_config = Path(sys.argv[1]) if len(sys.argv) == 2 else None
+cwd = request_config.parent if request_config is not None else Path.cwd()
+task = ("embedded_scf" if request_config is not None
+        else value(cwd / "INPUT", "fde_task"))
 print("OMP_NUM_THREADS=" + os.environ.get("OMP_NUM_THREADS", ""))
+if task == "embedded_session":
+    print("FDE_SESSION_READY 1", flush=True)
+    for command in sys.stdin:
+        fields = command.split()
+        if fields == ["STOP"]:
+            print("FDE_SESSION_STOPPED", flush=True)
+            raise SystemExit(0)
+        if len(fields) != 3 or fields[0] != "RUN":
+            print("FDE_SESSION_ERROR protocol invalid request", flush=True)
+            raise SystemExit(2)
+        completed = subprocess.run(
+            [sys.executable, __file__, fields[2]],
+            cwd=Path(fields[2]).parent,
+            check=False,
+        )
+        if completed.returncode != 0:
+            print("FDE_SESSION_ERROR " + fields[1] + " child failed", flush=True)
+            raise SystemExit(2)
+        print("FDE_SESSION_DONE " + fields[1], flush=True)
+    raise SystemExit(0)
 if task == "diabatic_postprocess":
     config = Path(value(cwd / "INPUT", "fde_config"))
     text = config.read_text(encoding="utf-8")
@@ -42,7 +67,8 @@ if task == "diabatic_postprocess":
         encoding="utf-8")
     raise SystemExit(0)
 
-config = Path(value(cwd / "INPUT", "fde_config"))
+config = (request_config if request_config is not None
+          else Path(value(cwd / "INPUT", "fde_config")))
 state = value(config, "ACTIVE_STATE")
 fragment = value(config, "ACTIVE_FRAGMENT")
 cycle = int(cwd.parent.name.split("-")[1])
@@ -136,7 +162,8 @@ def write_seed(path: Path, state: str, fragment: str, alpha: int, beta: int) -> 
 
 def prepare_case(root: Path, partial_first_cycle: bool = False,
                  rks: bool = False, adaptive: bool = False,
-                 jacobi_outer: bool = False, gpu: bool = False):
+                 jacobi_outer: bool = False, gpu: bool = False,
+                 persistent_session: bool = False):
     fake_abacus = root / "fake_abacus.py"
     fake_abacus.write_text(FAKE_ABACUS, encoding="utf-8")
     template = root / "template"
@@ -184,6 +211,8 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
         controls.update({"device": "gpu", "ks_solver": "cusolver"})
     if rks:
         controls["spin_mode"] = "rks"
+    if persistent_session:
+        controls["execution_mode"] = "persistent_session"
     if partial_first_cycle:
         controls.update({"allow_partial_scf": True,
                          "inexact_freeze_thaw_cycles": 1,
@@ -242,12 +271,36 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
                         "template_directory": str(template),
                         "initial_densities": initial}],
     }
+    if persistent_session:
+        specification["session_command"] = [sys.executable, str(fake_abacus)]
     spec_path = root / "workflow.json"
     spec_path.write_text(json.dumps(specification), encoding="utf-8")
     return work, spec_path
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_persistent_session_reuses_fixed_fragment_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root, persistent_session=True)
+
+            fde_workflow.run_workflow(spec_path)
+
+            for state in ("reactant", "product"):
+                state_directory = work / "g0" / state
+                workers = sorted((state_directory / "session-workers").glob("*"))
+                self.assertEqual(len(workers), 2)
+                for worker in workers:
+                    log = (worker / "fde_session.log").read_text(encoding="utf-8")
+                    self.assertEqual(log.count("FDE_SESSION_READY"), 1)
+                    self.assertEqual(log.count("FDE_SESSION_DONE"), 2)
+                performance = json.loads(
+                    (state_directory / "cycle-002" / "F"
+                     / "fde_performance.json").read_text(encoding="utf-8"))
+                self.assertTrue(performance["session_reused"])
+                self.assertEqual(performance["execution_mode"],
+                                 "persistent_session")
+
     def test_gpu_controls_reach_every_fragment_input(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

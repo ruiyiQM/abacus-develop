@@ -34,10 +34,13 @@ def launcher(
     binary: Path,
     *,
     exclusive: bool,
+    overlap: bool,
 ) -> List[str]:
     command = [srun]
     if exclusive:
         command.append("--exclusive")
+    if overlap:
+        command.extend(("--overlap", "--exact"))
     command.extend(
         [
             "--cpu-bind=cores",
@@ -59,6 +62,7 @@ def configure(
     postprocess_ranks: int,
     srun: str,
     exclusive: bool,
+    persistent_session: bool,
     work_directory: Path | None,
     device: str | None,
     ks_solver: str | None,
@@ -71,11 +75,17 @@ def configure(
     configured = dict(spec)
     configured["controls"] = dict(spec["controls"])
     configured["abacus_command"] = launcher(
-        srun, ranks, threads, binary, exclusive=exclusive
+        srun, ranks, threads, binary, exclusive=exclusive, overlap=False
     )
     configured["postprocess_command"] = launcher(
-        srun, postprocess_ranks, threads, binary, exclusive=exclusive
+        srun, postprocess_ranks, threads, binary,
+        exclusive=exclusive, overlap=False
     )
+    if persistent_session:
+        configured["controls"]["execution_mode"] = "persistent_session"
+        configured["session_command"] = launcher(
+            srun, ranks, threads, binary, exclusive=False, overlap=True
+        )
     if work_directory is not None:
         configured["work_directory"] = str(work_directory)
     if device is not None:
@@ -92,6 +102,7 @@ def configure(
         "threads_per_rank": threads,
         "postprocess_ranks": postprocess_ranks,
         "exclusive_steps": exclusive,
+        "persistent_session": persistent_session,
         "binary": str(binary),
     }
     if binary_sha256 is not None:
@@ -136,6 +147,11 @@ def arguments() -> argparse.Namespace:
         action="store_true",
         help="make each Slurm step exclusive (required for concurrent Jacobi steps)",
     )
+    parser.add_argument(
+        "--persistent-session",
+        action="store_true",
+        help="reuse fixed-fragment workers with overlapping resident Slurm steps",
+    )
     parser.add_argument("--work-directory", type=Path)
     parser.add_argument("--device", choices=("cpu", "gpu"))
     parser.add_argument("--ks-solver")
@@ -170,6 +186,7 @@ def main() -> int:
         postprocess_ranks=args.postprocess_ranks,
         srun=args.srun,
         exclusive=args.exclusive,
+        persistent_session=args.persistent_session,
         work_directory=work_directory,
         device=args.device,
         ks_solver=args.ks_solver,

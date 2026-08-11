@@ -104,6 +104,18 @@ class FdeWorkflowTest(unittest.TestCase):
         with self.assertRaises(fde_workflow.WorkflowError):
             fde_workflow.validate_spec(spec)
 
+    def test_validates_persistent_session_launcher(self):
+        spec = self.spec()
+        spec["controls"] = {"execution_mode": "persistent_session"}
+        spec["session_command"] = [
+            "/cluster/apps/slurm/bin/srun", "--overlap", "--exact", "abacus"]
+        fde_workflow.validate_spec(spec)
+
+        spec["session_command"] = [
+            "/cluster/apps/slurm/bin/srun", "--exact", "abacus"]
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "--overlap"):
+            fde_workflow.validate_spec(spec)
+
     def test_validates_gpu_solver_pair(self):
         for solver in ("cusolver", "elpa"):
             spec = self.spec()

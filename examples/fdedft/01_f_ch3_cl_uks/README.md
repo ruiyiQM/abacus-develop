@@ -24,8 +24,8 @@ workflow copies them into each active-fragment job and patches `nelec` and
 `nupdown` from the state table.  `workflow.template.json` explicitly selects
 `spin_mode: uks`.
 
-There is intentionally no user-facing `two_fermi` keyword.  For
-`fde_task embedded_scf` with `nspin 2`, ABACUS enables its internal two-Fermi
+There is intentionally no user-facing `two_fermi` keyword. For
+`fde_task embedded_scf` or `embedded_session` with `nspin 2`, ABACUS enables its internal two-Fermi
 path automatically.  Thus `nupdown 0` fixes equal alpha/beta populations for
 a closed-shell fragment instead of reverting to an unconstrained shared Fermi
 level.  Odd-electron fragments retain the requested signed spin population.
@@ -65,6 +65,10 @@ sbatch euler/run_single_point.sbatch
 It uses the GCC/OpenMPI runtime under `/cluster/home/zhourui/abacus-develop`,
 copies this example to a new `/cluster/scratch/$USER/fdedft-example-$JOBID`
 directory, and configures each embedded SCF as 20 MPI ranks x 4 OpenMP threads.
+The committed workflow uses persistent sessions: two fixed-fragment workers
+remain resident per state and alternate on overlapping Slurm steps. This
+retains NAO/PW initialization between compatible FT cycles; use
+`maximum_persistent_sessions: 1` if node memory is more important than reuse.
 Pass a different source root and run root as the first and second positional
 arguments when needed. The more general single-point/array runner and compact
 result collector are described in `tools/fde/euler/README.md`.

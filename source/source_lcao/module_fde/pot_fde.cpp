@@ -61,31 +61,73 @@ PotFde::PotFde(const ModulePW::PW_Basis* rho_basis,
     {
         throw std::invalid_argument("FDE potential requires a density basis and XC provider");
     }
-    if (config_.grid.x != static_cast<std::size_t>(rho_basis->nx)
-        || config_.grid.y != static_cast<std::size_t>(rho_basis->ny)
-        || config_.grid.z != static_cast<std::size_t>(rho_basis->nz))
-    {
-        throw std::invalid_argument("FDE potential grid does not match PW_Basis dimensions");
-    }
-    const std::size_t size = static_cast<std::size_t>(rho_basis->nrxx);
-    if (size != frozen_density_.alpha_bohr3.size()
-        || size != frozen_density_.beta_bohr3.size()
-        || size != frozen_hartree_potential_ry_.size()
-        || static_cast<std::size_t>(rho_basis->nrxx) != size)
-    {
-        throw std::invalid_argument("FDE potential data must match the local ABACUS density slab");
-    }
+    this->validate_frozen_data(frozen_density_,
+                               frozen_hartree_potential_ry_,
+                               config_);
     differential_operator_.reset(new PwGridDifferential(*rho_basis, use_gpu));
     {
         const ScopedPotFdeTimer cache_timer("prepare_frozen_cache");
         frozen_cache_ = EmbeddingPotentialEvaluator::prepare_frozen(
             frozen_density_, config_, *xc_provider_, differential_operator_.get());
     }
+    this->reset_last_result();
+}
+
+void PotFde::validate_frozen_data(
+    const SpinDensity& frozen_density,
+    const std::vector<double>& frozen_hartree_potential_ry,
+    const PotFdeConfig& config) const
+{
+    if (this->rho_basis_ == nullptr
+        || config.grid.x != static_cast<std::size_t>(this->rho_basis_->nx)
+        || config.grid.y != static_cast<std::size_t>(this->rho_basis_->ny)
+        || config.grid.z != static_cast<std::size_t>(this->rho_basis_->nz))
+    {
+        throw std::invalid_argument(
+            "FDE potential grid does not match PW_Basis dimensions");
+    }
+    const std::size_t size
+        = static_cast<std::size_t>(this->rho_basis_->nrxx);
+    if (size != frozen_density.alpha_bohr3.size()
+        || size != frozen_density.beta_bohr3.size()
+        || size != frozen_hartree_potential_ry.size())
+    {
+        throw std::invalid_argument(
+            "FDE potential data must match the local ABACUS density slab");
+    }
+}
+
+void PotFde::reset_last_result()
+{
+    const std::size_t size
+        = static_cast<std::size_t>(this->rho_basis_->nrxx);
     last_result_.potential.alpha_ry.assign(size, 0.0);
     last_result_.potential.beta_ry.assign(size, 0.0);
     last_result_.hartree_cross_energy_ry = 0.0;
     last_result_.nonadditive_kinetic_energy_ry = 0.0;
     last_result_.nonadditive_xc_energy_ry = 0.0;
+}
+
+void PotFde::reset_frozen_density(
+    const SpinDensity& frozen_density,
+    const std::vector<double>& frozen_hartree_potential_ry,
+    const PotFdeConfig& config)
+{
+    this->validate_frozen_data(frozen_density,
+                               frozen_hartree_potential_ry,
+                               config);
+    frozen_density_ = frozen_density;
+    frozen_hartree_potential_ry_ = frozen_hartree_potential_ry;
+    config_ = config;
+    {
+        const ScopedPotFdeTimer cache_timer("prepare_frozen_cache");
+        frozen_cache_ = EmbeddingPotentialEvaluator::prepare_frozen(
+            frozen_density_,
+            config_,
+            *xc_provider_,
+            differential_operator_.get());
+    }
+    this->reset_last_result();
 }
 
 EmbeddingPotentialResult PotFde::evaluate(const SpinDensity& active_density) const

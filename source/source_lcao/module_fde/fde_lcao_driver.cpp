@@ -9,6 +9,7 @@
 #include "fde_spin_density.h"
 #include "fde_fragment_artifact.h"
 #include "pot_fde.h"
+#include "runtime/fde_session_contract.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
 #include "source_basis/module_pw/pw_basis.h"
 #include "source_base/module_external/scalapack_connector.h"
@@ -519,7 +520,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     const UnitCell& unit_cell,
     const Parallel_Orbitals& orbitals)
 {
-    if (input.fde_task != "embedded_scf")
+    if (input.fde_task != "embedded_scf"
+        && input.fde_task != "embedded_session")
     {
         return std::unique_ptr<FdeLcaoDriver>();
     }
@@ -683,6 +685,189 @@ int FdeLcaoDriver::active_beta_electrons() const
     return active_beta_electrons_;
 }
 
+void FdeLcaoDriver::reload_session_config(
+    const std::string& path,
+    const UnitCell& unit_cell,
+    const Parallel_Orbitals& orbitals)
+{
+    const FdeRuntimeConfig requested = read_config_file(path);
+    FdeSessionContract::validate_compatible(config_, requested);
+
+    FrozenDensityArtifact active
+        = read_density_file(requested.active_density_path,
+                            requested.electron_tolerance,
+                            orbitals);
+    if (active.fragment_label != requested.active_fragment
+        || active.state_label != requested.active_state
+        || active.alpha_electrons != active_alpha_electrons_
+        || active.beta_electrons != active_beta_electrons_)
+    {
+        throw std::invalid_argument(
+            "FDE session ACTIVE_DENSITY metadata changed the worker population");
+    }
+
+    std::vector<FrozenDensityArtifact> frozen_environment;
+    std::vector<std::string> seen_labels;
+    for (std::size_t index = 0;
+         index < requested.frozen_density_artifacts.size();
+         ++index)
+    {
+        const RuntimeArtifactPath& artifact_path
+            = requested.frozen_density_artifacts[index];
+        if (artifact_path.label == requested.active_fragment
+            || std::find(seen_labels.begin(),
+                         seen_labels.end(),
+                         artifact_path.label) != seen_labels.end())
+        {
+            throw std::invalid_argument(
+                "FDE session frozen environment labels are invalid");
+        }
+        FrozenDensityArtifact artifact
+            = read_density_file(artifact_path.path,
+                                requested.electron_tolerance,
+                                orbitals);
+        const FragmentDefinition& fragment
+            = requested.fragments[FdeRuntimeConfigIO::fragment_index(
+                requested, artifact_path.label)];
+        const SpinPopulation population
+            = StateDefinition::spin_population(
+                fragment,
+                state_assignment(requested, artifact_path.label));
+        if (artifact.fragment_label != artifact_path.label
+            || artifact.state_label != requested.active_state
+            || artifact.alpha_electrons != population.alpha
+            || artifact.beta_electrons != population.beta)
+        {
+            throw std::invalid_argument(
+                "FDE session frozen-density metadata is incompatible");
+        }
+        frozen_environment.push_back(artifact);
+        seen_labels.push_back(artifact_path.label);
+    }
+    validate_artifact_set(active,
+                          frozen_environment,
+                          requested.electron_tolerance,
+                          orbitals);
+
+    std::vector<double> active_alpha_local;
+    std::vector<double> active_beta_local;
+    std::vector<double> frozen_alpha_local;
+    std::vector<double> frozen_beta_local;
+    std::vector<double> frozen_hartree;
+    if (embedding_potential_ != nullptr)
+    {
+        if (density_basis_ == nullptr || frozen_environment.empty())
+        {
+            throw std::runtime_error(
+                "FDE session embedding potential lost its density basis");
+        }
+        const FrozenDensityArtifact& reference = frozen_environment.front();
+        const DensityGridPartition partition
+            = DensityGridPartition::from_pw_basis(reference, *density_basis_);
+        (void)DensityGridPartition::from_pw_basis(active, *density_basis_);
+        active_alpha_local
+            = DensityGridPartition::scatter_from_root(active.rho_alpha_bohr3,
+                                                      *density_basis_);
+        active_beta_local
+            = DensityGridPartition::scatter_from_root(active.rho_beta_bohr3,
+                                                      *density_basis_);
+        frozen_alpha_local.assign(partition.local_size(), 0.0);
+        frozen_beta_local.assign(partition.local_size(), 0.0);
+        for (std::size_t fragment = 0;
+             fragment < frozen_environment.size();
+             ++fragment)
+        {
+            (void)DensityGridPartition::from_pw_basis(
+                frozen_environment[fragment], *density_basis_);
+            const std::vector<double> alpha
+                = DensityGridPartition::scatter_from_root(
+                    frozen_environment[fragment].rho_alpha_bohr3,
+                    *density_basis_);
+            const std::vector<double> beta
+                = DensityGridPartition::scatter_from_root(
+                    frozen_environment[fragment].rho_beta_bohr3,
+                    *density_basis_);
+            for (std::size_t point = 0;
+                 point < frozen_alpha_local.size();
+                 ++point)
+            {
+                frozen_alpha_local[point] += alpha[point];
+                frozen_beta_local[point] += beta[point];
+            }
+        }
+        if (nspin_ == 1)
+        {
+            for (std::size_t point = 0;
+                 point < active_alpha_local.size();
+                 ++point)
+            {
+                const double half_active
+                    = 0.5 * (active_alpha_local[point]
+                             + active_beta_local[point]);
+                active_alpha_local[point] = half_active;
+                active_beta_local[point] = half_active;
+            }
+            for (std::size_t point = 0;
+                 point < frozen_alpha_local.size();
+                 ++point)
+            {
+                const double half_frozen
+                    = 0.5 * (frozen_alpha_local[point]
+                             + frozen_beta_local[point]);
+                frozen_alpha_local[point] = half_frozen;
+                frozen_beta_local[point] = half_frozen;
+            }
+        }
+        double* density[2]
+            = {frozen_alpha_local.data(), frozen_beta_local.data()};
+        const double* const_density[2] = {density[0], density[1]};
+        const ModuleBase::matrix hartree_matrix
+            = elecstate::H_Hartree_pw::v_hartree(unit_cell,
+                                                 density_basis_,
+                                                 2,
+                                                 const_density);
+        frozen_hartree.assign(
+            static_cast<std::size_t>(density_basis_->nrxx), 0.0);
+        for (int point = 0; point < density_basis_->nrxx; ++point)
+        {
+            frozen_hartree[static_cast<std::size_t>(point)]
+                = hartree_matrix(0, point);
+        }
+        PotFdeConfig potential_config;
+        potential_config.grid = make_grid(reference,
+                                          *density_basis_,
+                                          unit_cell);
+        potential_config.kinetic_functional
+            = requested.kinetic_functional;
+        potential_config.density_floor_bohr3
+            = requested.density_floor_bohr3;
+        SpinDensity frozen;
+        frozen.alpha_bohr3 = frozen_alpha_local;
+        frozen.beta_bohr3 = frozen_beta_local;
+        embedding_potential_->reset_frozen_density(frozen,
+                                                   frozen_hartree,
+                                                   potential_config);
+        release_density_arrays(active);
+        for (std::size_t index = 0;
+             index < frozen_environment.size();
+             ++index)
+        {
+            release_density_arrays(frozen_environment[index]);
+        }
+    }
+
+    config_ = requested;
+    active_initial_ = active;
+    frozen_environment_ = frozen_environment;
+    if (embedding_potential_ != nullptr)
+    {
+        active_alpha_local_.swap(active_alpha_local);
+        active_beta_local_.swap(active_beta_local);
+        frozen_alpha_local_.swap(frozen_alpha_local);
+        frozen_beta_local_.swap(frozen_beta_local);
+    }
+}
+
 void FdeLcaoDriver::initialize_active_charge(Charge& charge) const
 {
     if (charge.nspin != nspin_ || charge.rho == nullptr
@@ -737,6 +922,15 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
                                                const UnitCell& unit_cell,
                                                elecstate::Potential& potential)
 {
+    if (embedding_potential_ != nullptr)
+    {
+        if (density_basis_ != &density_basis)
+        {
+            throw std::invalid_argument(
+                "FDE session cannot replace its initialized PW density basis");
+        }
+        return;
+    }
     density_basis_ = &density_basis;
     if (!LibxcPbeProvider::available())
     {

@@ -39,6 +39,7 @@ class ConfigureSlurmWorkflowTest(unittest.TestCase):
             postprocess_ranks=1,
             srun="/cluster/apps/slurm/bin/srun",
             exclusive=True,
+            persistent_session=True,
             work_directory=Path("/cluster/scratch/test/work"),
             device="gpu",
             ks_solver="cusolver",
@@ -59,6 +60,12 @@ class ConfigureSlurmWorkflowTest(unittest.TestCase):
             ],
         )
         self.assertIn("--ntasks=1", result["postprocess_command"])
+        self.assertIn("--overlap", result["session_command"])
+        self.assertIn("--exact", result["session_command"])
+        self.assertNotIn("--exclusive", result["session_command"])
+        self.assertEqual(
+            result["controls"]["execution_mode"], "persistent_session"
+        )
         self.assertEqual(result["controls"]["device"], "gpu")
         self.assertEqual(result["controls"]["ks_solver"], "cusolver")
         self.assertEqual(

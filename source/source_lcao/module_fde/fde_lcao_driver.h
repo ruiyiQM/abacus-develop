@@ -68,6 +68,11 @@ class FdeLcaoDriver
     int active_alpha_electrons() const;
     int active_beta_electrons() const;
 
+    /** Load the next density request while retaining fixed LCAO/PW state. */
+    void reload_session_config(const std::string& path,
+                               const UnitCell& unit_cell,
+                               const Parallel_Orbitals& orbitals);
+
     void initialize_active_charge(Charge& charge) const;
     void validate_core_density(const Charge& charge) const;
     void attach_embedding_potential(ModulePW::PW_Basis& density_basis,

@@ -300,3 +300,18 @@ AddTest(
     ../fde_density_artifact.cpp
     ../fde_energy_ledger.cpp
 )
+
+AddTest(
+  TARGET MODULE_FDE_session_contract
+  SOURCES fde_session_contract_test.cpp
+    ../runtime/fde_session_contract.cpp
+    ../fde_runtime_config.cpp
+    ../fde_state.cpp
+    ../fde_semilocal_functional.cpp
+)
+
+AddTest(
+  TARGET MODULE_FDE_session_protocol
+  SOURCES fde_session_protocol_test.cpp
+    ../runtime/fde_session_protocol.cpp
+)

@@ -184,7 +184,8 @@ embedded calculation.  The solver still uses `kpar 1`: all physical k points
 are handled by one AO communicator, while the AO matrices themselves may be
 MPI distributed.
 
-`fde_task` accepts `none`, `embedded_scf`, and `diabatic_postprocess`. The
+`fde_task` accepts `none`, `embedded_scf`, `embedded_session`, and
+`diabatic_postprocess`. The
 versioned, line-oriented `FDE_CONFIG` owns the fragment atom partition,
 neutral valence-electron counts, explicit state charge/spin assignments,
 active state and fragment, artifact paths, freeze-thaw controls, and K/L/M
@@ -207,8 +208,24 @@ END_FDE_CONFIG
 
 Thus the reactant branch contains closed-shell `F- + CH3Cl`, while the product
 branch contains the spin-coupled `F(radical) + CH3Cl-` fragment assignment.
-Every state/active-fragment pair is still one independent ABACUS process; an
-external workflow creates those task-local sidecars and alternates them.
+The default `process` workflow still starts one independent ABACUS process for
+every state/active-fragment call. With `controls.execution_mode` set to
+`persistent_session`, the workflow instead keeps one worker per fixed
+state/active-fragment and fixed INPUT signature. The worker retains UnitCell,
+NAO interpolation tables, PW bases, distributed AO containers, and hardware
+handles. A line-oriented stdin protocol sends only the next absolute
+`FDE_CONFIG`; the driver reloads active/frozen density artifacts and resets the
+existing `PotFde` frozen cache. A request may change `ACTIVE_DENSITY`,
+`FROZEN_DENSITY` paths, and `OUTPUT_PREFIX`. Any geometry, AO partition,
+charge/spin state, KEDF, grid control, SCF threshold, or mixing-signature
+change starts a new worker instead of reusing incompatible state.
+
+On Slurm, resident workers use overlapping job steps: the configured
+`session_command` must contain `srun --overlap --exact`. Only one
+Gauss--Seidel worker computes at a time, but all resident workers retain their
+memory. Set `maximum_persistent_sessions` to one to cap memory at the cost of
+restarting when the active fragment changes. Python waits for READY/DONE
+markers through a reader queue; the protocol contains no polling sleep.
 
 At runtime `FdeLcaoDriver` checks `nelec` and `nupdown` against that explicit
 fragment assignment, loads the active warm-start density and all environment

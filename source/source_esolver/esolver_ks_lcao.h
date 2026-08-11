@@ -49,6 +49,10 @@ class ESolver_KS_LCAO : public ESolver_KS
 
     void after_all_runners(BaseCell& basecell) override;
 
+    /** Reload the mutable density sidecars for one persistent FDE worker. */
+    void reload_fde_session(const std::string& config_path,
+                            const UnitCell& unit_cell);
+
   protected:
     virtual void before_scf(UnitCell& ucell, const int istep) override;
 
@@ -109,6 +113,7 @@ class ESolver_KS_LCAO : public ESolver_KS
 
     //! Task-local native FDE runtime; null for ordinary LCAO calculations.
     std::unique_ptr<fde::FdeLcaoDriver> fde_driver_;
+    bool fde_session_mode_ = false;
 
 
   public:

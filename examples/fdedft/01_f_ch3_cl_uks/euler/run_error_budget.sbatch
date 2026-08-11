@@ -104,6 +104,7 @@ python3 "${CONFIGURE_TOOL}" "${SPEC}" \
     --ranks "${SLURM_NTASKS}" \
     --threads "${SLURM_CPUS_PER_TASK}" \
     --srun /cluster/apps/slurm/bin/srun \
+    --persistent-session \
     --work-directory "${RUN_ROOT}/work-${variant}" \
     --force
 python3 "${WORKFLOW_TOOL}" validate "${SPEC}"

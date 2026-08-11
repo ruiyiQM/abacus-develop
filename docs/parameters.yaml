@@ -5001,11 +5001,12 @@ parameters:
     description: |
       Select the native FDE runtime entry point.
       * none: run an ordinary ABACUS calculation.
-      * embedded_scf: run one subsystem-in-environment LCAO Gamma-point SCF job described by fde_config.
+      * embedded_scf: run one subsystem-in-environment LCAO SCF job described by fde_config.
+      * embedded_session: initialize one fixed state/active-fragment worker once, then accept line-oriented RUN and STOP commands on standard input. Only density paths and the output prefix may change within one worker.
       * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config. This mode does not require STRU.
     default_value: none
     unit: ""
-    availability: LCAO Gamma-point, collinear-spin PBE calculations
+    availability: LCAO collinear-spin PBE calculations
   - name: fde_config
     category: Frozen-density embedding
     type: String

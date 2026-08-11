@@ -5001,6 +5001,7 @@
 - **Description**: Select the native FDE runtime entry point.
   - `none`: run an ordinary ABACUS calculation.
   - `embedded_scf`: run one subsystem-in-environment LCAO SCF job described by `fde_config`.
+  - `embedded_session`: initialize one fixed state/active-fragment worker once, then accept `RUN <request-id> <absolute-FDE_CONFIG>` and `STOP` commands on standard input. Only active/frozen density paths and the output prefix may change within one worker.
   - `diabatic_postprocess`: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from `fde_config`. This mode does not require `STRU`.
 - **Default**: none
 

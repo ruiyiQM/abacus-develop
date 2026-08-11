@@ -133,6 +133,7 @@ void ESolver_KS::runner(BaseCell& basecell, const int istep)
 
     // 2) SCF iterations
     bool conv_esolver = false;
+    this->oscillate_esolver = false;
     this->niter = this->maxniter;
     this->diag_ethr = PARAM.inp.pw_diag_thr;
     this->scf_nmax_flag = false; // mohan add 2025-09-21

@@ -23,6 +23,12 @@ class PotFde : public elecstate::PotBase
 
     EmbeddingPotentialResult evaluate(const SpinDensity& active_density) const;
 
+    /** Replace the per-request frozen environment without reallocating FFT state. */
+    void reset_frozen_density(
+        const SpinDensity& frozen_density,
+        const std::vector<double>& frozen_hartree_potential_ry,
+        const PotFdeConfig& config);
+
     void cal_v_eff(const Charge* const charge,
                    const UnitCell* const unit_cell,
                    ModuleBase::matrix& effective_potential) override;
@@ -38,6 +44,12 @@ class PotFde : public elecstate::PotBase
     std::unique_ptr<PwGridDifferential> differential_operator_;
     FrozenEmbeddingCache frozen_cache_;
     EmbeddingPotentialResult last_result_;
+
+    void validate_frozen_data(
+        const SpinDensity& frozen_density,
+        const std::vector<double>& frozen_hartree_potential_ry,
+        const PotFdeConfig& config) const;
+    void reset_last_result();
 };
 
 } // namespace fde

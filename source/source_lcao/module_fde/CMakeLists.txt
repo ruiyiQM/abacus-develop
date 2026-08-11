@@ -33,6 +33,9 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fde_subspace_solver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pot_fde.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session_contract.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/fde_session_protocol.cpp
     PARENT_SCOPE
 )
 

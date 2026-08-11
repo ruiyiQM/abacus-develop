@@ -80,6 +80,7 @@ void ReadInput::item_fde()
         item.description = R"(Select the native FDE runtime entry point.
 * none: run an ordinary ABACUS calculation.
 * embedded_scf: run one subsystem-in-environment LCAO SCF job described by fde_config.
+* embedded_session: keep one fixed subsystem worker alive and accept RUN requests on standard input.
 * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
         item.default_value = "none";
         item.unit = "";
@@ -92,18 +93,22 @@ void ReadInput::item_fde()
             // single-Fermi-level behavior of an ordinary UKS calculation.
             // Closed-shell RKS has one doubly occupied spatial-orbital channel
             // and must retain the ordinary single Fermi level.
-            if (para.input.fde_task == "embedded_scf")
+            if (para.input.fde_task == "embedded_scf"
+                || para.input.fde_task == "embedded_session")
             {
                 para.sys.two_fermi = para.input.nspin == 2;
             }
         };
         item.check_value = [](const Input_Item& item, const Parameter& para) {
             const std::string& task = para.input.fde_task;
-            if (task != "none" && task != "embedded_scf" && task != "diabatic_postprocess")
+            if (task != "none" && task != "embedded_scf"
+                && task != "embedded_session"
+                && task != "diabatic_postprocess")
             {
                 ModuleBase::WARNING_QUIT(
                     "ReadInput",
-                    "fde_task must be none, embedded_scf, or diabatic_postprocess");
+                    "fde_task must be none, embedded_scf, embedded_session, "
+                    "or diabatic_postprocess");
             }
             if (task == "none")
             {
@@ -113,7 +118,7 @@ void ReadInput::item_fde()
             {
                 ModuleBase::WARNING_QUIT("ReadInput", "fde_config must not be empty when FDE is enabled");
             }
-            if (task == "embedded_scf")
+            if (task == "embedded_scf" || task == "embedded_session")
             {
                 if (para.input.calculation != "scf" || para.input.basis_type != "lcao"
                     || (para.input.nspin != 1 && para.input.nspin != 2)
@@ -122,7 +127,7 @@ void ReadInput::item_fde()
                 {
                     ModuleBase::WARNING_QUIT(
                         "ReadInput",
-                        "fde_task embedded_scf requires calculation scf, basis_type lcao, "
+                        "fde_task embedded_scf/embedded_session requires calculation scf, basis_type lcao, "
                         "nspin 1 or 2, noncolin 0, and lspinorb 0");
                 }
                 const FdeXcCapability capability

@@ -83,6 +83,11 @@ TEST_F(InputTest, NativeFdeInput)
     param.input.gamma_only = false;
     EXPECT_NO_THROW(task->second.check_value(task->second, param));
 
+    param.input.fde_task = "embedded_session";
+    task->second.reset_value(task->second, param);
+    EXPECT_TRUE(param.sys.two_fermi);
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
+
     param.input.dft_functional = "scan";
     EXPECT_EXIT(task->second.check_value(task->second, param),
                 ::testing::ExitedWithCode(1),

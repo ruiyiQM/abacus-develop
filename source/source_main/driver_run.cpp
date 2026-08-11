@@ -13,6 +13,7 @@
 #include "source_hsolver/kernels/hegvd_op.h"
 #ifdef __LCAO
 #include "source_lcao/module_fde/fde_diabatic_postprocess.h"
+#include "source_lcao/module_fde/runtime/fde_session.h"
 #endif
 
 #include <ATen/kernels/blas.h>
@@ -108,7 +109,15 @@ void Driver::driver_run()
     const std::string cal = input.calculation;
 
     //! 4: different types of calculations
-    if (cal == "md")
+    if (input.fde_task == "embedded_session")
+    {
+#ifdef __LCAO
+        fde::FdeSession::serve(*p_esolver, ucell, input);
+#else
+        ModuleBase::WARNING_QUIT("Driver", "FDE session requires an LCAO-enabled build");
+#endif
+    }
+    else if (cal == "md")
     {
         Run_MD::md_line(ucell, p_esolver, PARAM);
     }

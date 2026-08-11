@@ -19,6 +19,7 @@
     }
   ],
   "controls": {
+    "execution_mode": "persistent_session",
     "spin_mode": "uks",
     "kedf": "pw91k",
     "device": "cpu",

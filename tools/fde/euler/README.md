@@ -69,6 +69,7 @@ python3 tools/fde/euler/configure_slurm_workflow.py workflow.local.json \
   --abacus /cluster/home/zhourui/abacus-develop/build-gcc-openmpi/install/bin/abacus \
   --ranks 20 \
   --threads 4 \
+  --persistent-session \
   --work-directory /cluster/scratch/zhourui/my-fde-case/work
 
 python3 tools/fde/fde_workflow.py validate workflow.euler.json
@@ -77,7 +78,10 @@ python3 tools/fde/fde_workflow.py validate workflow.euler.json
 The helper writes the MPI/OpenMP layout and executable path into provenance. It
 does not submit a job or modify the original JSON. Pass `--device gpu`; it
 selects `cusolver` unless another supported GPU solver is given. Pass
-`--exclusive` when two Jacobi subsystem steps will execute concurrently.
+`--exclusive` when ordinary one-shot Jacobi subsystem steps will execute
+concurrently. `--persistent-session` instead creates an overlapping, exact
+resident step command; do not combine the resident command itself with
+`--exclusive`.
 
 The checked example can be submitted directly after its pinned resources have
 been fetched:
