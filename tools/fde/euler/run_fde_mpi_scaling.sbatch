@@ -7,15 +7,36 @@ set -Eeuo pipefail
 
 layout=${1:?usage: run_fde_mpi_scaling.sbatch LAYOUT OMP_THREADS}
 omp_threads=${2:?usage: run_fde_mpi_scaling.sbatch LAYOUT OMP_THREADS}
-root=/cluster/home/zhourui/abacus-develop
-template=${root}/test_abacus/fodft_parallel_validation/fodft_modes/openmpi_elpa
-scratch=/cluster/scratch/zhourui/abacus-fde-mpi-scaling
+source_root=${3:-/cluster/home/${SLURM_JOB_USER:?}/abacus-develop}
+scratch=${4:-/cluster/scratch/${SLURM_JOB_USER}/abacus-fde-mpi-scaling}
+template=${5:?a prepared scaling template directory is required}
+binary=${6:-${source_root}/build-gcc-openmpi/install/bin/abacus}
+runtime_env=${7:-${source_root}/euler/abacus_gcc_openmpi_env.sh}
+source_commit=${8:-unknown}
+parser=${source_root}/tools/fde/euler/parse_fde_scaling.py
 case_dir=${scratch}/cases/${SLURM_JOB_ID}-${layout}
+
+for path in "${source_root}" "${template}" "${binary}" "${runtime_env}" "${parser}"; do
+    if [[ ! -e "${path}" ]]; then
+        echo "ERROR: required scaling path is missing: ${path}" >&2
+        exit 2
+    fi
+done
+source_root=$(realpath -e "${source_root}")
+template=$(realpath -e "${template}")
+binary=$(realpath -e "${binary}")
+runtime_env=$(realpath -e "${runtime_env}")
+parser=$(realpath -e "${parser}")
+if [[ -e "${case_dir}" ]]; then
+    echo "ERROR: scaling case directory already exists: ${case_dir}" >&2
+    exit 3
+fi
 
 export PATH=/cluster/apps/slurm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 source /etc/environ.d/lmod.sh
 export MODULEPATH=/cluster/software/lmods
-source ${root}/euler/abacus_gcc_openmpi_env.sh
+# shellcheck source=/dev/null
+source "${runtime_env}"
 
 mkdir -p "${case_dir}"
 cp "${template}/INPUT" "${template}/STRU" "${template}/KPT" \
@@ -35,8 +56,6 @@ export OMP_NUM_THREADS=${omp_threads}
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 export OPENBLAS_NUM_THREADS=1
-binary=${root}/build-gcc-openmpi/install/bin/abacus_std_para
-source_commit=$(git -C "${root}" rev-parse HEAD)
 binary_sha256=$(sha256sum "${binary}" | cut -d ' ' -f 1)
 
 cd "${case_dir}"
@@ -44,7 +63,7 @@ cd "${case_dir}"
     --ntasks="${SLURM_NTASKS}" --cpus-per-task="${SLURM_CPUS_PER_TASK}" \
     "${binary}" > abacus.out 2> abacus.err
 
-python3 "${root}/tools/fde/euler/parse_fde_scaling.py" \
+python3 "${parser}" \
     --case-dir "${case_dir}" \
     --layout "${layout}" \
     --job-id "${SLURM_JOB_ID}" \

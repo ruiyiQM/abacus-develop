@@ -146,6 +146,31 @@ Use `afternotok` or manual inspection if partial results are valuable. The
 workflow has no polling sleeps: Slurm owns queue waiting, while checkpoints
 own calculation restart.
 
+## MPI layout scaling
+
+The scaling helper launches the same prepared direct `embedded_scf` input as
+1 rank x 1 thread, 4 x 1, 20 x 4, and two-node 40 x 4 layouts. The template is
+now mandatory: it must contain `INPUT`, `STRU`, `KPT`, and `FDE_CONFIG`, and all
+resource/density paths referenced by those files must remain readable from the
+copied scratch case. Requiring the template explicitly prevents a benchmark
+from silently reusing an old `test_abacus` artifact.
+
+```bash
+bash tools/fde/euler/submit_fde_mpi_scaling.sh \
+  /cluster/scratch/$USER/abacus_test/source/COMMIT \
+  /cluster/scratch/$USER/abacus_test/fde-scaling-COMMIT \
+  /absolute/path/to/prepared-template \
+  /cluster/scratch/$USER/abacus_test/builds/COMMIT/cpu/install/bin/abacus \
+  /absolute/path/to/abacus_gcc_openmpi_env.sh \
+  COMMIT
+```
+
+The scratch root must not already contain `jobs.txt`. Each result records the
+supplied source commit and executable SHA-256. The runner uses the maintained
+`install/bin/abacus` name; legacy `abacus_std_para` paths are not inferred.
+When all four jobs finish, use the exact summarizer command printed by the
+submission helper.
+
 ## Collect compact final data
 
 After every state at every point has converged:

@@ -2,9 +2,45 @@
 
 set -Eeuo pipefail
 
-root=/cluster/home/zhourui/abacus-develop
-scratch=/cluster/scratch/zhourui/abacus-fde-mpi-scaling
-runner=${root}/tools/fde/euler/run_fde_mpi_scaling.sbatch
+source_root=${1:-/cluster/home/${USER:?}/abacus-develop}
+scratch=${2:-/cluster/scratch/${USER}/abacus-fde-mpi-scaling}
+template=${3:-${ABACUS_FDE_SCALING_TEMPLATE:-}}
+binary=${4:-${ABACUS_FDE_BINARY:-${source_root}/build-gcc-openmpi/install/bin/abacus}}
+runtime_env=${5:-${ABACUS_FDE_RUNTIME_ENV:-${source_root}/euler/abacus_gcc_openmpi_env.sh}}
+source_commit=${6:-}
+if [[ -z "${template}" ]]; then
+    echo "usage: $0 [SOURCE_ROOT] [SCRATCH_ROOT] TEMPLATE [ABACUS] [RUNTIME_ENV] [SOURCE_COMMIT]" >&2
+    exit 2
+fi
+for path in "${source_root}" "${template}" "${binary}" "${runtime_env}"; do
+    if [[ ! -e "${path}" ]]; then
+        echo "ERROR: required scaling path is missing: ${path}" >&2
+        exit 2
+    fi
+done
+source_root=$(realpath -e "${source_root}")
+template=$(realpath -e "${template}")
+binary=$(realpath -e "${binary}")
+runtime_env=$(realpath -e "${runtime_env}")
+if [[ -z "${source_commit}" ]]; then
+    if source_commit=$(git -C "${source_root}" rev-parse HEAD 2>/dev/null); then
+        :
+    else
+        source_commit=unknown
+    fi
+fi
+runner=${source_root}/tools/fde/euler/run_fde_mpi_scaling.sbatch
+summarizer=${source_root}/tools/fde/euler/summarize_fde_mpi_scaling.py
+for path in "${runner}" "${summarizer}"; do
+    if [[ ! -e "${path}" ]]; then
+        echo "ERROR: required scaling tool is missing: ${path}" >&2
+        exit 2
+    fi
+done
+if [[ -e "${scratch}/jobs.txt" ]]; then
+    echo "ERROR: scaling root already contains a submission: ${scratch}" >&2
+    exit 3
+fi
 
 mkdir -p "${scratch}/logs" "${scratch}/results"
 
@@ -17,7 +53,9 @@ submit()
         --mem-per-cpu=1800M \
         --output="${scratch}/logs/${layout}-%j.out" \
         --error="${scratch}/logs/${layout}-%j.err" \
-        "$@" "${runner}" "${layout}" "${omp_threads}"
+        "$@" "${runner}" "${layout}" "${omp_threads}" \
+        "${source_root}" "${scratch}" "${template}" "${binary}" \
+        "${runtime_env}" "${source_commit}"
 }
 
 job_1x1=$(submit 1rank_1thread 1 --nodes=1 --ntasks=1 --cpus-per-task=80)
@@ -33,4 +71,4 @@ printf '%s %s\n' \
     | tee "${scratch}/jobs.txt"
 
 printf 'After all jobs finish, validate with:\n  python3 %s %s/results --markdown\n' \
-    "${root}/tools/fde/euler/summarize_fde_mpi_scaling.py" "${scratch}"
+    "${summarizer}" "${scratch}"

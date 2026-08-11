@@ -23,6 +23,21 @@ configure_module = load_module("configure_slurm_workflow", "configure_slurm_work
 collect_module = load_module("collect_fde_results", "collect_fde_results.py")
 
 
+class ScalingScriptContractTest(unittest.TestCase):
+    def test_scaling_runner_requires_explicit_template_and_current_binary_name(self):
+        runner = (ROOT / "run_fde_mpi_scaling.sbatch").read_text(
+            encoding="utf-8")
+        submitter = (ROOT / "submit_fde_mpi_scaling.sh").read_text(
+            encoding="utf-8")
+        combined = runner + submitter
+
+        self.assertIn("prepared scaling template directory is required", runner)
+        self.assertIn("ABACUS_FDE_SCALING_TEMPLATE", submitter)
+        self.assertIn("install/bin/abacus", combined)
+        self.assertNotIn("abacus_std_para", combined)
+        self.assertNotIn("test_abacus/fodft_parallel_validation", combined)
+
+
 class ConfigureSlurmWorkflowTest(unittest.TestCase):
     def test_configure_adds_explicit_slurm_commands_and_provenance(self):
         source = {
