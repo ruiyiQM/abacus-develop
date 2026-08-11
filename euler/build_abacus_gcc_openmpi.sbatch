@@ -24,4 +24,6 @@ echo "Slurm job: ${SLURM_JOB_ID}"
 echo "Node list: ${SLURM_JOB_NODELIST}"
 echo "Allocated build CPUs: ${SLURM_CPUS_PER_TASK}"
 
-/cluster/home/zhourui/abacus-develop/euler/build_abacus_gcc_openmpi.sh
+readonly ABACUS_ROOT="${ABACUS_ROOT:-/cluster/home/zhourui/abacus-develop}"
+export ABACUS_ROOT
+exec bash "${ABACUS_ROOT}/euler/build_abacus_gcc_openmpi.sh"

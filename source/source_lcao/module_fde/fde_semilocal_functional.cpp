@@ -77,9 +77,15 @@ void validate_density(const SpinDensity& density, const std::size_t expected_siz
     }
 }
 
-bool equal_spin_channels(const SpinDensity& density)
+bool equal_spin_channels(
+    const SpinDensity& density,
+    const GridDifferentialOperator* differential_operator)
 {
-    return density.alpha_bohr3 == density.beta_bohr3;
+    const bool locally_equal
+        = density.alpha_bohr3 == density.beta_bohr3;
+    return differential_operator == nullptr
+               ? locally_equal
+               : differential_operator->all_processes(locally_equal);
 }
 
 void validate_frozen_cache(const FrozenSemilocalCache& cache,
@@ -470,7 +476,8 @@ FrozenSemilocalCache prepare_frozen_functional(
         = {&frozen_density.alpha_bohr3, &frozen_density.beta_bohr3};
     std::vector<double>* cache_potentials[2]
         = {&cache.potential_ry.alpha_ry, &cache.potential_ry.beta_ry};
-    const int evaluated_channels = equal_spin_channels(frozen_density) ? 1 : 2;
+    const int evaluated_channels
+        = equal_spin_channels(frozen_density, differential_operator) ? 1 : 2;
 
     for (int spin = 0; spin < evaluated_channels; ++spin)
     {
@@ -535,8 +542,12 @@ NonadditiveFunctionalResult evaluate_nonadditive_cached(
         = {&result.active_potential.alpha_ry, &result.active_potential.beta_ry};
     std::vector<double>* frozen_potentials[2]
         = {&result.frozen_potential.alpha_ry, &result.frozen_potential.beta_ry};
+    const bool active_channels_equal
+        = equal_spin_channels(active_density, differential_operator);
+    const bool frozen_channels_equal
+        = equal_spin_channels(frozen_density, differential_operator);
     const int evaluated_channels
-        = (equal_spin_channels(active_density) && equal_spin_channels(frozen_density)) ? 1 : 2;
+        = (active_channels_equal && frozen_channels_equal) ? 1 : 2;
 
     for (int spin = 0; spin < evaluated_channels; ++spin)
     {

@@ -73,6 +73,26 @@ sbatch --export=ABACUS_SKIP_DEPENDENCIES=1 \
   euler/build_abacus_gcc_openmpi.sbatch
 ```
 
+For validation of an unpushed source snapshot, reuse that dependency
+toolchain read-only while isolating every compilation output in scratch:
+
+```bash
+commit=<commit-or-snapshot-label>
+source_root=/cluster/scratch/$USER/abacus_test/source/${commit}
+build_root=/cluster/scratch/$USER/abacus_test/builds/${commit}
+mkdir -p "${build_root}"
+sbatch \
+  --chdir="${source_root}" \
+  --output="${build_root}/build-%j.out" \
+  --error="${build_root}/build-%j.err" \
+  --export=ABACUS_ROOT="${source_root}",ABACUS_BUILD_ROOT="${build_root}",ABACUS_TOOLCHAIN_SETUP=/cluster/home/$USER/abacus-develop/build-gcc-openmpi/toolchain/install/setup,ABACUS_SKIP_DEPENDENCIES=1,ABACUS_COMMIT_INFO=OFF \
+  "${source_root}/euler/build_abacus_gcc_openmpi.sbatch"
+```
+
+The source and build directory names provide provenance for a `git archive`
+snapshot, where embedded Git commit discovery is unavailable. The production
+binary under the home working tree is not replaced.
+
 ## Runtime environment and MPI smoke test
 
 Load the compiled runtime in an interactive allocation or a batch script with:

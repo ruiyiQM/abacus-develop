@@ -22,6 +22,7 @@ class PwGridDifferential : public GridDifferentialOperator
 
     std::size_t local_size() const override;
     bool uses_gpu() const override;
+    bool all_processes(bool local_condition) const override;
     void gradient(const std::vector<double>& values,
                   std::vector<double>& gradient_x,
                   std::vector<double>& gradient_y,

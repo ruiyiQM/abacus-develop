@@ -66,6 +66,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("value must be finite and positive")
+    return parsed
+
+
+def positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return parsed
+
+
 def load_resource_manifest() -> Dict[str, object]:
     return json.loads((ROOT / "default_resources.json").read_text(encoding="utf-8"))
 
@@ -101,14 +115,16 @@ def patch_input_text(text: str, values: Dict[str, object]) -> str:
 
 
 def probe_grid(root: Path, abacus: Path, pseudo_dir: Path,
-               orbital_dir: Path) -> Tuple[int, int, int, float]:
+               orbital_dir: Path,
+               input_overrides: Dict[str, object]) -> Tuple[int, int, int, float]:
     log_path = root / "grid_probe.log"
     with tempfile.TemporaryDirectory(prefix="fde-grid-probe-", dir=str(root)) as directory:
         work = Path(directory)
         shutil.copy2(root / "STRU", work / "STRU")
         shutil.copy2(root / "KPT", work / "KPT")
         input_text = (root / "INPUT").read_text(encoding="utf-8")
-        (work / "INPUT").write_text(patch_input_text(input_text, {
+        probe_overrides = dict(input_overrides)
+        probe_overrides.update({
             "suffix": "fde_grid_probe",
             "scf_nmax": 1,
             "nelec": 22,
@@ -118,7 +134,10 @@ def probe_grid(root: Path, abacus: Path, pseudo_dir: Path,
             "fde_task": "none",
             "pseudo_dir": pseudo_dir,
             "orbital_dir": orbital_dir,
-        }), encoding="utf-8")
+        })
+        (work / "INPUT").write_text(
+            patch_input_text(input_text, probe_overrides), encoding="utf-8"
+        )
         environment = dict(os.environ)
         environment.setdefault("OMP_NUM_THREADS", "1")
         with log_path.open("w", encoding="utf-8") as log:
@@ -172,7 +191,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--abacus", type=Path, required=True)
     parser.add_argument(
-        "--mpi-ranks", type=int, default=1,
+        "--mpi-ranks", type=positive_integer, default=1,
         help="run each embedded SCF with mpirun at this rank count (default: 1)")
     parser.add_argument("--pseudo-dir", type=Path,
                         default=DEFAULT_RESOURCE_ROOT / "pseudopotentials")
@@ -188,10 +207,24 @@ def main() -> int:
         "--kedf", choices=("thomas_fermi", "pw91k", "revapbek"),
         default="pw91k",
         help="nonadditive kinetic functional (default: pw91k)")
+    parser.add_argument(
+        "--variant-label",
+        help="safe suffix for independent benchmark workflow/generated/work paths")
+    parser.add_argument("--ecutwfc", type=positive_float, default=40.0)
+    parser.add_argument(
+        "--scf-density-tolerance", type=positive_float, default=3e-6)
+    parser.add_argument(
+        "--freeze-thaw-density-tolerance", type=positive_float, default=1e-5)
+    parser.add_argument(
+        "--energy-tolerance-ry", type=positive_float, default=2e-5)
+    parser.add_argument(
+        "--maximum-scf-iterations", type=positive_integer, default=200)
     arguments = parser.parse_args()
 
-    if arguments.mpi_ranks < 1:
-        parser.error("--mpi-ranks must be a positive integer")
+    if (arguments.variant_label is not None
+            and re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                         arguments.variant_label) is None):
+        parser.error("--variant-label contains unsafe characters")
 
     root = ROOT
     abacus = arguments.abacus.resolve()
@@ -228,7 +261,17 @@ def main() -> int:
                 parser.error(f"grid cube path must not contain whitespace: {grid_cube}")
             grid = cube_grid(grid_cube)
         else:
-            grid = probe_grid(root, abacus, pseudo_dir, orbital_dir)
+            grid = probe_grid(
+                root,
+                abacus,
+                pseudo_dir,
+                orbital_dir,
+                {
+                    "ecutwfc": arguments.ecutwfc,
+                    "scf_thr": arguments.scf_density_tolerance,
+                    "scf_nmax": arguments.maximum_scf_iterations,
+                },
+            )
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
 
@@ -237,8 +280,28 @@ def main() -> int:
                                if launcher else [str(abacus)])
     spec["postprocess_command"] = [str(abacus)]
     spec["controls"]["kedf"] = arguments.kedf
-    variant_suffix = "" if arguments.kedf == "pw91k" else f"-{arguments.kedf}"
+    spec["controls"]["maximum_scf_iterations"] = arguments.maximum_scf_iterations
+    spec["controls"]["scf_density_tolerance"] = arguments.scf_density_tolerance
+    spec["controls"]["freeze_thaw_density_tolerance"] \
+        = arguments.freeze_thaw_density_tolerance
+    spec["controls"]["energy_tolerance_ry"] = arguments.energy_tolerance_ry
+    adaptive_stages = spec["controls"].get("adaptive_scf", {}).get("stages", [])
+    for stage in adaptive_stages:
+        if stage.get("strict"):
+            stage["maximum_iterations"] = arguments.maximum_scf_iterations
+            stage["density_tolerance"] = arguments.scf_density_tolerance
+    if arguments.variant_label is not None:
+        variant_suffix = f"-{arguments.variant_label}"
+    else:
+        variant_suffix = "" if arguments.kedf == "pw91k" else f"-{arguments.kedf}"
     spec["work_directory"] = str((root / f"work{variant_suffix}").resolve())
+    spec.setdefault("provenance", {})["numerical_controls"] = {
+        "ecutwfc_ry": arguments.ecutwfc,
+        "scf_density_tolerance": arguments.scf_density_tolerance,
+        "freeze_thaw_density_tolerance": arguments.freeze_thaw_density_tolerance,
+        "energy_tolerance_ry": arguments.energy_tolerance_ry,
+        "maximum_scf_iterations": arguments.maximum_scf_iterations,
+    }
     spec["geometries"] = []
     generated = root / f"generated{variant_suffix}"
     generated.mkdir(exist_ok=True)
@@ -256,6 +319,18 @@ def main() -> int:
             template_output.mkdir(parents=True)
             for filename in ("INPUT", "KPT", "STRU"):
                 shutil.copy2(root / filename, template_output / filename)
+            input_path = template_output / "INPUT"
+            input_path.write_text(
+                patch_input_text(
+                    input_path.read_text(encoding="utf-8"),
+                    {
+                        "ecutwfc": arguments.ecutwfc,
+                        "scf_thr": arguments.scf_density_tolerance,
+                        "scf_nmax": arguments.maximum_scf_iterations,
+                    },
+                ),
+                encoding="utf-8",
+            )
             (template_output / "STRU").write_text(
                 render_stru(stru_template, float(row["f_c_angstrom"]),
                             float(row["c_cl_angstrom"])), encoding="utf-8")

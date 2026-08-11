@@ -285,3 +285,9 @@ python3 -m unittest tools/fde/test_fde_workflow_e2e.py -v
 
 The example under `examples/fdedft/01_f_ch3_cl_uks` is the maintained starting
 point for a complete two-state UKS calculation.
+
+Use `compare_scientific_runs.py` with the example's
+`scientific_error_budget.json` to check state energies, the diabatic gap,
+overlap, raw and orthogonalized coupling, crossing brackets, and final FT
+convergence. This scientific comparison is intentionally separate from the
+bit-level MPI consistency test under `tools/fde/euler`.

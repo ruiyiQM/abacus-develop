@@ -2,12 +2,13 @@
 
 set -Eeuo pipefail
 
-readonly ABACUS_ROOT="/cluster/home/zhourui/abacus-develop"
-readonly BUILD_ROOT="${ABACUS_ROOT}/build-gcc-openmpi"
+readonly ABACUS_ROOT="${ABACUS_ROOT:-/cluster/home/zhourui/abacus-develop}"
+readonly BUILD_ROOT="${ABACUS_BUILD_ROOT:-${ABACUS_ROOT}/build-gcc-openmpi}"
 readonly CMAKE_BUILD_DIR="${BUILD_ROOT}/cmake"
 readonly INSTALL_DIR="${BUILD_ROOT}/install"
-readonly TOOLCHAIN_DIR="${BUILD_ROOT}/toolchain"
-readonly TOOLCHAIN_SETUP="${TOOLCHAIN_DIR}/install/setup"
+readonly TOOLCHAIN_DIR="${ABACUS_TOOLCHAIN_DIR:-${BUILD_ROOT}/toolchain}"
+readonly TOOLCHAIN_SETUP="${ABACUS_TOOLCHAIN_SETUP:-${TOOLCHAIN_DIR}/install/setup}"
+readonly COMMIT_INFO="${ABACUS_COMMIT_INFO:-ON}"
 
 BUILD_JOBS="${ABACUS_BUILD_JOBS:-${SLURM_CPUS_PER_TASK:-16}}"
 if [[ ! "${BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
@@ -50,7 +51,7 @@ if grep -Eiq '(^|/)(intel|oneapi|mkl)' <<<"${loaded_modules}"; then
     exit 3
 fi
 
-if [[ ! -x "${TOOLCHAIN_DIR}/toolchain_gnu.sh" ]]; then
+if [[ "${ABACUS_SKIP_DEPENDENCIES:-0}" != "1" && ! -x "${TOOLCHAIN_DIR}/toolchain_gnu.sh" ]]; then
     echo "ERROR: isolated GNU toolchain is missing: ${TOOLCHAIN_DIR}" >&2
     echo "Run the preparation step documented in euler/build_abacus_gcc_openmpi.sbatch." >&2
     exit 4
@@ -63,7 +64,8 @@ export LD_RUN_PATH="${LD_RUN_PATH:-}"
 mkdir -p "${CMAKE_BUILD_DIR}" "${INSTALL_DIR}" "${BUILD_ROOT}/logs"
 
 echo "ABACUS source: ${ABACUS_ROOT}"
-echo "Git commit: $(git -C "${ABACUS_ROOT}" rev-parse HEAD)"
+git_commit="$(git -C "${ABACUS_ROOT}" rev-parse HEAD 2>/dev/null || true)"
+echo "Git commit: ${git_commit:-unavailable (source snapshot)}"
 echo "Build jobs: ${BUILD_JOBS}"
 echo "CMake build directory: ${CMAKE_BUILD_DIR}"
 echo "Install directory: ${INSTALL_DIR}"
@@ -132,7 +134,7 @@ cmake --fresh -S "${ABACUS_ROOT}" -B "${CMAKE_BUILD_DIR}" \
     -DBUILD_TESTING=OFF \
     -DENABLE_NATIVE_OPTIMIZATION=OFF \
     -DGIT_SUBMODULE=OFF \
-    -DCOMMIT_INFO=ON \
+    -DCOMMIT_INFO="${COMMIT_INFO}" \
     -DMATH_INFO=OFF \
     -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON
 

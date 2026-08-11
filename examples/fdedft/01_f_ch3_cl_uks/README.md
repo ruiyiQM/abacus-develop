@@ -164,3 +164,41 @@ layout used to produce them.
 
 The off-diagonal result is the documented state-specific linearized
 transition-density approximation, not an exact many-electron coupling.
+
+## Scientific error budget
+
+`scientific_error_budget.json` makes the maintained reproducibility limits for
+state energies, energy gap, overlap, raw matrix element, orthogonalized
+coupling, FT residual, and cycle count machine readable. Compare any compatible
+two-state PES table with:
+
+```bash
+python3 ../../../tools/fde/compare_scientific_runs.py \
+  scientific_error_budget.json \
+  reference/fde_pes.tsv.ref \
+  /path/to/candidate/fde_pes.tsv \
+  --candidate-convergence /path/to/candidate/work \
+  --output comparison.json
+```
+
+The Euler benchmark array runs the maintained production controls, a tighter
+SCF/FT calculation on the same 40 Ry grid, and a tight 60 Ry calculation:
+
+```bash
+array_job=$(sbatch --parsable euler/run_error_budget.sbatch)
+sbatch --dependency=afterok:${array_job} \
+  euler/summarize_error_budget.sbatch \
+  /cluster/scratch/$USER/abacus_test/fde-scientific-budget-${array_job}
+```
+
+By default the array tests the executable installed below the supplied source
+root. For an unpushed source snapshot, build into an independent scratch
+directory and submit with
+`--export=ABACUS_FDE_BINARY=/absolute/path/to/abacus`. This keeps the
+benchmark source, binary, and result directory explicit and prevents an older
+executable in the home working tree from being tested by accident.
+
+The committed tolerance is a same-model reproducibility gate. The 60 Ry
+comparison remains informative until its observed grid sensitivity has been
+reviewed and a production cutoff is selected; it is never silently treated as
+equivalent to the deliberately inexpensive 40 Ry example.

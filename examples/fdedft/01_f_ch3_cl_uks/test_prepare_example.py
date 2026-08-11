@@ -55,6 +55,14 @@ class PrepareExampleTest(unittest.TestCase):
         self.assertIn("fde_task                 none", rendered)
         self.assertEqual(rendered.count("out_chg"), 1)
 
+    def test_benchmark_numeric_arguments_are_positive(self):
+        self.assertEqual(prepare.positive_float("60"), 60.0)
+        self.assertEqual(prepare.positive_integer("300"), 300)
+        with self.assertRaises(prepare.argparse.ArgumentTypeError):
+            prepare.positive_float("nan")
+        with self.assertRaises(prepare.argparse.ArgumentTypeError):
+            prepare.positive_integer("0")
+
     def test_default_resource_names_match_stru(self):
         manifest = prepare.load_resource_manifest()
         stru = (MODULE_PATH.parent / "STRU").read_text(encoding="utf-8")

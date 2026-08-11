@@ -2,6 +2,7 @@
 
 export ABACUS_ROOT="/cluster/home/zhourui/abacus-develop"
 export ABACUS_BUILD_ROOT="${ABACUS_ROOT}/build-gcc-openmpi"
+export PATH=/cluster/apps/slurm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 if ! command -v module >/dev/null 2>&1; then
     # shellcheck source=/dev/null

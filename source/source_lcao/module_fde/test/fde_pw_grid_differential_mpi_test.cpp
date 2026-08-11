@@ -120,6 +120,20 @@ TEST(FdePwGridDifferentialMpi, DifferentiatesPeriodicModesAcrossZSlabs)
     EXPECT_LT(global_maximum_error, 1.0e-10);
 }
 
+TEST(FdePwGridDifferentialMpi, ReducesLocalBranchDecisionsAcrossThePool)
+{
+    int process_count = 0;
+    int rank = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    ModulePW::PW_Basis basis("cpu", "double");
+    initialize_basis(basis, process_count, rank);
+    const fde::PwGridDifferential differential(basis, false);
+
+    EXPECT_TRUE(differential.all_processes(true));
+    EXPECT_FALSE(differential.all_processes(rank != 0));
+}
+
 int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);

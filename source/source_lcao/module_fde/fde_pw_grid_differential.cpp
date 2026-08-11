@@ -72,6 +72,32 @@ bool PwGridDifferential::uses_gpu() const
 #endif
 }
 
+bool PwGridDifferential::all_processes(const bool local_condition) const
+{
+#ifdef __MPI
+    if (basis_.pool_world == MPI_COMM_NULL)
+    {
+        throw std::runtime_error(
+            "FDE PW grid agreement requires an initialized pool communicator");
+    }
+    const int local_value = local_condition ? 1 : 0;
+    int global_value = 0;
+    if (MPI_Allreduce(&local_value,
+                      &global_value,
+                      1,
+                      MPI_INT,
+                      MPI_MIN,
+                      basis_.pool_world)
+        != MPI_SUCCESS)
+    {
+        throw std::runtime_error("FDE PW grid agreement reduction failed");
+    }
+    return global_value != 0;
+#else
+    return local_condition;
+#endif
+}
+
 void PwGridDifferential::gradient(const std::vector<double>& values,
                                   std::vector<double>& gradient_x,
                                   std::vector<double>& gradient_y,

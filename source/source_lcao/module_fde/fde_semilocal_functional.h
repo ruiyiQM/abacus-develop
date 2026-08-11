@@ -62,6 +62,11 @@ class GridDifferentialOperator
     virtual std::size_t local_size() const = 0;
     /** True when pointwise semilocal work should use the CUDA backend. */
     virtual bool uses_gpu() const { return false; }
+    /** Return true only when every rank participating in grid transforms agrees. */
+    virtual bool all_processes(bool local_condition) const
+    {
+        return local_condition;
+    }
     virtual void gradient(const std::vector<double>& values,
                           std::vector<double>& gradient_x,
                           std::vector<double>& gradient_y,
