@@ -1,0 +1,23 @@
+{
+  "folding_factor": 2,
+  "maximum_absolute_error_ry": 1.2995080567179684e-09,
+  "passed": true,
+  "primitive_kpoints_per_spin": 2,
+  "schema_version": 1,
+  "spins": [
+    {
+      "eigenvalue_count": 14,
+      "maximum_absolute_error_ry": 1.2995080567179684e-09,
+      "rms_error_ry": 4.907321457577988e-10,
+      "spin": 0
+    },
+    {
+      "eigenvalue_count": 14,
+      "maximum_absolute_error_ry": 4.979350265443827e-11,
+      "rms_error_ry": 2.169943309702004e-11,
+      "spin": 1
+    }
+  ],
+  "supercell_kpoints_per_spin": 1,
+  "tolerance_ry": 1e-06
+}

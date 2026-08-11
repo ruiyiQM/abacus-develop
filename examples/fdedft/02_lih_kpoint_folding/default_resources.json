@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/abacusmodeling/ABACUS-orbitals",
+  "source_commit": "3b634f1618f5c56baa97084a41ae17e801d46ab9",
+  "source_description": "SG15-v1.0 PBE norm-conserving pseudopotentials and StandardOrbitals-v2.0 DZP at 100 Ry",
+  "resources": [
+    {
+      "kind": "pseudopotentials",
+      "element": "H",
+      "path": "SG15_v1.0/Pseudopotential/H_ONCV_PBE-1.0.upf",
+      "sha256": "3f5deaaf57ff09d87da2c2c186eb1654d174fe385c9edc265036b3c8869286ef"
+    },
+    {
+      "kind": "pseudopotentials",
+      "element": "Li",
+      "path": "SG15_v1.0/Pseudopotential/Li_ONCV_PBE-1.0.upf",
+      "sha256": "ca3d1f1d598deb7949829506da9df3ad1e323073681399d4f7b1bfff3b689d0a"
+    },
+    {
+      "kind": "orbitals",
+      "element": "H",
+      "cutoff_bohr": 8,
+      "path": "SG15_v1.0/Orbitals_v2.0/H_DZP/H_gga_8au_100Ry_2s1p.orb",
+      "sha256": "1950927d0760d25a3cdbfa0f5d15acd74848087d0d01dd4b5046931ef82c7489"
+    },
+    {
+      "kind": "orbitals",
+      "element": "Li",
+      "cutoff_bohr": 8,
+      "path": "SG15_v1.0/Orbitals_v2.0/Li_DZP/Li_gga_8au_100Ry_4s1p.orb",
+      "sha256": "6af83d57fa9ff26ff4f8bf1fbf8168149edf041e1d4c78943eafde3881e2efed"
+    }
+  ]
+}

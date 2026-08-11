@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "system": "periodic LiH primitive Gamma/X versus 2 x 1 x 1 supercell Gamma",
+  "method": "PBE/PW91k UKS native FDE embedded_scf",
+  "basis": "SG15-v1.0 PBE plus StandardOrbitals-v2.0 DZP",
+  "ecutwfc_ry": 40,
+  "resource_source_commit": "3b634f1618f5c56baa97084a41ae17e801d46ab9",
+  "execution": {
+    "cluster": "ETH Euler",
+    "slurm_job": "10215305",
+    "mpi_ranks": 4,
+    "openmp_threads_per_rank": 4,
+    "tolerance_ry": 1e-06
+  }
+}

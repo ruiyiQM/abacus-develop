@@ -1,14 +1,18 @@
 # Frozen-density embedding DFT examples
 
-This category contains native ABACUS FDE-DFT examples.  Each case follows the
-usual example layout with committed `INPUT`, `KPT`, and `STRU` files, a
-`run.sh` entry point, and compact reference output.
+This category contains native ABACUS FDE-DFT examples. Each case has a `run.sh`
+entry point and compact reference output. A single-system case keeps committed
+`INPUT`, `KPT`, and `STRU` files at its root; an acceptance comparison keeps
+one set below each named representation.
 
-Available case:
+Available cases:
 
 - `01_f_ch3_cl_uks`: one PBE/PW91k UKS diabatic-state and coupling calculation
   for `[F-CH3-Cl]-`, using fixed alpha/beta fragment populations (the native
   two-Fermi path).
+- `02_lih_kpoint_folding`: periodic complex-k embedded SCF acceptance; compares
+  primitive-cell Gamma/X eigenvalues with a `2 x 1 x 1` supercell Gamma
+  spectrum for both spins.
 
 The maintained workflow also accepts PBE0-in-PBE and SCAN-in-PBE variants:
 the first name is the intrafragment solver functional, while the second is the
@@ -25,7 +29,6 @@ The workflow also provides explicit Gauss--Seidel/Jacobi updates and optional
 outer linear/Anderson density mixing; the case README documents safe defaults
 and MPI resource requirements.
 
-The case now includes `euler/run_single_point.sbatch`, a scratch-isolated
-20-rank x 4-thread Euler launch example. Reusable array and collection tools,
-including the tested scratch layout and operational checklist, are documented
-in `tools/fde/euler/README.md`.
+Both cases include scratch-isolated Euler batch wrappers. Reusable array and
+collection tools, including the tested scratch layout and operational
+checklist, are documented in `tools/fde/euler/README.md`.
