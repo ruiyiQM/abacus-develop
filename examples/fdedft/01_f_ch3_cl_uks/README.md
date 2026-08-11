@@ -72,8 +72,11 @@ retains NAO/PW initialization plus AO density matrices and orbitals between
 compatible FT cycles, while resetting SCF mixing history per request; use
 `maximum_persistent_sessions: 1` if node memory is more important than reuse.
 Pass a different source root and run root as the first and second positional
-arguments when needed. The more general single-point/array runner and compact
-result collector are described in `tools/fde/euler/README.md`.
+arguments when needed. Positional arguments three through five may override the
+ABACUS binary, runtime setup, and pinned-resource directory, respectively; this
+prevents a scratch source snapshot from silently selecting an older home
+binary. The more general single-point/array runner and compact result collector
+are described in `tools/fde/euler/README.md`.
 
 To prepare independent comparisons of all three NAKE choices, reuse the same
 ABACUS executable and run:
@@ -238,6 +241,8 @@ directory and submit with
 `--export=ABACUS_FDE_BINARY=/absolute/path/to/abacus`. This keeps the
 benchmark source, binary, and result directory explicit and prevents an older
 executable in the home working tree from being tested by accident.
+`ABACUS_FDE_RUNTIME_ENV` and `ABACUS_FDE_RESOURCE_ROOT` provide the analogous
+overrides for the module setup and an external verified resource directory.
 
 The committed tolerance is a same-model reproducibility gate. The 60 Ry
 comparison remains informative until its observed grid sensitivity has been

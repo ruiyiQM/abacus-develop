@@ -18,6 +18,7 @@ readonly BUDGET_ROOT=${2:-/cluster/scratch/${SLURM_JOB_USER:?}/abacus_test/fde-s
 readonly CASE_SOURCE=${SOURCE_ROOT}/examples/fdedft/01_f_ch3_cl_uks
 readonly ABACUS_BIN=${ABACUS_FDE_BINARY:-${SOURCE_ROOT}/build-gcc-openmpi/install/bin/abacus}
 readonly RUNTIME_ENV=${ABACUS_FDE_RUNTIME_ENV:-${SOURCE_ROOT}/euler/abacus_gcc_openmpi_env.sh}
+readonly RESOURCE_SOURCE=${ABACUS_FDE_RESOURCE_ROOT:-${CASE_SOURCE}/resources}
 readonly WORKFLOW_TOOL=${SOURCE_ROOT}/tools/fde/fde_workflow.py
 readonly CONFIGURE_TOOL=${SOURCE_ROOT}/tools/fde/euler/configure_slurm_workflow.py
 readonly COMPARE_TOOL=${SOURCE_ROOT}/tools/fde/compare_scientific_runs.py
@@ -58,8 +59,8 @@ if [[ -e "${RUN_ROOT}" ]]; then
     echo "ERROR: benchmark run already exists: ${RUN_ROOT}" >&2
     exit 3
 fi
-if [[ ! -d "${CASE_SOURCE}/resources" ]]; then
-    echo "ERROR: fetch pinned resources in ${CASE_SOURCE} before submission" >&2
+if [[ ! -d "${RESOURCE_SOURCE}" ]]; then
+    echo "ERROR: FDE resource directory is missing: ${RESOURCE_SOURCE}" >&2
     exit 4
 fi
 if [[ ! -x "${ABACUS_BIN}" ]]; then
@@ -88,8 +89,8 @@ cd "${RUN_ROOT}"
 python3 prepare_example.py \
     --abacus "${ABACUS_BIN}" \
     --mpi-ranks 1 \
-    --pseudo-dir "${CASE_SOURCE}/resources/pseudopotentials" \
-    --orbital-dir "${CASE_SOURCE}/resources/orbitals" \
+    --pseudo-dir "${RESOURCE_SOURCE}/pseudopotentials" \
+    --orbital-dir "${RESOURCE_SOURCE}/orbitals" \
     --variant-label "${variant}" \
     --ecutwfc "${cutoff}" \
     --scf-density-tolerance "${scf_tolerance}" \

@@ -15,29 +15,28 @@ set -Eeuo pipefail
 readonly SOURCE_ROOT=${1:-/cluster/home/zhourui/abacus-develop}
 readonly RUN_ROOT=${2:-/cluster/scratch/${SLURM_JOB_USER:?}/fdedft-example-${SLURM_JOB_ID:?}}
 readonly CASE_SOURCE=${SOURCE_ROOT}/examples/fdedft/01_f_ch3_cl_uks
-readonly RUNTIME_ENV=${SOURCE_ROOT}/euler/abacus_gcc_openmpi_env.sh
-readonly ABACUS_BIN=${SOURCE_ROOT}/build-gcc-openmpi/install/bin/abacus
+readonly ABACUS_BIN=${3:-${ABACUS_FDE_BINARY:-${SOURCE_ROOT}/build-gcc-openmpi/install/bin/abacus}}
+readonly RUNTIME_ENV=${4:-${ABACUS_FDE_RUNTIME_ENV:-${SOURCE_ROOT}/euler/abacus_gcc_openmpi_env.sh}}
+readonly RESOURCE_SOURCE=${5:-${ABACUS_FDE_RESOURCE_ROOT:-${CASE_SOURCE}/resources}}
 readonly WORKFLOW_TOOL=${SOURCE_ROOT}/tools/fde/fde_workflow.py
 readonly CONFIGURE_TOOL=${SOURCE_ROOT}/tools/fde/euler/configure_slurm_workflow.py
 
-for path in "${CASE_SOURCE}" "${RUNTIME_ENV}" "${ABACUS_BIN}" "${WORKFLOW_TOOL}" "${CONFIGURE_TOOL}"; do
+for path in "${CASE_SOURCE}" "${RUNTIME_ENV}" "${ABACUS_BIN}" "${RESOURCE_SOURCE}" "${WORKFLOW_TOOL}" "${CONFIGURE_TOOL}"; do
     if [[ ! -e "${path}" ]]; then
         echo "ERROR: required path is missing: ${path}" >&2
         exit 2
     fi
 done
-if [[ ! -d "${CASE_SOURCE}/resources" ]]; then
-    echo "ERROR: fetch the pinned example resources on the login node before submitting" >&2
-    echo "  cd ${CASE_SOURCE} && python3 fetch_default_resources.py" >&2
-    exit 2
-fi
 if [[ -e "${RUN_ROOT}" ]]; then
     echo "ERROR: run directory already exists: ${RUN_ROOT}" >&2
     exit 3
 fi
 
-mkdir -p "${RUN_ROOT}"
-cp -a "${CASE_SOURCE}/." "${RUN_ROOT}/"
+mkdir -p "${RUN_ROOT}/resources"
+for filename in INPUT KPT STRU default_resources.json geometry.csv prepare_example.py workflow.template.json; do
+    cp "${CASE_SOURCE}/${filename}" "${RUN_ROOT}/${filename}"
+done
+cp -a "${RESOURCE_SOURCE}/." "${RUN_ROOT}/resources/"
 
 # shellcheck source=/dev/null
 source "${RUNTIME_ENV}"
