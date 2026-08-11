@@ -90,6 +90,7 @@ def compare_reports(paths: Sequence[Path], labels: Sequence[str]) -> Dict[str, o
     return {
         "schema_version": 1,
         "baseline": reports[0]["label"],
+        "wall_time_semantics": "sum_of_subsystem_call_wall_times",
         "reports": reports,
     }
 
