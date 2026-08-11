@@ -54,6 +54,12 @@ The first request uses `density_seed`; later compatible requests use
 `resident_ao_density_matrix_and_orbitals`. Session logs live outside prunable
 FT cycle directories under `<state>/session-workers/`.
 
+ABACUS rebuilds its Hamiltonian and registered potential components for the
+positive ionic step used by a warm request. The FDE driver reattaches `PotFde`
+from resident distributed density/Hartree arrays at that boundary, so the AO
+density matrix and orbitals are retained without retaining a dangling
+potential-component pointer.
+
 ## Performance records
 
 Every active-fragment directory contains `fde_performance.json` with:

@@ -314,8 +314,11 @@ TEST_F(PotentialNewTest, AppendComponentTransfersOwnershipAndRunsInLifecycle)
     smooth_basis->nrxx = 8;
     create_potential(smooth_basis.get(), smooth_basis.get());
     potential->pot_register({"fixed"});
-    potential->append_component(
-        std::unique_ptr<elecstate::PotBase>(new elecstate::MockPotComponent("dynamic", 8)));
+    std::unique_ptr<elecstate::PotBase> dynamic(
+        new elecstate::MockPotComponent("dynamic", 8));
+    const elecstate::PotBase* dynamic_address = dynamic.get();
+    potential->append_component(std::move(dynamic));
+    EXPECT_TRUE(potential->contains_component(dynamic_address));
 
     Charge charge;
     potential->update_from_charge(&charge, ucell.get());
@@ -323,8 +326,11 @@ TEST_F(PotentialNewTest, AppendComponentTransfersOwnershipAndRunsInLifecycle)
     EXPECT_EQ(elecstate::MockPotComponent::dynamic_calls, 1);
     EXPECT_EQ(elecstate::MockPotComponent::destroyed, 0);
 
+    potential->pot_register({"fixed"});
+    EXPECT_FALSE(potential->contains_component(dynamic_address));
+
     potential.reset();
-    EXPECT_EQ(elecstate::MockPotComponent::destroyed, 2);
+    EXPECT_EQ(elecstate::MockPotComponent::destroyed, 3);
 }
 
 TEST_F(PotentialNewTest, AppendComponentRejectsNullOwnership)

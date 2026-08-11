@@ -886,6 +886,7 @@ void FdeLcaoDriver::reload_session_config(
         active_beta_local_.swap(active_beta_local);
         frozen_alpha_local_.swap(frozen_alpha_local);
         frozen_beta_local_.swap(frozen_beta_local);
+        frozen_hartree_local_.swap(frozen_hartree);
     }
 }
 
@@ -943,14 +944,10 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
                                                const UnitCell& unit_cell,
                                                elecstate::Potential& potential)
 {
-    if (embedding_potential_ != nullptr)
+    if (density_basis_ != nullptr && density_basis_ != &density_basis)
     {
-        if (density_basis_ != &density_basis)
-        {
-            throw std::invalid_argument(
-                "FDE session cannot replace its initialized PW density basis");
-        }
-        return;
+        throw std::invalid_argument(
+            "FDE session cannot replace its initialized PW density basis");
     }
     density_basis_ = &density_basis;
     if (config_.embedding_xc != "pbe")
@@ -962,11 +959,50 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
     {
         throw std::runtime_error("FDE embedded_scf requires an ABACUS build with Libxc");
     }
+    if (embedding_potential_ != nullptr
+        && potential.contains_component(embedding_potential_))
+    {
+        return;
+    }
     if (frozen_environment_.empty())
     {
         throw std::invalid_argument("FDE embedded_scf requires a frozen environment density");
     }
     const FrozenDensityArtifact& reference = frozen_environment_.front();
+    if (embedding_potential_ != nullptr)
+    {
+        // HamiltLCAO::pot_register replaces every Potential component at the
+        // start of an ionic step. The old raw pointer is therefore only an
+        // identity token here; never dereference it after the ownership test.
+        embedding_potential_ = nullptr;
+        if (frozen_alpha_local_.empty()
+            || frozen_alpha_local_.size() != frozen_beta_local_.size()
+            || frozen_alpha_local_.size() != frozen_hartree_local_.size())
+        {
+            throw std::runtime_error(
+                "FDE session lost the resident frozen potential data");
+        }
+        SpinDensity frozen;
+        frozen.alpha_bohr3 = frozen_alpha_local_;
+        frozen.beta_bohr3 = frozen_beta_local_;
+        PotFdeConfig potential_config;
+        potential_config.grid = make_grid(reference, density_basis, unit_cell);
+        potential_config.kinetic_functional = config_.kinetic_functional;
+        potential_config.density_floor_bohr3 = config_.density_floor_bohr3;
+        std::shared_ptr<const NonadditiveXcProvider> xc_provider(
+            new LibxcPbeProvider());
+        std::unique_ptr<PotFde> component(
+            new PotFde(&density_basis,
+                       frozen,
+                       frozen_hartree_local_,
+                       potential_config,
+                       xc_provider,
+                       use_gpu_));
+        embedding_potential_ = component.get();
+        potential.append_component(
+            std::unique_ptr<elecstate::PotBase>(component.release()));
+        return;
+    }
     const DensityGridPartition partition
         = DensityGridPartition::from_pw_basis(reference, density_basis);
     (void)DensityGridPartition::from_pw_basis(active_initial_, density_basis);
@@ -1043,6 +1079,7 @@ void FdeLcaoDriver::attach_embedding_potential(ModulePW::PW_Basis& density_basis
         {
             hartree[point] = frozen_hartree(0, point);
         }
+        frozen_hartree_local_ = hartree;
         PotFdeConfig potential_config;
         potential_config.grid = grid;
         potential_config.kinetic_functional = config_.kinetic_functional;

@@ -33,6 +33,12 @@ resident state is modified. `PotFde::reset_frozen_density` rebuilds the
 frozen-functional cache while retaining its initialized PW differential/FFT
 operator. The workflow creates a new worker whenever the signature changes.
 
+`HamiltLCAO` replaces the owned potential-component list at every positive
+ionic step. The FDE driver therefore checks component ownership and reattaches
+a fresh `PotFde` from resident frozen density/Hartree arrays before the next
+SCF. A cached raw component pointer is never dereferenced after
+`Potential::pot_register` has replaced it.
+
 This boundary is deliberate: reusing a wavefunction or mixing history across
 different active AO spaces would be fast but scientifically invalid.
 

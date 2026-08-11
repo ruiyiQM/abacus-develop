@@ -11,6 +11,7 @@
 #include "source_io/module_parameter/parameter.h"
 
 #include <map>
+#include <algorithm>
 #include <stdexcept>
 
 namespace elecstate
@@ -99,6 +100,15 @@ void Potential::append_component(std::unique_ptr<PotBase> component)
     }
     this->components.push_back(component.release());
     this->fixed_done = false;
+}
+
+bool Potential::contains_component(const PotBase* component) const
+{
+    return component != nullptr
+           && std::find(this->components.begin(),
+                        this->components.end(),
+                        component)
+                  != this->components.end();
 }
 
 void Potential::allocate()

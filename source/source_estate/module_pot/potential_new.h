@@ -80,6 +80,9 @@ class Potential : public PotBase
      * transferred to Potential.
      */
     void append_component(std::unique_ptr<PotBase> component);
+
+    /** True while this Potential owns the exact component address. */
+    bool contains_component(const PotBase* component) const;
     // update potential from current charge
     void update_from_charge(const Charge* const chg, const UnitCell* const ucell);
     // interface for SCF-converged, etxc vtxc for Energy, vnew for force_scc

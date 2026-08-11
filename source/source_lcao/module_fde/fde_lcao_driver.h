@@ -159,6 +159,7 @@ class FdeLcaoDriver
     std::vector<double> active_beta_local_;
     std::vector<double> frozen_alpha_local_;
     std::vector<double> frozen_beta_local_;
+    std::vector<double> frozen_hartree_local_;
     ModulePW::PW_Basis* density_basis_;
     PotFde* embedding_potential_;
 };
