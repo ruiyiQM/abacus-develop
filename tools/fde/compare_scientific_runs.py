@@ -275,14 +275,19 @@ def compare(
             for column, _ in off_diagonal_columns
         }
         determinant_phase = 1.0
+        phase_anchor = None
         if phase_invariant:
-            for column, _ in off_diagonal_columns:
-                reference_value = reference_off_diagonal[column]
-                trial_value = trial_off_diagonal[column]
-                if abs(reference_value) > 1.0e-15 and abs(trial_value) > 1.0e-15:
-                    determinant_phase = (
-                        1.0 if reference_value * trial_value >= 0.0 else -1.0)
-                    break
+            phase_anchor = max(
+                (column for column, _ in off_diagonal_columns),
+                key=lambda column: abs(
+                    reference_off_diagonal[column]
+                    * trial_off_diagonal[column]),
+            )
+            phase_product = (
+                reference_off_diagonal[phase_anchor]
+                * trial_off_diagonal[phase_anchor])
+            if abs(phase_product) > 1.0e-30:
+                determinant_phase = 1.0 if phase_product >= 0.0 else -1.0
         off_diagonal_deltas = {}
         signed_off_diagonal_deltas = {}
         for column, metric in off_diagonal_columns:
@@ -323,6 +328,7 @@ def compare(
         }
         if phase_invariant:
             point["determinant_phase_alignment"] = determinant_phase
+            point["determinant_phase_anchor"] = phase_anchor
             point["signed_off_diagonal_deltas"] = signed_off_diagonal_deltas
         points.append(point)
 

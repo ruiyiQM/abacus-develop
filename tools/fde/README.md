@@ -301,13 +301,16 @@ python3 tools/fde/summarize_performance.py \
   --json-output performance-comparison.json
 ```
 
-The first report is the baseline. The TSV output includes aggregate
-subsystem-wall-time speedup, subsystem calls, SCF iterations, retries, session
-reuse, electronic-step time, ABACUS overhead, and session startup. This wall
-field is the sum of subsystem-call durations; for concurrent Jacobi calls it is
-not an end-to-end scheduler elapsed time. Schema-1 reports remain readable,
-but their unavailable phase fields are reported as zero rather than inferred
-from human-readable logs.
+The first report is the baseline. For schema 2, speedup uses the sum of the
+nonoverlapping profiled phases, so persistent-session startup, workflow
+preparation, ABACUS work, and artifact validation are all included. The TSV
+also exposes the narrower ABACUS request-wall sum, subsystem calls, SCF
+iterations, retries, session reuse, electronic-step time, ABACUS overhead, and
+session startup. These are sums over subsystem calls; for concurrent Jacobi
+calls they are not an end-to-end scheduler elapsed time. Schema-1 reports
+remain readable and fall back to the request-wall sum, but their unavailable
+phase fields are reported as zero rather than inferred from human-readable
+logs.
 
 ## Scientific and k-point acceptance tools
 

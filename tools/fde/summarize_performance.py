@@ -52,6 +52,18 @@ def summarize_report(path: Path, label: str) -> Dict[str, object]:
         for name in PHASE_NAMES
     }
     profiled = math.fsum(phases.values())
+    if int(payload["schema_version"]) >= 2:
+        declared_profiled = nonnegative_number(
+            payload, "total_profiled_seconds")
+        scale = max(1.0, declared_profiled, profiled)
+        if abs(declared_profiled - profiled) > 1.0e-9 * scale:
+            raise PerformanceSummaryError(
+                f"phase totals do not match total_profiled_seconds in {path}")
+        comparison_time = profiled
+        comparison_source = "total_profiled_seconds"
+    else:
+        comparison_time = wall
+        comparison_source = "total_wall_time_seconds"
     retries = int(nonnegative_number(payload, "total_retries"))
     reuse = nonnegative_number(payload, "session_reuse_fraction")
     if reuse > 1.0:
@@ -69,7 +81,10 @@ def summarize_report(path: Path, label: str) -> Dict[str, object]:
         "session_reuse_fraction": reuse,
         "phase_totals_seconds": phases,
         "profiled_time_seconds": profiled,
-        "profiled_fraction_of_wall": profiled / wall if wall > 0.0 else 0.0,
+        "profiled_to_request_wall_ratio": (
+            profiled / wall if wall > 0.0 else 0.0),
+        "comparison_time_seconds": comparison_time,
+        "comparison_time_source": comparison_source,
     }
 
 
@@ -80,31 +95,36 @@ def compare_reports(paths: Sequence[Path], labels: Sequence[str]) -> Dict[str, o
         raise PerformanceSummaryError("path and label counts differ")
     reports = [summarize_report(path, label)
                for path, label in zip(paths, labels)]
-    baseline_wall = float(reports[0]["wall_time_seconds"])
+    baseline_time = float(reports[0]["comparison_time_seconds"])
     for index, report in enumerate(reports):
-        wall = float(report["wall_time_seconds"])
+        comparison_time = float(report["comparison_time_seconds"])
         report["speedup_vs_baseline"] = (
-            baseline_wall / wall if wall > 0.0 else None)
-        report["wall_time_delta_seconds"] = wall - baseline_wall
+            baseline_time / comparison_time if comparison_time > 0.0 else None)
+        report["comparison_time_delta_seconds"] = (
+            comparison_time - baseline_time)
         report["is_baseline"] = index == 0
     return {
         "schema_version": 1,
         "baseline": reports[0]["label"],
-        "wall_time_semantics": "sum_of_subsystem_call_wall_times",
+        "comparison_time_semantics": (
+            "schema-2 nonoverlapping profiled phases, with schema-1 aggregate "
+            "subsystem request wall time as a legacy fallback"),
         "reports": reports,
     }
 
 
 def render_tsv(summary: Mapping[str, object]) -> str:
     lines = [
-        "label\twall_s\tspeedup\tcalls\tscf_iterations\tretries\t"
-        "session_reuse\telectronic_s\tabacus_overhead_s\tsession_startup_s"
+        "label\tcomparison_s\trequest_wall_s\tspeedup\tcalls\t"
+        "scf_iterations\tretries\tsession_reuse\telectronic_s\t"
+        "abacus_overhead_s\tsession_startup_s"
     ]
     for report in summary["reports"]:
         speedup = report["speedup_vs_baseline"]
         phases = report["phase_totals_seconds"]
         lines.append("\t".join((
             str(report["label"]),
+            f"{float(report['comparison_time_seconds']):.6g}",
             f"{float(report['wall_time_seconds']):.6g}",
             "" if speedup is None else f"{float(speedup):.6g}",
             str(report["subsystem_calls"]),

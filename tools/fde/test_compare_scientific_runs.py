@@ -107,7 +107,7 @@ class ScientificComparisonTest(unittest.TestCase):
             report = comparison.compare(settings, baseline, candidate)
 
             self.assertFalse(report["passed"])
-            self.assertAlmostEqual(report["maxima"]["h12_delta_ry"], 0.2)
+            self.assertAlmostEqual(report["maxima"]["overlap_delta"], 0.02)
 
     def test_signed_budget_still_rejects_determinant_sign_flip(self):
         with tempfile.TemporaryDirectory() as directory:

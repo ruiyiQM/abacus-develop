@@ -19,7 +19,7 @@ class SummarizePerformanceTest(unittest.TestCase):
         payload = {
             "schema_version": schema,
             "total_wall_time_seconds": wall,
-            "total_electronic_step_time_seconds": 40.0,
+            "total_electronic_step_time_seconds": 0.4 * wall,
             "total_subsystem_calls": 4,
             "total_scf_iterations": 20,
         }
@@ -27,12 +27,13 @@ class SummarizePerformanceTest(unittest.TestCase):
             payload.update({
                 "total_retries": 1,
                 "session_reuse_fraction": 0.75,
+                "total_profiled_seconds": wall,
                 "phase_totals_seconds": {
-                    "workflow_preparation": 2.0,
-                    "session_startup": 3.0,
-                    "electronic_steps": 40.0,
-                    "abacus_overhead": 5.0,
-                    "artifact_validation": 1.0,
+                    "workflow_preparation": 0.02 * wall,
+                    "session_startup": 0.03 * wall,
+                    "electronic_steps": 0.4 * wall,
+                    "abacus_overhead": 0.54 * wall,
+                    "artifact_validation": 0.01 * wall,
                 },
             })
         path.write_text(json.dumps(payload), encoding="utf-8")
@@ -52,8 +53,8 @@ class SummarizePerformanceTest(unittest.TestCase):
             self.assertEqual(
                 summary["reports"][1]["speedup_vs_baseline"], 2.0)
             self.assertEqual(
-                summary["reports"][0]["profiled_time_seconds"], 51.0)
-            self.assertIn("gpu\t50\t2", performance.render_tsv(summary))
+                summary["reports"][0]["profiled_time_seconds"], 100.0)
+            self.assertIn("gpu\t50\t50\t2", performance.render_tsv(summary))
 
     def test_accepts_legacy_schema_without_inventing_phases(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -65,6 +66,19 @@ class SummarizePerformanceTest(unittest.TestCase):
             item = summary["reports"][0]
             self.assertEqual(item["profiled_time_seconds"], 0.0)
             self.assertEqual(item["session_reuse_fraction"], 0.0)
+            self.assertEqual(
+                item["comparison_time_source"], "total_wall_time_seconds")
+
+    def test_rejects_inconsistent_profile_total(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "invalid-profile.json"
+            self.write_report(report, 10.0)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload["total_profiled_seconds"] = 9.0
+            report.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaises(performance.PerformanceSummaryError):
+                performance.compare_reports([report], ["invalid"])
 
     def test_rejects_invalid_reuse_fraction(self):
         with tempfile.TemporaryDirectory() as directory:
