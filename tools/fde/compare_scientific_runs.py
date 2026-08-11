@@ -229,6 +229,10 @@ def compare(
         raise ScientificComparisonError("state-energy columns differ between runs")
     if set(baseline) != set(candidate):
         raise ScientificComparisonError("coordinate sets differ between runs")
+    phase_invariant = budget.get("phase_invariant_off_diagonal", False)
+    if not isinstance(phase_invariant, bool):
+        raise ScientificComparisonError(
+            "phase_invariant_off_diagonal must be a Boolean")
 
     maxima = {
         "state_energy_delta_ry": 0.0,
@@ -257,18 +261,36 @@ def compare(
         ]
         reference_gap = reference_energies[1] - reference_energies[0]
         trial_gap = trial_energies[1] - trial_energies[0]
-        overlap_delta = (
-            finite(trial, "overlap", candidate_path)
-            - finite(reference, "overlap", baseline_path)
+        off_diagonal_columns = (
+            ("overlap", "overlap_delta"),
+            ("h12_ry", "h12_delta_ry"),
+            ("orthogonalized_coupling_ry", "coupling_delta_ry"),
         )
-        h12_delta = (
-            finite(trial, "h12_ry", candidate_path)
-            - finite(reference, "h12_ry", baseline_path)
-        )
-        coupling_delta = (
-            finite(trial, "orthogonalized_coupling_ry", candidate_path)
-            - finite(reference, "orthogonalized_coupling_ry", baseline_path)
-        )
+        reference_off_diagonal = {
+            column: finite(reference, column, baseline_path)
+            for column, _ in off_diagonal_columns
+        }
+        trial_off_diagonal = {
+            column: finite(trial, column, candidate_path)
+            for column, _ in off_diagonal_columns
+        }
+        determinant_phase = 1.0
+        if phase_invariant:
+            for column, _ in off_diagonal_columns:
+                reference_value = reference_off_diagonal[column]
+                trial_value = trial_off_diagonal[column]
+                if abs(reference_value) > 1.0e-15 and abs(trial_value) > 1.0e-15:
+                    determinant_phase = (
+                        1.0 if reference_value * trial_value >= 0.0 else -1.0)
+                    break
+        off_diagonal_deltas = {}
+        signed_off_diagonal_deltas = {}
+        for column, metric in off_diagonal_columns:
+            reference_value = reference_off_diagonal[column]
+            trial_value = trial_off_diagonal[column]
+            signed_off_diagonal_deltas[metric] = trial_value - reference_value
+            off_diagonal_deltas[metric] = (
+                determinant_phase * trial_value - reference_value)
         maxima["state_energy_delta_ry"] = max(
             maxima["state_energy_delta_ry"],
             *(abs(value) for value in energy_deltas),
@@ -277,29 +299,32 @@ def compare(
             maxima["energy_gap_delta_ry"], abs(trial_gap - reference_gap)
         )
         maxima["overlap_delta"] = max(
-            maxima["overlap_delta"], abs(overlap_delta)
+            maxima["overlap_delta"],
+            abs(off_diagonal_deltas["overlap_delta"]),
         )
         maxima["h12_delta_ry"] = max(
-            maxima["h12_delta_ry"], abs(h12_delta)
+            maxima["h12_delta_ry"],
+            abs(off_diagonal_deltas["h12_delta_ry"]),
         )
         maxima["coupling_delta_ry"] = max(
-            maxima["coupling_delta_ry"], abs(coupling_delta)
+            maxima["coupling_delta_ry"],
+            abs(off_diagonal_deltas["coupling_delta_ry"]),
         )
-        points.append(
-            {
-                "geometry": trial["geometry"],
-                "coordinate_angstrom": finite(
-                    trial, "coordinate_angstrom", candidate_path
-                ),
-                "state_energy_deltas_ry": dict(
-                    zip(candidate_energies, energy_deltas)
-                ),
-                "energy_gap_delta_ry": trial_gap - reference_gap,
-                "overlap_delta": overlap_delta,
-                "h12_delta_ry": h12_delta,
-                "coupling_delta_ry": coupling_delta,
-            }
-        )
+        point = {
+            "geometry": trial["geometry"],
+            "coordinate_angstrom": finite(
+                trial, "coordinate_angstrom", candidate_path
+            ),
+            "state_energy_deltas_ry": dict(
+                zip(candidate_energies, energy_deltas)
+            ),
+            "energy_gap_delta_ry": trial_gap - reference_gap,
+            **off_diagonal_deltas,
+        }
+        if phase_invariant:
+            point["determinant_phase_alignment"] = determinant_phase
+            point["signed_off_diagonal_deltas"] = signed_off_diagonal_deltas
+        points.append(point)
 
     tolerances = budget.get("tolerances", {})
     if not isinstance(tolerances, dict):
@@ -347,6 +372,8 @@ def compare(
         "candidate": str(candidate_path.resolve()),
         "state_energy_columns": baseline_energies,
         "point_count": len(points),
+        "off_diagonal_comparison": (
+            "determinant_phase_aligned" if phase_invariant else "signed"),
         "maxima": maxima,
         "crossing_brackets": {
             "baseline": baseline_brackets,

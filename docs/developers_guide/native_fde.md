@@ -67,34 +67,31 @@ copying the label from the cycle-zero seed.
 
 ### Exchange-correlation capability boundary
 
-Ordinary ABACUS support for an XC functional does not by itself make that
-functional available to native FDE. The embedded-SCF path must also be able to
-persist every frozen-fragment field and apply the nonadditive functional
-derivative to the active subsystem.
+Native FDE distinguishes the functional used by the active-fragment solver
+from the functional derivative used for the nonadditive embedding potential.
+Ordinary ABACUS PBE0 and SCAN machinery can therefore be used inside each
+fragment even though the current embedding provider remains PBE-only.
 
-| XC family | Native FDE status | Missing FDE data or operator |
-|---|---|---|
-| PBE GGA | Supported | None within the documented semilocal, no-NLCC contract |
-| SCAN/r2SCAN meta-GGA | Rejected explicitly | Pointwise fragment kinetic-energy density `tau` in density artifacts and the associated generalized-Kohn-Sham `delta Exc / delta tau` operator |
-| PBE0/HSE/HF and other hybrids | Rejected explicitly | Fragment density-matrix/exchange artifacts and a nonlocal interfragment exact-exchange operator |
-| SCAN0 and other hybrid meta-GGAs | Rejected explicitly | Both of the preceding meta-GGA and exact-exchange capabilities |
+| `fragment_xc` | `embedding_xc` | Native FDE status | Interpretation |
+|---|---|---|---|
+| PBE | PBE | Supported | Semilocal PBE-in-PBE embedding within the documented no-NLCC contract |
+| PBE0 | PBE | Supported | Fragment-local exact exchange; no nonadditive interfragment exact exchange |
+| SCAN | PBE | Supported | Fragment-local meta-GGA `tau` terms; no nonadditive meta-GGA `tau` contribution |
+| HSE/HF/r2SCAN or other names | any | Rejected explicitly | Not accepted by the native fragment-XC selector |
+| any functional | non-PBE | Rejected explicitly | The native nonadditive XC provider currently implements PBE only |
 
-ABACUS evaluates meta-GGA terms from both density and orbital kinetic-energy
-density. `FrozenDensityArtifact` currently stores spin densities plus a scalar
-orbital kinetic energy, not a pointwise `tau` field. `PotFde` also contributes
-only a multiplicative real-space spin potential. Reusing the ordinary SCAN
-local-density derivative while omitting the `tau` derivative would therefore
-be an incomplete meta-GGA FDE calculation, so `embedded_scf` fails before the
-SCF starts.
+PBE0-in-PBE and SCAN-in-PBE are controlled embedding approximations, not
+full-system PBE0 or SCAN calculations. The active-fragment generalized
+Kohn--Sham solve uses the ordinary ABACUS implementation of the selected
+fragment functional. The frozen-environment contribution passed through
+`PotFde` remains a multiplicative, density-only PBE nonadditive potential.
 
-For a hybrid functional, the missing nonadditive exact-exchange contribution
-depends on occupied fragment density matrices and is a nonlocal operator. It
-cannot be represented by the local spin-grid interface of
-`NonadditiveXcProvider`/`PotFde`. The ordinary ABACUS EXX operator may still be
-used outside FDE, but enabling it only for each isolated active-fragment SCF
-would omit interfragment exact exchange and would not define a consistent
-hybrid FDE energy or coupling. `SCAN0` needs both this EXX extension and the
-meta-GGA `tau` extension.
+A full nonadditive meta-GGA extension would require pointwise frozen-fragment
+kinetic-energy density `tau` in the density artifacts and the corresponding
+generalized-Kohn--Sham derivative. A full nonadditive hybrid extension would
+require occupied-fragment density-matrix/exchange artifacts and a nonlocal
+interfragment exact-exchange operator. Neither missing operator is silently
+approximated by the current implementation.
 
 ## Pseudopotential and AO-subspace boundary
 
@@ -652,8 +649,8 @@ diagonalization, controlled multi-fragment FDE-diab approximations, and the
 semilocal analytic diagonal-state force ledger. The native embedded-SCF path
 supports MPI-distributed AO and PW layouts and periodic complex k-point
 sampling with `kpar 1`; k-point-parallel pools, periodic determinant coupling,
-hybrid functionals, spinors, and analytic off-diagonal coupling/overlap
-derivatives remain separate follow-up work.
+nonadditive hybrid/meta-GGA embedding, spinors, and analytic off-diagonal
+coupling/overlap derivatives remain separate follow-up work.
 
 ## Acceptance gates
 

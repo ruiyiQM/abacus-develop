@@ -54,6 +54,82 @@ def budget():
 
 
 class ScientificComparisonTest(unittest.TestCase):
+    def test_phase_invariant_budget_accepts_determinant_sign_flip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.tsv"
+            candidate = root / "candidate.tsv"
+            write_pes(
+                baseline,
+                [["g0", 0.0, -10.0, -9.9, 0.01, -0.1, -0.002]],
+            )
+            write_pes(
+                candidate,
+                [["g0", 0.0, -10.0, -9.9, -0.01, 0.1, 0.002]],
+            )
+            settings = budget()
+            settings["phase_invariant_off_diagonal"] = True
+            settings["convergence"]["required"] = False
+
+            report = comparison.compare(settings, baseline, candidate)
+
+            self.assertTrue(report["passed"])
+            self.assertEqual(
+                report["off_diagonal_comparison"],
+                "determinant_phase_aligned",
+            )
+            self.assertEqual(report["maxima"]["coupling_delta_ry"], 0.0)
+            self.assertEqual(
+                report["points"][0]["determinant_phase_alignment"], -1.0)
+            self.assertAlmostEqual(
+                report["points"][0]["signed_off_diagonal_deltas"]
+                ["coupling_delta_ry"],
+                0.004,
+            )
+
+    def test_phase_alignment_rejects_inconsistent_h12_sign(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.tsv"
+            candidate = root / "candidate.tsv"
+            write_pes(
+                baseline,
+                [["g0", 0.0, -10.0, -9.9, 0.01, -0.1, -0.002]],
+            )
+            write_pes(
+                candidate,
+                [["g0", 0.0, -10.0, -9.9, -0.01, -0.1, 0.002]],
+            )
+            settings = budget()
+            settings["phase_invariant_off_diagonal"] = True
+            settings["convergence"]["required"] = False
+
+            report = comparison.compare(settings, baseline, candidate)
+
+            self.assertFalse(report["passed"])
+            self.assertAlmostEqual(report["maxima"]["h12_delta_ry"], 0.2)
+
+    def test_signed_budget_still_rejects_determinant_sign_flip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.tsv"
+            candidate = root / "candidate.tsv"
+            write_pes(
+                baseline,
+                [["g0", 0.0, -10.0, -9.9, 0.01, -0.1, -0.002]],
+            )
+            write_pes(
+                candidate,
+                [["g0", 0.0, -10.0, -9.9, -0.01, 0.1, 0.002]],
+            )
+            settings = budget()
+            settings["convergence"]["required"] = False
+
+            report = comparison.compare(settings, baseline, candidate)
+
+            self.assertFalse(report["passed"])
+            self.assertEqual(report["off_diagonal_comparison"], "signed")
+
     def test_passes_small_numerical_changes_and_tracks_crossing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

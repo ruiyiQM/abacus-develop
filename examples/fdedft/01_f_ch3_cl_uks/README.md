@@ -197,6 +197,12 @@ libraries, and compiler, so they are comparison targets rather than bitwise
 golden files.  `reference/provenance.json` records the exact source and Euler
 layout used to produce them.
 
+The sign of an occupied orbital is arbitrary. A consistent determinant-phase
+change flips overlap, H12, and the signed coupling together without changing
+the nonorthogonal eigenproblem. The committed scientific budget therefore sets
+`phase_invariant_off_diagonal: true` and aligns one common determinant phase;
+the comparison JSON still records the raw signed deltas for auditing.
+
 The off-diagonal result is the documented state-specific linearized
 transition-density approximation, not an exact many-electron coupling.
 

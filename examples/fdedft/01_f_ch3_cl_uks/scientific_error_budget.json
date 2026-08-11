@@ -3,6 +3,7 @@
   "case": "[F-CH3-Cl]- PBE/PW91k UKS two-state single point",
   "coordinate_tolerance_angstrom": 1e-10,
   "require_same_crossing_brackets": true,
+  "phase_invariant_off_diagonal": true,
   "tolerances": {
     "maximum_state_energy_delta_ry": 0.0001,
     "maximum_energy_gap_delta_ry": 0.0001,
@@ -19,6 +20,7 @@
     "state_energy": "Reproducibility budget for the same 40 Ry/DZP model, not a complete-basis error.",
     "energy_gap": "Protects the relative diabatic surface separation from a common total-energy shift.",
     "coupling": "Applies to the orthogonalized linearized FDE-FODFT coupling.",
+    "phase": "One common determinant phase is aligned before comparing overlap, H12, and coupling because an occupied-orbital sign change flips all three without changing the diabatic physics.",
     "cutoff_scan": "A 60 Ry comparison quantifies model discretization and is reported before this budget is tightened."
   }
 }
