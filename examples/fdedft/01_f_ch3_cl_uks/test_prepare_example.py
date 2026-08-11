@@ -85,6 +85,8 @@ class PrepareExampleTest(unittest.TestCase):
         self.assertEqual(workflow["controls"]["embedding_xc"], "pbe")
         self.assertEqual(workflow["controls"]["coupling_provider"],
                          "symmetric_linearized")
+        self.assertTrue(
+            workflow["controls"]["adaptive_scf"]["auto_tune"]["enabled"])
         self.assertEqual(workflow["states"][0]["fragments"]["F"]["charge"], -1)
         self.assertEqual(workflow["states"][1]["fragments"]["F"]["spin"], 1)
 

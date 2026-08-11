@@ -98,3 +98,9 @@ slabs continue to use ABACUS' MPI CPU PW transform, followed by GPU pointwise
 NAKE work on each rank. A CUDA-aware distributed FFT requires a separate
 decomposition/backend project and is not inferred from device-resident local
 buffers.
+
+Workflow-level SCF policy and phase aggregation are intentionally implemented
+under `tools/fde/workflow/`. Native `FdeLcaoDriver`/`PotFde` timers remain the
+fine-grained source for C++ phases, while the Python profiler owns cross-process
+and cross-cycle accounting. Keeping those boundaries separate prevents a
+process-wide profiler singleton from leaking state between resident sessions.

@@ -22,6 +22,8 @@ _TOOLS_DIRECTORY = str(Path(__file__).resolve().parent)
 if _TOOLS_DIRECTORY not in sys.path:
     sys.path.insert(0, _TOOLS_DIRECTORY)
 from fde_session import FdeSessionProcess, default_environment
+from workflow.profiler import aggregate_profiles, subsystem_phase_profile
+from workflow.scf_policy import select_adaptive_stage
 
 
 class WorkflowError(RuntimeError):
@@ -403,9 +405,38 @@ def validate_spec(spec: Mapping[str, object]) -> None:
         _validate_mixing_settings(settings, f"mixing recovery fallback {index}")
 
     if adaptive_enabled:
-        unknown_adaptive = set(adaptive) - {"enabled", "force_strict_cycle", "stages"}
+        unknown_adaptive = set(adaptive) - {
+            "enabled", "force_strict_cycle", "stages", "auto_tune",
+        }
         if unknown_adaptive:
             raise WorkflowError("adaptive_scf contains unsupported keys")
+        auto_tune = adaptive.get("auto_tune", {})
+        if not isinstance(auto_tune, dict):
+            raise WorkflowError("adaptive_scf.auto_tune must be a JSON object")
+        unknown_auto = set(auto_tune) - {
+            "enabled", "stagnation_ratio", "stagnation_cycles",
+            "iteration_pressure_fraction", "promote_on_recovery",
+        }
+        if unknown_auto:
+            raise WorkflowError("adaptive_scf.auto_tune contains unsupported keys")
+        for name in ("enabled", "promote_on_recovery"):
+            value = auto_tune.get(name, name == "promote_on_recovery")
+            if not isinstance(value, bool):
+                raise WorkflowError(f"adaptive_scf.auto_tune.{name} must be a boolean")
+        for name, default in (("stagnation_ratio", 0.9),
+                              ("iteration_pressure_fraction", 0.8)):
+            value = auto_tune.get(name, default)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))
+                    or float(value) <= 0.0 or float(value) > 1.0):
+                raise WorkflowError(
+                    f"adaptive_scf.auto_tune.{name} must be in (0, 1]")
+        stagnation_cycles = auto_tune.get("stagnation_cycles", 2)
+        if (isinstance(stagnation_cycles, bool)
+                or not isinstance(stagnation_cycles, int)
+                or stagnation_cycles < 1):
+            raise WorkflowError(
+                "adaptive_scf.auto_tune.stagnation_cycles must be positive")
         stages = adaptive_scf_stages(controls)
         if len(stages) < 2:
             raise WorkflowError("adaptive_scf requires at least two stages")
@@ -1053,7 +1084,8 @@ def patch_input(path: Path, values: Mapping[str, object]) -> None:
 
 def scf_schedule(controls: Mapping[str, object],
                  cycle: int,
-                 previous_density_rms: float | None = None) -> Dict[str, object]:
+                 previous_density_rms: float | None = None,
+                 history: Sequence[Mapping[str, object]] = ()) -> Dict[str, object]:
     if cycle <= 0:
         raise WorkflowError("freeze-thaw cycle must be positive")
     adaptive = controls.get("adaptive_scf", {})
@@ -1063,16 +1095,21 @@ def scf_schedule(controls: Mapping[str, object],
         confirmations = int(controls.get("strict_confirmation_cycles", 2))
         force_strict = int(adaptive.get(
             "force_strict_cycle", maximum_cycles - confirmations + 1))
-        if cycle >= force_strict:
-            stage = stages[-1]
-        elif previous_density_rms is None:
-            stage = stages[0]
-        else:
-            stage = stages[-1]
-            for candidate in stages:
-                if previous_density_rms >= float(candidate["minimum_density_rms"]):
-                    stage = candidate
-                    break
+        try:
+            selection = select_adaptive_stage(
+                stages,
+                cycle,
+                previous_density_rms,
+                maximum_cycles,
+                confirmations,
+                force_strict,
+                history,
+                adaptive.get("auto_tune", {}),
+            )
+        except ValueError as error:
+            raise WorkflowError(str(error)) from error
+        stage = selection["stage"]
+        assert isinstance(stage, dict)
         return {
             "mode": str(stage["name"]),
             "strict": bool(stage["strict"]),
@@ -1080,6 +1117,7 @@ def scf_schedule(controls: Mapping[str, object],
             "density_tolerance": float(stage["density_tolerance"]),
             "stage": stage,
             "previous_density_rms": previous_density_rms,
+            "decision": selection["decision"],
         }
     inexact_cycles = int(controls.get("inexact_freeze_thaw_cycles", 0))
     strict = cycle > inexact_cycles
@@ -1307,7 +1345,7 @@ def write_state_performance(state_directory: Path,
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 numeric_sums[name] += value
     summary: Dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "subsystem_calls": len(records),
         "total_wall_time_seconds": numeric_sums["wall_time_seconds"],
         "total_electronic_step_time_seconds":
@@ -1315,6 +1353,7 @@ def write_state_performance(state_directory: Path,
         "total_scf_iterations": int(numeric_sums["iterations"]),
         "records": records,
     }
+    summary.update(aggregate_profiles(records))
     _atomic_json(state_directory / "performance.json", summary)
     _atomic_text(
         state_directory / "performance.jsonl",
@@ -1324,8 +1363,13 @@ def write_state_performance(state_directory: Path,
 def write_workflow_performance(root: Path) -> None:
     """Aggregate completed state reports under a PES work directory."""
     state_reports: List[Dict[str, object]] = []
+    all_records: List[Mapping[str, object]] = []
     for path in sorted(root.glob("*/*/performance.json")):
         report = json.loads(path.read_text(encoding="utf-8"))
+        records = report.get("records", [])
+        if isinstance(records, list):
+            all_records.extend(record for record in records
+                               if isinstance(record, dict))
         state_reports.append({
             "geometry": path.parent.parent.name,
             "state": path.parent.name,
@@ -1335,9 +1379,10 @@ def write_workflow_performance(root: Path) -> None:
             "total_electronic_step_time_seconds":
                 report.get("total_electronic_step_time_seconds", 0.0),
             "total_scf_iterations": report.get("total_scf_iterations", 0),
+            "phase_totals_seconds": report.get("phase_totals_seconds", {}),
         })
-    _atomic_json(root / "fde_performance.json", {
-        "schema_version": 1,
+    workflow_summary: Dict[str, object] = {
+        "schema_version": 2,
         "states": state_reports,
         "total_subsystem_calls": sum(int(item["subsystem_calls"])
                                      for item in state_reports),
@@ -1348,7 +1393,9 @@ def write_workflow_performance(root: Path) -> None:
             for item in state_reports),
         "total_scf_iterations": sum(int(item["total_scf_iterations"])
                                     for item in state_reports),
-    })
+    }
+    workflow_summary.update(aggregate_profiles(all_records))
+    _atomic_json(root / "fde_performance.json", workflow_summary)
 
 
 def remove_abacus_restart_files(job_directory: Path) -> None:
@@ -1504,6 +1551,7 @@ def run_fragment_scf(
     retry = 0
     attempt_densities = dict(input_densities)
     while True:
+        attempt_started = time.monotonic()
         directory_name = (active_label if retry == 0
                           else f"{active_label}-retry-{retry:02d}")
         job_directory = state_directory / f"cycle-{cycle:03d}" / directory_name
@@ -1546,8 +1594,9 @@ def run_fragment_scf(
         environment = dict(os.environ)
         environment.setdefault("OMP_NUM_THREADS", "1")
         launch_metrics: Dict[str, object]
+        launch_started = time.monotonic()
+        preparation_seconds = launch_started - attempt_started
         if session_pool is None:
-            launch_started = time.monotonic()
             with log_path.open("w", encoding="utf-8") as log:
                 completed = subprocess.run(
                     list(spec["abacus_command"]), cwd=job_directory,
@@ -1581,10 +1630,14 @@ def run_fragment_scf(
             "device": str(controls.get("device", "cpu")).lower(),
             "ks_solver": str(controls.get("ks_solver", "lapack")),
             "mixing": mixing,
+            "workflow_preparation_seconds": preparation_seconds,
         })
+        launch_metrics["phase_times_seconds"] = subsystem_phase_profile(
+            launch_metrics)
         _atomic_json(job_directory / "fde_performance.json", launch_metrics)
         if int(launch_metrics["returncode"]) != 0:
             raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
+        artifact_started = time.monotonic()
         density_path, density_data = select_scf_density(
             job_directory, bool(controls.get("allow_partial_scf", False)))
         inner_converged = bool(density_data["scf_converged"])
@@ -1597,6 +1650,11 @@ def run_fragment_scf(
                 f"partial ABACUS job produced a final FDE fragment in {job_directory}")
         if bool(controls.get("remove_abacus_restart_files", False)):
             remove_abacus_restart_files(job_directory)
+        launch_metrics["artifact_validation_seconds"] = (
+            time.monotonic() - artifact_started)
+        launch_metrics["phase_times_seconds"] = subsystem_phase_profile(
+            launch_metrics)
+        _atomic_json(job_directory / "fde_performance.json", launch_metrics)
         attempt_densities[active_label] = density_path.resolve()
         attempt_metrics = dict(launch_metrics)
         attempt_metrics.update({
@@ -1611,6 +1669,7 @@ def run_fragment_scf(
             break
         retry += 1
 
+    attempt_profile = aggregate_profiles(attempts)
     metrics = {
         "converged": inner_converged,
         "iterations": sum(
@@ -1629,6 +1688,9 @@ def run_fragment_scf(
         "mixing": mixing,
         "retry_count": retry,
         "attempts": attempts,
+        "phase_times_seconds": attempt_profile["phase_totals_seconds"],
+        "session_reused": any(bool(item.get("session_reused", False))
+                              for item in attempts),
     }
     return {
         "label": active_label,
@@ -1687,7 +1749,7 @@ def _run_state(spec: Mapping[str, object],
     neutral = {fragment["label"]: int(fragment["neutral_valence_electrons"])
                for fragment in fragments}
     for cycle in range(start_cycle, maximum_cycles + 1):
-        schedule = scf_schedule(controls, cycle, previous_density_rms)
+        schedule = scf_schedule(controls, cycle, previous_density_rms, history)
         strict_scf = bool(schedule["strict"])
         old_density_data = {label: read_density(path) for label, path in densities.items()}
         cycle_fragments: List[Mapping[str, object]] = []
@@ -1766,6 +1828,7 @@ def _run_state(spec: Mapping[str, object],
                             "maximum_iterations": schedule["maximum_iterations"],
                             "density_tolerance": schedule["density_tolerance"],
                             "previous_density_rms": schedule["previous_density_rms"],
+                            "decision": schedule.get("decision"),
                         },
                         "all_inner_scf_converged": all_inner_converged,
                         "strict_cycle_complete": strict_cycle_complete,

@@ -259,6 +259,14 @@ class FdeWorkflowTest(unittest.TestCase):
         self.assertEqual(
             fde_workflow.scf_schedule(controls, 10, 1.0)["mode"], "strict")
 
+        controls["adaptive_scf"]["auto_tune"] = {"enabled": True}
+        history = [{"density_rms": 2e-3, "inner_scf": {
+            "F": {"retry_count": 1, "iterations": 10,
+                  "maximum_iterations": 20}}}]
+        promoted = fde_workflow.scf_schedule(controls, 2, 2e-3, history)
+        self.assertEqual(promoted["mode"], "medium")
+        self.assertEqual(promoted["decision"]["reason"], "recovery_pressure")
+
     def test_validates_adaptive_scf_and_recovery_policy(self):
         spec = self.spec()
         spec["controls"] = {
@@ -283,6 +291,12 @@ class FdeWorkflowTest(unittest.TestCase):
             },
         }
         fde_workflow.validate_spec(spec)
+        spec["controls"]["adaptive_scf"]["auto_tune"] = {
+            "enabled": True, "iteration_pressure_fraction": 1.5,
+        }
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "must be in"):
+            fde_workflow.validate_spec(spec)
+        del spec["controls"]["adaptive_scf"]["auto_tune"]
         spec["controls"]["adaptive_scf"]["stages"][1]["minimum_density_rms"] = 1e-4
         with self.assertRaisesRegex(fde_workflow.WorkflowError, "must be zero"):
             fde_workflow.validate_spec(spec)

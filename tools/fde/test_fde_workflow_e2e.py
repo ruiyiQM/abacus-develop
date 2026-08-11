@@ -371,6 +371,9 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 (work / "fde_performance.json").read_text(encoding="utf-8"))
             self.assertEqual(performance["total_subsystem_calls"], 8)
             self.assertEqual(performance["total_scf_iterations"], 16)
+            self.assertEqual(performance["schema_version"], 2)
+            self.assertIn("phase_totals_seconds", performance)
+            self.assertIn("electronic_step_fraction_of_abacus", performance)
             self.assertAlmostEqual(
                 performance["total_electronic_step_time_seconds"], 0.4)
 

@@ -219,6 +219,13 @@ residual stalls.
 "adaptive_scf": {
   "enabled": true,
   "force_strict_cycle": 45,
+  "auto_tune": {
+    "enabled": true,
+    "stagnation_ratio": 0.9,
+    "stagnation_cycles": 2,
+    "iteration_pressure_fraction": 0.8,
+    "promote_on_recovery": true
+  },
   "stages": [
     {
       "name": "loose",
@@ -251,6 +258,31 @@ requires `strict_confirmation_cycles` complete strict cycles, the FT density
 criterion, and the energy criterion.  The legacy fixed
 `inexact_freeze_thaw_cycles` schedule remains supported but cannot be combined
 with `adaptive_scf`.
+
+With `auto_tune.enabled`, the residual threshold remains the baseline stage.
+The policy promotes by at most one stage when recent FT residual ratios
+stagnate, the preceding subsystem SCF consumes a configured fraction of its
+iteration limit, or a recovery retry was required. It never demotes a stage and
+`force_strict_cycle` always wins. The selected/baseline stages, residual ratios,
+iteration fraction, recovery flag, and decision reason are stored in each
+checkpoint, so automatic behavior is reproducible rather than heuristic state
+hidden in the driver.
+
+## Structured workflow profiler
+
+`tools/fde/workflow/profiler.py` gives every subsystem call five nonoverlapping
+phases: workflow preparation, persistent-session startup, electronic steps,
+other ABACUS work, and artifact validation. `performance.json` and the top-level
+`fde_performance.json` use schema 2 and aggregate these phases while preserving
+the previous wall-time/iteration fields. They also report electronic-step
+fraction within ABACUS, persistent-session reuse fraction, and total recovery
+retries. `performance.jsonl` remains one restart-safe record per subsystem call.
+
+ABACUS' native `FdeLcaoDriver` and `PotFde` timers still provide the detailed
+breakdown inside the `abacus_overhead` phase (density scatter, frozen-cache
+construction, functional evaluation, reductions, and artifact writes). The
+workflow profiler does not parse human-readable timer tables or double-count
+those nested timers.
 
 ## Inner mixing and recovery
 

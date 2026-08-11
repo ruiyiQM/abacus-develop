@@ -40,6 +40,13 @@
     "adaptive_scf": {
       "enabled": true,
       "force_strict_cycle": 45,
+      "auto_tune": {
+        "enabled": true,
+        "stagnation_ratio": 0.9,
+        "stagnation_cycles": 2,
+        "iteration_pressure_fraction": 0.8,
+        "promote_on_recovery": true
+      },
       "stages": [
         {
           "name": "loose",

@@ -142,8 +142,9 @@ a statistical confidence interval.
 
 Each state also has `performance.json` and `performance.jsonl`, and every
 active-fragment job has an `fde_performance.json`.  These files separate ABACUS
-electronic-step time from process/setup overhead and record the exact SCF
-threshold and mixing controls used by each call.
+electronic-step time from ABACUS overhead, session startup, workflow
+preparation, and artifact validation. They also record session reuse, retries,
+the exact SCF threshold, and mixing controls used by each call.
 
 The example uses the residual-driven `adaptive_scf` policy.  Its loose and
 medium stages may pass population-valid partial densities forward instead of
@@ -153,6 +154,12 @@ strict Broyden solve returns only a partial density, the example retries from
 that density with Pulay and finally guarded plain mixing.  See
 `tools/fde/README.md` for precedence, validation rules, and the complete JSON
 schema used by these controls.
+
+`auto_tune` may promote the next cycle by one stage when two outer residual
+ratios stagnate above 0.9, an inner solve consumes at least 80% of its iteration
+budget, or recovery was needed. Every choice and its evidence is saved under
+`scf_schedule.decision`; automatic tuning can never delay the forced strict
+confirmation window.
 
 Frozen-only PW91k/PBE functional values are prepared once per active-fragment
 SCF and then reused for its electronic steps.  The cache is in memory, is
