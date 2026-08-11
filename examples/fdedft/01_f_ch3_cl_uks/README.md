@@ -63,7 +63,8 @@ python3 fetch_default_resources.py
 sbatch euler/run_single_point.sbatch
 ```
 
-It uses the GCC/OpenMPI runtime under `/cluster/home/zhourui/abacus-develop`,
+It uses the GCC/OpenMPI runtime under
+`/cluster/home/$SLURM_JOB_USER/abacus-develop`,
 copies this example to a new `/cluster/scratch/$USER/fdedft-example-$JOBID`
 directory, and configures each embedded SCF as 20 MPI ranks x 4 OpenMP threads.
 The committed workflow uses persistent sessions: two fixed-fragment workers

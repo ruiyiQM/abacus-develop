@@ -25,7 +25,7 @@ unusable.
 
 The verified CPU stack is GCC 12.2.0, OpenMPI 4.1.6, OpenBLAS 0.3.24,
 ScaLAPACK 2.2.0, and an isolated GNU-toolchain ELPA. Intel oneAPI/MKL is
-deliberately rejected. From `/cluster/home/zhourui/abacus-develop`:
+deliberately rejected. From `/cluster/home/$USER/abacus-develop`:
 
 ```bash
 mkdir -p build-gcc-openmpi
@@ -66,11 +66,11 @@ commands with explicit `srun` arrays:
 ```bash
 python3 tools/fde/euler/configure_slurm_workflow.py workflow.local.json \
   --output workflow.euler.json \
-  --abacus /cluster/home/zhourui/abacus-develop/build-gcc-openmpi/install/bin/abacus \
+  --abacus /cluster/home/$USER/abacus-develop/build-gcc-openmpi/install/bin/abacus \
   --ranks 20 \
   --threads 4 \
   --persistent-session \
-  --work-directory /cluster/scratch/zhourui/my-fde-case/work
+  --work-directory /cluster/scratch/$USER/my-fde-case/work
 
 python3 tools/fde/fde_workflow.py validate workflow.euler.json
 ```
@@ -87,7 +87,7 @@ The checked example can be submitted directly after its pinned resources have
 been fetched:
 
 ```bash
-cd /cluster/home/zhourui/abacus-develop/examples/fdedft/01_f_ch3_cl_uks
+cd /cluster/home/$USER/abacus-develop/examples/fdedft/01_f_ch3_cl_uks
 python3 fetch_default_resources.py
 sbatch euler/run_single_point.sbatch
 ```
@@ -105,7 +105,7 @@ manifest. A single point uses:
 
 ```bash
 sbatch tools/fde/euler/run_fde_workflow.sbatch \
-  /cluster/scratch/zhourui/my-fde-case/specs/g09.json
+  /cluster/scratch/$USER/my-fde-case/specs/g09.json
 ```
 
 For a scan, the manifest must contain a unique `task_id` column and one of
@@ -113,8 +113,8 @@ For a scan, the manifest must contain a unique `task_id` column and one of
 
 ```text
 task_id  geometry  spec
-0        g00       /cluster/scratch/zhourui/my-fde-case/specs/g00.json
-1        g01       /cluster/scratch/zhourui/my-fde-case/specs/g01.json
+0        g00       /cluster/scratch/$USER/my-fde-case/specs/g00.json
+1        g01       /cluster/scratch/$USER/my-fde-case/specs/g01.json
 ```
 
 The example above is tab-separated; spaces are shown only for readability.
@@ -123,7 +123,7 @@ Submit 20 independent points with at most four running at once:
 ```bash
 sbatch --array=0-19%4 \
   tools/fde/euler/run_fde_workflow.sbatch \
-  /cluster/scratch/zhourui/my-fde-case/spec_manifest.tsv
+  /cluster/scratch/$USER/my-fde-case/spec_manifest.tsv
 ```
 
 Command-line `sbatch` resource options may override the 20 x 4 default, but
@@ -138,7 +138,7 @@ between the individual points. A collector may depend on the entire array:
 ```bash
 array_job=$(sbatch --parsable --array=0-19%4 \
   tools/fde/euler/run_fde_workflow.sbatch \
-  /cluster/scratch/zhourui/my-fde-case/spec_manifest.tsv)
+  /cluster/scratch/$USER/my-fde-case/spec_manifest.tsv)
 sbatch --dependency=afterok:${array_job} collect.sbatch
 ```
 
@@ -177,8 +177,8 @@ After every state at every point has converged:
 
 ```bash
 python3 tools/fde/euler/collect_fde_results.py \
-  /cluster/scratch/zhourui/my-fde-case/spec_manifest.tsv \
-  /cluster/home/zhourui/fde-results/my-fde-case
+  /cluster/scratch/$USER/my-fde-case/spec_manifest.tsv \
+  /cluster/home/$USER/fde-results/my-fde-case
 ```
 
 The output directory must not already exist. The collector fails closed on a
