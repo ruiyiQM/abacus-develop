@@ -30,6 +30,13 @@ For the tested ETH Euler build, single-point and array runners, launcher
 configuration, compact result collection, convergence playbook, and scratch
 retention policy, see `tools/fde/euler/README.md`.
 
+Pinned PP/orbital files shared by examples are installed with
+`fetch_example_resources.py`. The tool validates manifest paths and SHA-256
+checksums, supports either GitHub download or an offline ABACUS-orbitals
+checkout, and refuses to replace a mismatched existing file unless `--force`
+is explicit. Each example keeps a short compatibility wrapper so its documented
+`fetch_default_resources.py` command remains self-contained.
+
 ## Persistent subsystem sessions
 
 Set `controls.execution_mode` to `persistent_session` to retain one ABACUS
@@ -283,6 +290,36 @@ breakdown inside the `abacus_overhead` phase (density scatter, frozen-cache
 construction, functional evaluation, reductions, and artifact writes). The
 workflow profiler does not parse human-readable timer tables or double-count
 those nested timers.
+
+Compare complete CPU/GPU or workflow runs directly from their aggregate JSON:
+
+```bash
+python3 tools/fde/summarize_performance.py \
+  /path/to/cpu/fde_performance.json \
+  /path/to/gpu/fde_performance.json \
+  --labels cpu gpu \
+  --json-output performance-comparison.json
+```
+
+The first report is the baseline. The TSV output includes wall-clock speedup,
+subsystem calls, SCF iterations, retries, session reuse, electronic-step time,
+ABACUS overhead, and session startup. Schema-1 reports remain readable, but
+their unavailable phase fields are reported as zero rather than inferred from
+human-readable logs.
+
+## Scientific and k-point acceptance tools
+
+`compare_scientific_runs.py` compares PES/state/coupling tables against a
+machine-readable error budget. When `phase_invariant_off_diagonal` is true,
+one common determinant phase is aligned before comparing overlap, raw H12, and
+orthogonalized coupling. This accepts an arbitrary occupied-orbital sign change
+that flips all three quantities while still rejecting inconsistent relative
+sign changes; unaligned signed deltas are retained in the JSON for diagnosis.
+
+`compare_band_folding.py` validates periodic embedded-SCF eigenvalue artifacts
+spin by spin. The maintained LiH example under
+`examples/fdedft/02_lih_kpoint_folding` uses it to match primitive Gamma/X
+bands to the doubled-supercell Gamma spectrum.
 
 ## Inner mixing and recovery
 
