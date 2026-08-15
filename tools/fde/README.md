@@ -442,6 +442,20 @@ update is needed for reproducibility experiments.
 
 ## Tests
 
+The durable regression entry point validates every committed compact
+scientific/performance reference and runs the workflow, Euler-helper, and
+example unit suites:
+
+```bash
+python3 tools/fde/run_regression.py --output /tmp/fde-regression.json
+```
+
+Pass `--build-directory /absolute/path/to/build` to additionally run every
+registered `MODULE_FDE_*` CTest from a configured native build. The exact
+inventory is versioned in `regression_manifest.json`; accepted results,
+limitations, and the prioritized backlog are recorded in
+`source/source_lcao/module_fde/DEVELOPMENT_STATUS.md`.
+
 ```bash
 python3 -m unittest tools/fde/test_fde_workflow.py -v
 python3 -m unittest tools/fde/test_fde_workflow_e2e.py -v

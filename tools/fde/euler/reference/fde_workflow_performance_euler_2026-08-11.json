@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-11",
+  "platform": "ETH Euler normal.4h, 20 MPI ranks x 4 OpenMP threads",
+  "system": "[F-CH3-Cl]- PBE/PW91k UKS two-state single point at 40 Ry/DZP",
+  "slurm_array": 10378084,
+  "abacus_source_commit": "411f963a0f8b2624fb83796afc83b4512601b9ad",
+  "workflow_source_commit": "894ab472bcde4a31a902c96abba5836145ed7103",
+  "abacus_binary_sha256": "72750ef9e7737ba2457fe85f4b8aed109b65d212bccd6f8138674014d275db05",
+  "controlled_speedup_comparison": false,
+  "timing_interpretation": "The variants ran on different allocated nodes. Profile sums include overlapping phases and are not scheduler elapsed time; use them as an operational baseline, not as a production-versus-tight speedup.",
+  "records": [
+    {
+      "label": "production",
+      "slurm_job": "10378084_0",
+      "total_profiled_seconds": 4384.085196618456,
+      "request_wall_seconds": 4233.133019174449,
+      "session_startup_seconds": 148.6790760839358,
+      "workflow_preparation_seconds": 1.0086269564926624,
+      "artifact_validation_seconds": 1.264474403578788,
+      "subsystem_calls": 24,
+      "scf_iterations": 229,
+      "retries": 0,
+      "session_reuse_fraction": 0.5
+    },
+    {
+      "label": "tight_scf",
+      "slurm_job": "10378084_1",
+      "total_profiled_seconds": 1792.1100774309598,
+      "request_wall_seconds": 1632.285358545836,
+      "session_startup_seconds": 158.29587231809273,
+      "workflow_preparation_seconds": 0.5818545240908861,
+      "artifact_validation_seconds": 0.94699204294011,
+      "subsystem_calls": 24,
+      "scf_iterations": 253,
+      "retries": 0,
+      "session_reuse_fraction": 0.5
+    }
+  ]
+}

@@ -37,6 +37,16 @@ class ScalingScriptContractTest(unittest.TestCase):
         self.assertNotIn("abacus_std_para", combined)
         self.assertNotIn("test_abacus/fodft_parallel_validation", combined)
 
+    def test_cuda_runner_requires_an_explicit_current_template(self):
+        runner = (ROOT.parents[2] / "euler/test_fde_cuda.sbatch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ABACUS_FDE_REFERENCE_CASE must name a directory", runner)
+        self.assertIn("SLURM_JOB_USER", runner)
+        self.assertIn("abacus_binary_sha256", runner)
+        self.assertNotIn("/cluster/home/zhourui", runner)
+        self.assertNotIn("test_abacus/", runner)
+
 
 class ConfigureSlurmWorkflowTest(unittest.TestCase):
     def test_configure_adds_explicit_slurm_commands_and_provenance(self):

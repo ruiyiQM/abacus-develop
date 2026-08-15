@@ -10,19 +10,26 @@
 
 set -Eeuo pipefail
 
-readonly ABACUS_ROOT="${ABACUS_ROOT:-/cluster/home/zhourui/abacus-develop}"
+readonly JOB_USER=${SLURM_JOB_USER:?}
+readonly ABACUS_ROOT="${ABACUS_ROOT:-/cluster/home/${JOB_USER}/abacus-develop}"
 readonly CUDA_BUILD_ROOT="${ABACUS_CUDA_BUILD_ROOT:-${ABACUS_ROOT}/build-gcc-openmpi-cuda}"
 readonly ABACUS_BIN="${ABACUS_CUDA_BIN:-${CUDA_BUILD_ROOT}/install/bin/abacus}"
-readonly RESOURCE_ROOT="${ABACUS_FDE_RESOURCE_ROOT:-/cluster/home/zhourui/abacus-develop/test_abacus/fde_f_ch3_cl/dzp/resources}"
-readonly REFERENCE_CASE="${ABACUS_FDE_REFERENCE_CASE:-/cluster/home/zhourui/abacus-develop/test_abacus/fodft_parallel_validation/fodft_modes/openmpi_elpa}"
-readonly TOOLCHAIN_SETUP="${ABACUS_TOOLCHAIN_SETUP:-/cluster/home/zhourui/abacus-develop/build-gcc-openmpi/toolchain/install/setup}"
+readonly RESOURCE_ROOT="${ABACUS_FDE_RESOURCE_ROOT:-${ABACUS_ROOT}/examples/fdedft/01_f_ch3_cl_uks/resources}"
+readonly REFERENCE_CASE="${ABACUS_FDE_REFERENCE_CASE:-}"
+readonly TOOLCHAIN_SETUP="${ABACUS_TOOLCHAIN_SETUP:-${ABACUS_ROOT}/build-gcc-openmpi/toolchain/install/setup}"
 readonly CUDA_MODULE="${ABACUS_CUDA_MODULE:-cuda/13.0.2}"
 readonly TEST_THREADS="${ABACUS_FDE_TEST_THREADS:-${SLURM_CPUS_PER_TASK}}"
-readonly TEST_ROOT="${ABACUS_FDE_CUDA_TEST_ROOT:-/cluster/scratch/${USER}/abacus-fde-cuda-test-${SLURM_JOB_ID}}"
+readonly TEST_ROOT="${ABACUS_FDE_CUDA_TEST_ROOT:-/cluster/scratch/${JOB_USER}/abacus-fde-cuda-test-${SLURM_JOB_ID}}"
 readonly SRUN_BIN="${ABACUS_SRUN_BIN:-/cluster/apps/slurm/bin/srun}"
 
+if [[ -z "${REFERENCE_CASE}" ]]; then
+    echo "ERROR: ABACUS_FDE_REFERENCE_CASE must name a directory containing" >&2
+    echo "       a prepared direct embedded_scf FDE_CONFIG" >&2
+    exit 2
+fi
 for required in "${ABACUS_BIN}" "${TOOLCHAIN_SETUP}" \
                 "${ABACUS_ROOT}/examples/fdedft/01_f_ch3_cl_uks/prepare_example.py" \
+                "${RESOURCE_ROOT}" \
                 "${REFERENCE_CASE}/FDE_CONFIG" "${SRUN_BIN}"; do
     if [[ ! -e "${required}" ]]; then
         echo "ERROR: required path is missing: ${required}" >&2
@@ -51,6 +58,12 @@ export OMP_NUM_THREADS="${TEST_THREADS}"
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
+echo "source_root=${ABACUS_ROOT}"
+echo "source_commit=$(git -C "${ABACUS_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
+echo "abacus_binary=${ABACUS_BIN}"
+echo "abacus_binary_sha256=$(sha256sum "${ABACUS_BIN}" | awk '{print $1}')"
+echo "reference_case=${REFERENCE_CASE}"
+echo "resource_root=${RESOURCE_ROOT}"
 nvidia-smi --query-gpu=name,memory.total,driver_version \
     --format=csv,noheader
 

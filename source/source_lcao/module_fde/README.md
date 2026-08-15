@@ -1,5 +1,9 @@
 # Native FDE module boundaries
 
+The durable implementation/benchmark status, accepted regression inventory,
+known limitations, and prioritized backlog are maintained in
+[`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md).
+
 `module_fde` is organized as four primary responsibilities plus one auxiliary
 orchestration layer. The directory name describes the scientific/lifecycle
 owner of a file; CPU and GPU implementations of the same operation deliberately

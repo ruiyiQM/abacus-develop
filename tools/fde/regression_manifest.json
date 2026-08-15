@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-08-15",
+  "description": "Durable ABACUS native FDE regression inventory; large scratch densities, build trees, and restart files are deliberately excluded.",
+  "python_suites": [
+    {
+      "label": "workflow_and_tools",
+      "start_directory": "tools/fde",
+      "pattern": "test_*.py"
+    },
+    {
+      "label": "molecular_example",
+      "start_directory": "examples/fdedft/01_f_ch3_cl_uks",
+      "pattern": "test_*.py"
+    },
+    {
+      "label": "periodic_example",
+      "start_directory": "examples/fdedft/02_lih_kpoint_folding",
+      "pattern": "test_*.py"
+    }
+  ],
+  "required_paths": [
+    "source/source_lcao/module_fde/DEVELOPMENT_STATUS.md",
+    "source/source_lcao/module_fde/README.md",
+    "source/source_lcao/module_fde/test/CMakeLists.txt",
+    "tools/fde/run_regression.py",
+    "tools/fde/test_run_regression.py",
+    "tools/fde/compare_scientific_runs.py",
+    "tools/fde/compare_band_folding.py",
+    "tools/fde/euler/submit_fde_mpi_scaling.sh",
+    "euler/test_fde_cuda.sbatch",
+    "examples/fdedft/01_f_ch3_cl_uks/scientific_error_budget.json",
+    "examples/fdedft/01_f_ch3_cl_uks/reference/fde_pes.tsv.ref",
+    "examples/fdedft/01_f_ch3_cl_uks/reference/convergence.json.ref",
+    "examples/fdedft/01_f_ch3_cl_uks/reference/provenance.json",
+    "examples/fdedft/02_lih_kpoint_folding/reference/band_folding_result.json.ref",
+    "examples/fdedft/02_lih_kpoint_folding/reference/provenance.json",
+    "tools/fde/euler/reference/fde_mpi_scaling_euler_2026-08-09.json",
+    "tools/fde/euler/reference/fde_cuda_euler_2026-08-10.json",
+    "tools/fde/euler/reference/fde_workflow_performance_euler_2026-08-11.json"
+  ],
+  "references": {
+    "molecular_diabatic": {
+      "comparison_tool": "tools/fde/compare_scientific_runs.py",
+      "budget": "examples/fdedft/01_f_ch3_cl_uks/scientific_error_budget.json",
+      "pes": "examples/fdedft/01_f_ch3_cl_uks/reference/fde_pes.tsv.ref",
+      "convergence": "examples/fdedft/01_f_ch3_cl_uks/reference/convergence.json.ref",
+      "provenance": "examples/fdedft/01_f_ch3_cl_uks/reference/provenance.json"
+    },
+    "periodic_band_folding": {
+      "result": "examples/fdedft/02_lih_kpoint_folding/reference/band_folding_result.json.ref",
+      "provenance": "examples/fdedft/02_lih_kpoint_folding/reference/provenance.json"
+    },
+    "mpi_scaling": {
+      "result": "tools/fde/euler/reference/fde_mpi_scaling_euler_2026-08-09.json"
+    },
+    "cuda_consistency": {
+      "result": "tools/fde/euler/reference/fde_cuda_euler_2026-08-10.json"
+    },
+    "workflow_performance": {
+      "result": "tools/fde/euler/reference/fde_workflow_performance_euler_2026-08-11.json"
+    }
+  }
+}

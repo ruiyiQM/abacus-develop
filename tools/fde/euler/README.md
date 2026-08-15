@@ -49,14 +49,26 @@ The separate CUDA build and regression are:
 
 ```bash
 sbatch euler/build_abacus_gcc_openmpi_cuda.sbatch
-sbatch euler/test_fde_cuda.sbatch
+sbatch --export=ABACUS_FDE_REFERENCE_CASE=/absolute/path/to/prepared-template \
+  euler/test_fde_cuda.sbatch
 ```
+
+The reference directory is mandatory and must contain a direct `embedded_scf`
+`FDE_CONFIG` matching the maintained molecular example. Its referenced paths
+must remain readable on the compute node. Use `ABACUS_CUDA_BIN`,
+`ABACUS_FDE_RESOURCE_ROOT`, and `ABACUS_TOOLCHAIN_SETUP` to make the tested
+binary, resources, and runtime explicit. The regression prints the source
+commit and executable SHA-256 before launching any case; it never infers a
+legacy `test_abacus` directory.
 
 The final regression in scratch job directory
 `abacus-fde-cuda-test-10305537` smoke-tested all three KEDFs and verified
 CPU/GPU agreement for PW91k and revAPBEk from a physical nonuniform 40 Ry
 density. Uniform-density tests alone are not a sufficient GGA-NAKE gate because
-their gradient is identically zero.
+their gradient is identically zero. Its compact numerical record is committed
+as `tools/fde/euler/reference/fde_cuda_euler_2026-08-10.json`; the status file
+under `source/source_lcao/module_fde` explains why it must be refreshed on the
+current native source before publication.
 
 ## Prepare one Euler workflow
 
