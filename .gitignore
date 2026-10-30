@@ -35,3 +35,4 @@ examples/fdedft/01_f_ch3_cl_uks/resources/
 examples/fdedft/01_f_ch3_cl_uks/work/
 examples/fdedft/01_f_ch3_cl_uks/workflow.json
 examples/fdedft/01_f_ch3_cl_uks/fdedft.output
+tests/integrate/general_info.local

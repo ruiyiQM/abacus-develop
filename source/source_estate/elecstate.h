@@ -8,6 +8,11 @@
 #include "source_psi/psi.h"
 #include "module_pot/potential_new.h"
 
+namespace ModulePW
+{
+class PW_Basis_Big;
+}
+
 namespace elecstate
 {
 
@@ -42,7 +47,14 @@ class ElecState
 
     // calculate electronic charge density on grid points or density matrix in real space
     // the consequence charge density rho saved into rho_out, preparing for charge mixing.
+    // NOTE: all overloads are intentionally provided (with empty bodies) so that
+    // template derived classes (e.g. ElecStatePW<T, Device>) can safely mark their
+    // psiToRho/cal_tau as 'override' regardless of which (T, Device) combo is instantiated.
     virtual void psiToRho(const psi::Psi<std::complex<double>>& psi)
+    {
+        return;
+    }
+    virtual void psiToRho(const psi::Psi<std::complex<double>, base_device::DEVICE_GPU>& psi)
     {
         return;
     }
@@ -50,7 +62,23 @@ class ElecState
     {
         return;
     }
+    virtual void psiToRho(const psi::Psi<double, base_device::DEVICE_GPU>& psi)
+    {
+        return;
+    }
+    virtual void psiToRho(const psi::Psi<std::complex<float>>& psi)
+    {
+        return;
+    }
+    virtual void psiToRho(const psi::Psi<std::complex<float>, base_device::DEVICE_GPU>& psi)
+    {
+        return;
+    }
     virtual void cal_tau(const psi::Psi<std::complex<double>>& psi)
+    {
+        return;
+    }
+    virtual void cal_tau(const psi::Psi<std::complex<double>, base_device::DEVICE_GPU>& psi)
     {
         return;
     }
@@ -58,7 +86,15 @@ class ElecState
     {
         return;
     }
+    virtual void cal_tau(const psi::Psi<double, base_device::DEVICE_GPU>& psi)
+    {
+        return;
+    }
     virtual void cal_tau(const psi::Psi<std::complex<float>>& psi)
+    {
+        return;
+    }
+    virtual void cal_tau(const psi::Psi<std::complex<float>, base_device::DEVICE_GPU>& psi)
     {
         return;
     }
@@ -114,7 +150,17 @@ class ElecState
     ModuleBase::matrix vnew;
     bool vnew_exist = false;
     void cal_converged();
-    void cal_energies(const int type);
+    /// @brief assemble the total energy from its contributions
+    /// @param type 1 means Harris-Foulkes functional, 2 means Kohn-Sham
+    /// @param imp_sol whether the implicit solvation correction contributes
+    /// @param sc_mag_switch whether the spin-constraint energy contributes
+    /// @param dft_plus_u 0 disables the DFT+U energy term
+    /// @param assume_isolated "makov-payne" adds the isolated-system correction
+    void cal_energies(const int type,
+                      const int imp_sol,
+                      const bool sc_mag_switch,
+                      const int dft_plus_u,
+                      const std::string& assume_isolated);
     void set_exx(const double& Eexx, const bool cal_exx, const double hybrid_alpha);
     void set_exx(const std::complex<double>& Eexx, const bool cal_exx, const double hybrid_alpha);
 
@@ -131,6 +177,7 @@ class ElecState
     }
 
     double get_dftu_energy();
+    void set_dftu_energy(double e) { dftu_energy_ = e; }
     double get_local_pp_energy();
 
     fenergy f_en; ///< energies contribute to the total free energy
@@ -148,6 +195,9 @@ class ElecState
   public:
 
     bool skip_weights = false;
+
+  private:
+    double dftu_energy_ = 0.0; ///< DFT+U energy, set by ESolver via set_dftu_energy()
 };
 
 /**

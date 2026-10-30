@@ -1,8 +1,9 @@
 list(APPEND objects
-    esolver.cpp
+    esolver_factory.cpp
     esolver_ks.cpp
     esolver_fp.cpp
     esolver_ks_pw.cpp
+    esolver_ks_pw_tddft.cpp
     esolver_ks_lcaopw.cpp
     esolver_sdft_pw.cpp
     esolver_lj.cpp
@@ -19,11 +20,22 @@ if(ENABLE_LCAO)
   list(APPEND objects
       esolver_ks_lcao.cpp
       esolver_ks_lcao_tddft.cpp
+      esolver_lr_orb.cpp
+      esolver_lr_init.cpp
+      esolver_lr_cfg.cpp
+      esolver_lr_lcao_tddft.cpp
+      esolver_lr_grad.cpp
+      esolver_lr_rlx.cpp
       esolver_gets.cpp
       lcao_others.cpp
       esolver_dm2rho.cpp
       esolver_double_xc.cpp
   )
+  if(ENABLE_LIBRI)
+    list(APPEND objects
+        esolver_lr_lcao_bse.cpp
+    )
+  endif()
 endif()
 
 add_library(
@@ -43,4 +55,3 @@ if(BUILD_TESTING)
     add_subdirectory(test)
   endif()
 endif()
-

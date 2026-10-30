@@ -107,11 +107,11 @@ void FdeProjectedHamiltonianT<TK>::refresh(const bool yes)
 
 template <typename TK>
 void FdeProjectedHamiltonianT<TK>::matrix(
-    hamilt::MatrixBlock<TK>& hamiltonian,
-    hamilt::MatrixBlock<TK>& overlap)
+    ModuleBase::MatrixBlock<TK>& hamiltonian,
+    ModuleBase::MatrixBlock<TK>& overlap)
 {
-    hamilt::MatrixBlock<TK> full_h;
-    hamilt::MatrixBlock<TK> full_s;
+    ModuleBase::MatrixBlock<TK> full_h;
+    ModuleBase::MatrixBlock<TK> full_s;
     full_hamiltonian_->matrix(full_h, full_s);
     const std::size_t local_rows
         = static_cast<std::size_t>(orbital_distribution_->get_row_size());
@@ -164,11 +164,11 @@ void FdeProjectedHamiltonianT<TK>::matrix(
         }
     }
     overlap_initialized_[overlap_slot] = 1;
-    hamiltonian = hamilt::MatrixBlock<TK>{projected_hamiltonian_.data(),
+    hamiltonian = ModuleBase::MatrixBlock<TK>{projected_hamiltonian_.data(),
                                           local_rows,
                                           local_columns,
                                           full_h.desc};
-    overlap = hamilt::MatrixBlock<TK>{projected_overlap_.data() + overlap_base,
+    overlap = ModuleBase::MatrixBlock<TK>{projected_overlap_.data() + overlap_base,
                                       local_rows,
                                       local_columns,
                                       full_s.desc};

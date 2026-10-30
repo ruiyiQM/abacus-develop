@@ -1,10 +1,9 @@
 #include "source_pw/module_pwdft/setup_pot.h"
 
-#include "source_estate/module_charge/symmetry_rho.h"
+#include "source_estate/module_charge/chg_symm.h"
 #include "source_lcao/module_deltaspin/spin_constrain.h"
-#include "source_pw/module_pwdft/onsite_proj.h"
+#include "source_pw/module_proj/onsite_proj.h"
 #include "source_pw/module_pwdft/vnl_pw.h"
-#include "source_lcao/module_dftu/dftu.h"
 #include "source_pw/module_pwdft/vsep_pw.h"
 
 template <typename T, typename Device>
@@ -17,9 +16,9 @@ void pw::setup_pot(const int istep,
         const Charge &chr, // charge density
         pseudopot_cell_vl &locpp, // local pseudopotentials
         pseudopot_cell_vnl &ppcell, // non-local pseudopotentials
-        Plus_U &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<T, Device>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, Device>* onsite_psi, // persistent double-precision mirror
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod
@@ -32,7 +31,7 @@ void pw::setup_pot(const int istep,
     //! 0) DFT-1/2 calculations, sep potential need to generate
     // before effective potential calculation
     //----------------------------------------------------------
-    if (PARAM.inp.dfthalf_type > 0)
+    if (inp.dfthalf_type > 0)
     {
         vsep_cell->generate_vsep_r(pw_rhod[0], sf.strucFac, ucell.sep_cell);
     }
@@ -47,13 +46,12 @@ void pw::setup_pot(const int istep,
     //! 2) Symmetrize the charge density (rho)
     //----------------------------------------------------------
 
-    //! Symmetry_rho should behind init_scf, because charge should be
-    //! initialized first. liuyu comment: Symmetry_rho should be
+    //! Density symmetrization should be behind init_scf, because charge should be
+    //! initialized first. liuyu comment: it should be
     //! located between init_rho and v_of_rho?
-    Symmetry_rho srho;
     for (int is = 0; is < inp.nspin; is++)
     {
-        srho.begin(is, chr, pw_rhod, ucell.symm);
+        module_charge::cal_rhog_symm(is, chr, pw_rhod, ucell.symm);
     }
 
     //----------------------------------------------------------
@@ -70,16 +68,18 @@ void pw::setup_pot(const int istep,
     //----------------------------------------------------------
     //! 4) Onsite projectors
     //----------------------------------------------------------
-    if (PARAM.inp.onsite_radius > 0)
+    const bool spinor_rt = inp.esolver_type == "tddft" && inp.nspin == 4;
+    // The RT observer owns endpoint projection setup, including spinor precision conversion.
+    if (inp.onsite_radius > 0 && !spinor_rt)
     {
         auto* onsite_p = projectors::OnsiteProjector<double, Device>::get_instance();
-        onsite_p->init(PARAM.inp.orbital_dir,
+        onsite_p->init(inp.orbital_dir,
                 &ucell,
-                *(kspw_psi),
+                *onsite_psi,
                 kv,
                 *(pw_wfc),
                 sf,
-                PARAM.inp.onsite_radius,
+                inp.onsite_radius,
                 PARAM.globalv.nqx,
                 PARAM.globalv.dq,
                 pelec->wg,
@@ -89,20 +89,20 @@ void pw::setup_pot(const int istep,
     //----------------------------------------------------------
     //! 5) Spin-constrained algorithms
     //----------------------------------------------------------
-    if (PARAM.inp.sc_mag_switch)
+    if (inp.sc_mag_switch)
     {
         spinconstrain::SpinConstrain<std::complex<double>>& sc
             = spinconstrain::SpinConstrain<std::complex<double>>::getScInstance();
-        sc.init_sc(PARAM.inp.sc_thr,
-                   PARAM.inp.nsc,
-                   PARAM.inp.nsc_min,
-                   PARAM.inp.alpha_trial,
-                   PARAM.inp.sccut,
-                   PARAM.inp.sc_drop_thr,
+        sc.init_sc(inp.sc_thr,
+                   inp.nsc,
+                   inp.nsc_min,
+                   inp.alpha_trial,
+                   inp.sccut,
+                   inp.sc_drop_thr,
                    ucell,
-                   PARAM.inp.sc_direction_only,
+                   inp.sc_direction_only,
                    nullptr, // parallel orbitals
-                   PARAM.inp.nspin,
+                   inp.nspin,
                    kv,
                    p_hamilt,
                    kspw_psi,
@@ -111,30 +111,6 @@ void pw::setup_pot(const int istep,
 #endif
                    pelec,
                    pw_wfc);
-    }
-
-    //----------------------------------------------------------
-    //! 6) DFT+U algorithm
-    // This should not called in before_scf (esolver), it should be
-    // called in before_all_runners (esolver), which should 
-    // be improved later. Mohan note 2025-11-06
-    //----------------------------------------------------------
-    if (PARAM.inp.dft_plus_u)
-    {
-        const int nlocal_dftu = 0;
-        dftu.init(ucell, nullptr,
-                  PARAM.globalv.npol,
-                  PARAM.inp.nspin, PARAM.inp.orbital_corr, PARAM.inp.yukawa_potential, PARAM.inp.yukawa_lambda,
-                  PARAM.globalv.global_readin_dir,
-                  PARAM.globalv.global_out_dir,
-                  PARAM.inp.init_chg,
-                  nlocal_dftu,
-                  PARAM.globalv.gamma_only_local,
-                  PARAM.inp.ks_solver,
-                  PARAM.inp.cal_force,
-                  PARAM.inp.cal_stress,
-                  PARAM.inp.device,
-                  PARAM.inp.kpar);
     }
 
     return;
@@ -150,9 +126,9 @@ template void pw::setup_pot<std::complex<float>, base_device::DEVICE_CPU>(
         const Charge &chr, // charge density
         pseudopot_cell_vl &locpp, // local pseudopotentials
         pseudopot_cell_vnl &ppcell, // non-local pseudopotentials
-        Plus_U &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<std::complex<float>, base_device::DEVICE_CPU>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, base_device::DEVICE_CPU>* onsite_psi,
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod
@@ -170,9 +146,9 @@ template void pw::setup_pot<std::complex<double>, base_device::DEVICE_CPU>(
         const Charge &chr, // charge density
         pseudopot_cell_vl &locpp, // local pseudopotentials
         pseudopot_cell_vnl &ppcell, // non-local pseudopotentials
-        Plus_U &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<std::complex<double>, base_device::DEVICE_CPU>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, base_device::DEVICE_CPU>* onsite_psi,
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod
@@ -191,9 +167,9 @@ template void pw::setup_pot<std::complex<float>, base_device::DEVICE_GPU>(
         const Charge &chr, // charge density
         pseudopot_cell_vl &locpp, // local pseudopotentials
         pseudopot_cell_vnl &ppcell, // non-local pseudopotentials
-        Plus_U &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<std::complex<float>, base_device::DEVICE_GPU>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* onsite_psi,
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod
@@ -210,9 +186,9 @@ template void pw::setup_pot<std::complex<double>, base_device::DEVICE_GPU>(
         const Charge &chr, // charge density
         pseudopot_cell_vl &locpp, // local pseudopotentials
         pseudopot_cell_vnl &ppcell, // non-local pseudopotentials
-        Plus_U &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* onsite_psi,
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod

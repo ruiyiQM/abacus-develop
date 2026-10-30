@@ -6,9 +6,12 @@
 #include "source_cell/klist.h"
 #include "source_estate/module_pot/potential_new.h"
 #include "source_hamilt/hamilt.h"
-#include "source_lcao/module_dftu/dftu.h" // mohan add 2025-11-06
+#include "source_pw/module_pwdft/dftu_base.h"
 #include "source_pw/module_pwdft/exx_helper.h"
 #include "source_pw/module_pwdft/vnl_pw.h"
+
+/// General_Exx_Info forward declaration, full definition in general_exx_info.h
+struct General_Exx_Info;
 
 namespace hamilt
 {
@@ -28,13 +31,19 @@ class HamiltPW : public Hamilt<T, Device>
              ModulePW::PW_Basis_K* wfc_basis,
              K_Vectors* p_kv,
              pseudopot_cell_vnl* nlpp,
-             Plus_U* p_dftu, // mohan add 2025-11-06
-             const UnitCell* ucell);
+             Plus_U_Base* p_dftu,
+             const UnitCell* ucell,
+             const General_Exx_Info* exx_info);
 
     ~HamiltPW();
 
     // for target K point, update consequence of hPsi() and matrix()
     void updateHk(const int ik) override;
+
+    /** @brief Bind local-potential buffers and Hartree vector potential for the same operation.
+     *  @note The caller must keep the buffers alive and restore endpoint state after propagation.
+     */
+    void bind_td_state(const Real* veff, const ModuleBase::Vector3<double>& A_ha);
 
     void sPsi(const T* psi_in, // psi
               T* spsi,         // spsi

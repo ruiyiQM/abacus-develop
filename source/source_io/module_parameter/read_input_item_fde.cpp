@@ -93,7 +93,7 @@ void ReadInput::item_fde()
 * diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
         item.default_value = "none";
         item.unit = "";
-        item.availability = "LCAO collinear-spin PBE, PBE0, or SCAN fragment calculations";
+        item.domain.set_choices({"none", "embedded_scf", "embedded_session", "diabatic_postprocess"});
         read_sync_string(input.fde_task);
         item.reset_value = [](const Input_Item&, Parameter& para) {
             // A spin-polarized embedded subsystem carries a prescribed
@@ -159,7 +159,7 @@ void ReadInput::item_fde()
         item.description = R"(Path to the deterministic FDE_CONFIG sidecar file. The sidecar defines fragments, diabatic charge/spin states, independent fragment/embedding XC choices, density/determinant/linearized-state artifacts, convergence controls, and coupling/diagonalization selections. Relative paths are resolved from the ABACUS working directory.)";
         item.default_value = "FDE_CONFIG";
         item.unit = "";
-        item.availability = "fde_task is not none";
+        item.set_availability("fde_task!=none");
         read_sync_string(input.fde_config);
         this->add_item(item);
     }

@@ -1,23 +1,32 @@
 list(APPEND objects
     elecstate.cpp
     init_scf.cpp
-    elecstate_energy_terms.cpp
+    estate_e_terms.cpp
     elecstate_energy.cpp
     elecstate_exx.cpp
     elecstate_print.cpp
     elecstate_tools.cpp
     elecstate_pw.cpp
+    uspp_density.cpp
     elecstate_pw_sdft.cpp
     elecstate_pw_cal_tau.cpp
     makov_payne.cpp
+    charge_moments.cpp
+    pcc_0d.cpp
+    pcc_2d.cpp
     module_pot/gatefield.cpp
     module_pot/efield.cpp
-    module_pot/H_Hartree_pw.cpp
-    module_pot/H_TDDFT_pw.cpp
+    module_pot/h_hartree_pw.cpp
+    module_pot/h_tddft_pw.cpp
     module_pot/pot_xc.cpp
     module_pot/pot_local.cpp
+    module_pot/pot_pcc.cpp
+    module_pot/pot_sccs.cpp
+    module_pot/sccs_pcc_0d.cpp
+    module_pot/sccs_pcc_2d.cpp
     module_pot/potential_new.cpp
     module_pot/potential_types.cpp
+    module_pot/pot_surchem.cpp
     module_pot/pot_ml_exx.cpp
     module_pot/pot_ml_exx_label.cpp
     module_pot/pot_sep.cpp
@@ -26,22 +35,32 @@ list(APPEND objects
     module_pot/td_field.cpp
     module_pot/td_field_profiles.cpp
     module_pot/td_field_manager.cpp
-    module_charge/chgmixing.cpp
-    module_charge/gint_precision_controller.cpp
+    module_charge/chg_routine.cpp
     module_charge/charge.cpp
-    module_charge/charge_init.cpp
-    module_charge/charge_mpi.cpp
-    module_charge/charge_extra.cpp
-    module_charge/charge_mixing.cpp
-    module_charge/charge_mixing_dmr.cpp
-    module_charge/charge_mixing_residual.cpp
-    module_charge/charge_mixing_preconditioner.cpp
-    module_charge/charge_mixing_rho.cpp
-    module_charge/charge_mixing_uspp.cpp
-    module_charge/symmetry_rho.cpp
-    module_charge/symmetry_rhog.cpp
+    module_charge/chg_atomic.cpp
+    module_charge/chg_atomic_inner.cpp
+    module_charge/chg_init.cpp
+    module_charge/chg_tools.cpp
+    module_charge/chg_parallel.cpp
+    module_charge/chg_extra.cpp
+    module_charge/chg_mix.cpp
+    module_charge/chg_mix_rho.cpp
+    module_charge/chg_dmr.cpp
+    module_charge/chg_drho.cpp
+    module_charge/chg_drho_inner.cpp
+    module_charge/chg_precond.cpp
+    module_charge/chg_tau.cpp
+    module_charge/chg_symm.cpp
+    module_charge/chg_uspp.cpp
+    module_charge/chg_symm_detail.cpp
+    module_charge/chg_rhog_io.cpp
+    write_elecstat_pot.cpp
+    write_init.cpp
     fp_energy.cpp
     occupy.cpp
+    occ_matrix.cpp
+    occ_comput.cpp
+    occ_mixer.cpp
     param_update.cpp
     setup_estate_pw.cpp
     update_pot.cpp
@@ -50,11 +69,19 @@ list(APPEND objects
 if(ENABLE_LCAO)
   list(APPEND objects
       elecstate_lcao.cpp
-      module_dm/init_dm.cpp
+      module_dm/dm_routine.cpp
       module_dm/density_matrix.cpp
-      module_dm/density_matrix_io.cpp
-      module_dm/cal_dm_psi.cpp
-      module_dm/cal_edm_tddft.cpp
+      module_dm/dmr_gamma.cpp
+      module_dm/dm_tools.cpp
+      module_dm/dmr_k.cpp
+      module_dm/dmr_td.cpp
+      module_dm/dmr_full.cpp
+      module_dm/dmr_init.cpp
+      module_dm/dm_setter.cpp
+      module_dm/dm_getter.cpp
+      module_dm/dm_from_psi.cpp
+      module_dm/edm_tddft.cpp
+      module_dm/edm_tddft_lapack.cpp
   )
 endif()
 
@@ -70,11 +97,14 @@ endif()
 
 if(BUILD_TESTING)
   if(ENABLE_MPI)
-    add_subdirectory(test)
-    add_subdirectory(test_mpi)
+    add_subdirectory(unittests)
+    add_subdirectory(module_charge/unittests)
   endif()
 endif()
 
 if(ENABLE_LCAO)
   add_subdirectory(module_dm)
+  if(BUILD_TESTING)
+    add_subdirectory(module_dm/unittests)
+  endif()
 endif()

@@ -19,10 +19,11 @@
 #include "source_cell/klist.h"
 #include "source_estate/elecstate.h"
 #include "source_estate/module_charge/charge.h"
-#include "source_estate/module_pot/H_Hartree_pw.h"
+#include "source_estate/module_pot/h_hartree_pw.h"
 #include "source_estate/module_pot/potential_new.h"
 #include "source_io/module_parameter/input_parameter.h"
 #include "source_hsolver/hsolver_lcao.h"
+#include "source_hamilt/hamilt_hs_adapter.h"
 #include "source_psi/psi.h"
 
 #include <algorithm>
@@ -1133,10 +1134,16 @@ void FdeLcaoDriver::solve_projected(
     hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
     psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
-    elecstate::DensityMatrix<double, double>& density_matrix,
+    module_dm::DensityMatrix<double, double>& density_matrix,
     Charge& charge,
     const Parallel_Orbitals& orbitals) const
 {
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_
+        || charge.nspin != nspin_)
+    {
+        throw std::runtime_error(
+            "FDE spin-density normalization requires the attached PW grid");
+    }
     std::unique_ptr<FdeProjectedHamiltonian> projected
         = this->projected_hamiltonian(
             full_hamiltonian,
@@ -1154,20 +1161,18 @@ void FdeLcaoDriver::solve_projected(
                                        static_cast<int>(full_ao_dimension_),
                                        nbands_,
                                        electron_count_,
-                                       use_gpu_);
-    solver.solve(projected.get(),
+                                       use_gpu_,
+                                       density_basis_->poolnproc,
+                                       density_basis_->poolrank);
+    hamilt::HamiltHSMatrix<double> hs(projected.get());
+    solver.solve(hs,
                  wavefunctions,
                  &electronic_state,
                  density_matrix,
                  charge,
                  nspin_,
+                 active_initial_.cell_volume_bohr3,
                  false);
-    if (density_basis_ == nullptr || charge.rhopw != density_basis_
-        || charge.nspin != nspin_)
-    {
-        throw std::runtime_error(
-            "FDE spin-density normalization requires the attached PW grid");
-    }
     // ABACUS' general LCAO path normalizes only the total density.  The
     // projected alpha and beta quadratures can have different grid errors, so
     // restore both fixed FDE populations before charge/magnetization mixing.
@@ -1193,10 +1198,16 @@ void FdeLcaoDriver::solve_projected(
         full_hamiltonian,
     psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
-    elecstate::DensityMatrix<std::complex<double>, double>& density_matrix,
+    module_dm::DensityMatrix<std::complex<double>, double>& density_matrix,
     Charge& charge,
     const Parallel_Orbitals& orbitals) const
 {
+    if (density_basis_ == nullptr || charge.rhopw != density_basis_
+        || charge.nspin != nspin_)
+    {
+        throw std::runtime_error(
+            "FDE spin-density normalization requires the attached PW grid");
+    }
     std::unique_ptr<FdeProjectedHamiltonianComplex> projected
         = this->projected_hamiltonian(
             full_hamiltonian,
@@ -1212,20 +1223,18 @@ void FdeLcaoDriver::solve_projected(
         static_cast<int>(full_ao_dimension_),
         nbands_,
         electron_count_,
-        use_gpu_);
-    solver.solve(projected.get(),
+        use_gpu_,
+        density_basis_->poolnproc,
+        density_basis_->poolrank);
+    hamilt::HamiltHSMatrix<std::complex<double>> hs(projected.get());
+    solver.solve(hs,
                  wavefunctions,
                  &electronic_state,
                  density_matrix,
                  charge,
                  nspin_,
+                 active_initial_.cell_volume_bohr3,
                  false);
-    if (density_basis_ == nullptr || charge.rhopw != density_basis_
-        || charge.nspin != nspin_)
-    {
-        throw std::runtime_error(
-            "FDE spin-density normalization requires the attached PW grid");
-    }
     if (nspin_ == 2)
     {
         normalize_spin_density(charge.rho[0],
@@ -1277,7 +1286,7 @@ void validate_parallel_layout(const ModulePW::PW_Basis& basis,
 }
 
 std::vector<double> gather_matrix_to_root(
-    const hamilt::MatrixBlock<double>& matrix,
+    const ModuleBase::MatrixBlock<double>& matrix,
     const std::size_t dimension,
     const Parallel_Orbitals& orbitals,
     const int rank)
@@ -1633,8 +1642,8 @@ void FdeLcaoDriver::write_scf_artifacts(
         for (int spin = 0; spin < nspin_; ++spin)
         {
             full_hamiltonian.updateHk(spin_kpoint[spin]);
-            hamilt::MatrixBlock<double> local_hamiltonian;
-            hamilt::MatrixBlock<double> local_overlap;
+            ModuleBase::MatrixBlock<double> local_hamiltonian;
+            ModuleBase::MatrixBlock<double> local_overlap;
             full_hamiltonian.matrix(local_hamiltonian, local_overlap);
             if (spin == 0)
             {

@@ -35,8 +35,8 @@ class FdeProjectedHamiltonianT : public hamilt::Hamilt<TK>
 
     void updateHk(int kpoint) override;
     void refresh(bool yes) override;
-    void matrix(hamilt::MatrixBlock<TK>& hamiltonian,
-                hamilt::MatrixBlock<TK>& overlap) override;
+    void matrix(ModuleBase::MatrixBlock<TK>& hamiltonian,
+                ModuleBase::MatrixBlock<TK>& overlap) override;
 
     const std::vector<std::size_t>& active_orbitals() const;
 

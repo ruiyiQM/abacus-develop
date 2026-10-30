@@ -67,8 +67,12 @@ class ReadInput
      *
      * @param param parameters of ABACUS
      * @param filename INPUT
+     * @return Empty on success, otherwise shared input-validation diagnostics.
      */
-    void read_txt_input(Parameter& param, const std::string& filename);
+    std::string read_txt_input(Parameter& param, const std::string& filename);
+    /// Validate explicit domains, read values, resolve defaults and validate
+    /// resolved domains. Return diagnostics before entering the calculation.
+    std::string prepare_input(Parameter& param);
     /**
      * @brief Resolve the primary H/S output options and their legacy aliases.
      *
@@ -76,6 +80,13 @@ class ReadInput
      * does not depend on the order of keywords in the INPUT file.
      */
     void normalize_hs_output_options(Parameter& param);
+    /**
+     * @brief Resolve init_occ_mat and its legacy alias omc.
+     *
+     * This is called after all INPUT values have been read so that the result
+     * does not depend on the order of keywords in the INPUT file.
+     */
+    void normalize_occ_mat_options(Parameter& param);
     /**
      * @brief write INPUT file of txt format
      *
@@ -127,16 +138,21 @@ class ReadInput
     void item_deepks();
     // items for real time tddft
     void item_rt_tddft();
-    // items for linear response tddft
-    void item_tdofdft();
     // items for td-ofdft
+    void item_tdofdft();
+    // items for linear response tddft
     void item_lr_tddft();
+    // items for BSE
+    void item_bse();
+    // items for density functional perturbation theory
+    void item_dfpt();
     // items for output
     void item_output();
     // items for postprocess
     void item_postprocess();
     // items for some models
     void item_model();
+    void item_sccs();
     // items for exx
     void item_exx();
     // items for dft+u

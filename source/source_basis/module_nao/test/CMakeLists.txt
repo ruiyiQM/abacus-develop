@@ -3,7 +3,7 @@ AddTest(
   SOURCES
     numerical_radial_test.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
+    ../../module_ao/orb_atomic_lm.cpp
   LIBS parameter device base
 )
 
@@ -12,11 +12,11 @@ AddTest(
   SOURCES
     atomic_radials_test.cpp
     ../atomic_radials.cpp
+    ../smoothgen.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
   LIBS parameter device base
 )
 
@@ -27,9 +27,8 @@ AddTest(
     ../beta_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
   LIBS parameter device base
 )
 
@@ -40,9 +39,8 @@ AddTest(
     ../hydrogen_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
   LIBS parameter device base
 )
 
@@ -53,9 +51,8 @@ AddTest(
     ../pswfc_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
   LIBS parameter device base
 )
 
@@ -66,9 +63,8 @@ AddTest(
     ../sphbes_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
  LIBS parameter device base
 )
 
@@ -78,15 +74,15 @@ AddTest(
     radial_collection_test.cpp
     ../radial_collection.cpp
     ../atomic_radials.cpp
+    ../smoothgen.cpp
     ../beta_radials.cpp
     ../hydrogen_radials.cpp
     ../pswfc_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
     ../sphbes_radials.cpp
-    ../../module_ao/ORB_atomic_lm.cpp
-    ../../module_ao/ORB_atomic.cpp
-    ../../../source_io/module_output/orb_io.cpp
+    ../../module_ao/orb_atomic_lm.cpp
+    ../../module_ao/orb_atomic.cpp
   LIBS parameter device base
 )
 
@@ -97,6 +93,7 @@ AddTest(
     ../two_center_table.cpp
     ../radial_collection.cpp
     ../atomic_radials.cpp
+    ../smoothgen.cpp
     ../beta_radials.cpp
     ../hydrogen_radials.cpp
     ../pswfc_radials.cpp
@@ -106,7 +103,7 @@ AddTest(
     ../two_center_bundle.cpp
     ../two_center_integrator.cpp
     ../real_gaunt_table.cpp
-    ../../../source_io/module_output/orb_io.cpp
+
   LIBS parameter device base container orb
 )
 
@@ -115,19 +112,20 @@ AddTest(
   SOURCES
     real_gaunt_table_test.cpp
     ../real_gaunt_table.cpp
-    ../../module_ao/ORB_gaunt_table.cpp
+    ../../module_ao/orb_gaunt_table.cpp
   LIBS parameter device base container
 )
 
 AddTest(
   TARGET MODULE_NAO_two_center_integrator
   SOURCES
-    two_center_integrator_test.cpp
+    two_center_integ_test.cpp
     ../two_center_integrator.cpp
     ../two_center_table.cpp
     ../real_gaunt_table.cpp
     ../radial_collection.cpp
     ../atomic_radials.cpp
+    ../smoothgen.cpp
     ../beta_radials.cpp
     ../hydrogen_radials.cpp
     ../pswfc_radials.cpp
@@ -135,7 +133,7 @@ AddTest(
     ../radial_set.cpp
     ../numerical_radial.cpp
     ../two_center_bundle.cpp
-    ../../../source_io/module_output/orb_io.cpp
+
   LIBS parameter device base container orb
 )
 
@@ -149,33 +147,13 @@ AddTest(
     ../real_gaunt_table.cpp
     ../radial_collection.cpp
     ../atomic_radials.cpp
+    ../smoothgen.cpp
     ../beta_radials.cpp
     ../hydrogen_radials.cpp
     ../pswfc_radials.cpp
     ../sphbes_radials.cpp
     ../radial_set.cpp
     ../numerical_radial.cpp
-    ../../../source_io/module_output/orb_io.cpp
+
   LIBS parameter device base container orb
 )
-
-AddTest(
-  TARGET MODULE_NAO_generate_projection
-  SOURCES
-    projgen_test.cpp
-    ../two_center_bundle.cpp
-    ../two_center_integrator.cpp
-    ../two_center_table.cpp
-    ../real_gaunt_table.cpp
-    ../radial_collection.cpp
-    ../atomic_radials.cpp
-    ../beta_radials.cpp
-    ../hydrogen_radials.cpp
-    ../pswfc_radials.cpp
-    ../sphbes_radials.cpp
-    ../radial_set.cpp
-    ../numerical_radial.cpp
-    ../../../source_io/module_output/orb_io.cpp
-  LIBS parameter device base container orb
-)
-

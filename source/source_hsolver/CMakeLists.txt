@@ -4,16 +4,14 @@ list(APPEND objects
     diago_david.cpp
     diago_dav_subspace.cpp
     diago_bpcg.cpp
-    para_linear_transform.cpp
+    para_lin_tf.cpp
     hsolver_pw.cpp
     hsolver_lcaopw.cpp
-    hsolver_pw_sdft.cpp
     diago_iter_assist.cpp
     hsolver.cpp
     diago_pxxxgvx.cpp
     diag_hs_para.cpp
     diago_params.cpp
-
 )
 
 if(ENABLE_LCAO)
@@ -80,14 +78,16 @@ if(ENABLE_COVERAGE)
   add_coverage(hsolver)
 endif()
 
-if(ENABLE_LCAO AND ENABLE_ELPA)
+if(ENABLE_ELPA)
   add_subdirectory(module_genelpa)
 endif()
 
 if(BUILD_TESTING)
-  add_subdirectory(test)
+  add_subdirectory(unittests)
   if(ENABLE_MPI)
     add_subdirectory(kernels/test)
   endif()
   message(STATUS "Building tests")
 endif()
+
+add_subdirectory(module_linalg)

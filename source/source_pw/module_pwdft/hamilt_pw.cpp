@@ -9,8 +9,11 @@
 #include "source_base/global_function.h"
 #include "source_base/global_variable.h"
 #include "source_base/parallel_reduce.h"
-#include "source_hamilt/module_xc/exx_info.h" // use GlobalC::exx_info
+#include "source_estate/module_pot/pot_pcc.h"
+#include "source_hamilt/module_xc/general_exx_info.h" // for General_Exx_Info type
 #include "source_io/module_parameter/parameter.h"
+#include "source_pw/module_rt/op_pw_ekin_td.h"
+#include "source_pw/module_rt/op_pw_nl_td.h"
 
 namespace hamilt
 {
@@ -20,8 +23,9 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
                               ModulePW::PW_Basis_K* wfc_basis,
                               K_Vectors* pkv,
                               pseudopot_cell_vnl* nlpp,
-                              Plus_U* p_dftu, // mohan add 2025-11-06
-                              const UnitCell* ucell)
+                              Plus_U_Base* p_dftu,
+                              const UnitCell* ucell,
+                              const General_Exx_Info* exx_info)
     : ucell(ucell)
 {
     this->classname = "HamiltPW";
@@ -33,12 +37,13 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     const auto tpiba = static_cast<Real>(ucell->tpiba);
     const int* isk = pkv->isk.data();
     const Real* gk2 = wfc_basis->get_gk2_data<Real>();
+    const bool is_tddft = PARAM.inp.esolver_type == "tddft";
+    const bool velocity_gauge = is_tddft && PARAM.inp.td_stype == 1;
 
     if (PARAM.inp.t_in_h)
     {
         // Operator<double>* ekinetic = new Ekinetic<OperatorLCAO<double>>
-        Operator<T, Device>* ekinetic
-            = new Ekinetic<OperatorPW<T, Device>>(tpiba2, gk2, wfc_basis->nks, wfc_basis->npwk_max);
+        Operator<T, Device>* ekinetic = new Ekinetic<OperatorPW<T, Device>>(tpiba2, gk2, wfc_basis->nks, wfc_basis->npwk_max);
         if (this->ops == nullptr)
         {
             this->ops = ekinetic;
@@ -47,31 +52,65 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
         {
             this->ops->add(ekinetic);
         }
+
+        // Add the velocity-gauge kinetic correction 2*A*p + A^2.
+        if (velocity_gauge)
+        {
+            Operator<T, Device>* td_ekinetic = new TDEkineticPW<T, Device>(wfc_basis);
+
+            if (this->ops == nullptr)
+            {
+                this->ops = td_ekinetic;
+            }
+            else
+            {
+                this->ops->add(td_ekinetic);
+            }
+        }
     }
-    if (PARAM.inp.vl_in_h)
+    const Input_para& input = PARAM.inp;
+    if (input.vl_in_h)
     {
         std::vector<std::string> pot_register_in;
-        if (PARAM.inp.vion_in_h)
+        if (input.vion_in_h)
         {
             pot_register_in.push_back("local");
         }
-        if (PARAM.inp.vh_in_h)
+        if (input.vh_in_h)
         {
             pot_register_in.push_back("hartree");
         }
         // no variable can choose xc, maybe it is necessary
         pot_register_in.push_back("xc");
-        if (PARAM.inp.imp_sol)
+        if (input.imp_sol == 1)
         {
             pot_register_in.push_back("surchem");
         }
-        if (PARAM.inp.efield_flag)
+        if (input.imp_sol == 2)
+        {
+            pot_register_in.push_back("sccs");
+        }
+        if (input.assume_isolated == "pcc_0d")
+        {
+            pot_register_in.push_back("pcc");
+        }
+        if (input.assume_isolated == "pcc_2d")
+        {
+            const int count = pkv->get_nks();
+            elecstate::PotPcc::validate_kpoints(pkv->kvec_d, count, input.pcc_2d_axis);
+            pot_register_in.push_back("pcc_2d");
+        }
+        if (input.efield_flag)
         {
             pot_register_in.push_back("efield");
         }
-        if (PARAM.inp.gate_flag)
+        if (input.gate_flag)
         {
             pot_register_in.push_back("gatefield");
+        }
+        if (is_tddft)
+        {
+            pot_register_in.push_back("tddft");
         }
         if (PARAM.inp.ml_exx) // sunliang
         {
@@ -86,7 +125,7 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
         if (pot_register_in.size() > 0)
         {
             // register Potential by gathered operator
-            pot_in->pot_register(pot_register_in);
+            pot_in->pot_register(pot_register_in, input);
             Operator<T, Device>* veff = new Veff<OperatorPW<T, Device>>(isk,
                                                                         pot_in->get_veff_smooth_data<Real>(),
                                                                         pot_in->get_veff_smooth().nr,
@@ -111,7 +150,19 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     }
     if (PARAM.inp.vnl_in_h)
     {
-        Operator<T, Device>* nonlocal = new Nonlocal<OperatorPW<T, Device>>(isk, this->ppcell, ucell, wfc_basis);
+        Operator<T, Device>* nonlocal = nullptr;
+
+        // Use vector-potential-shifted projectors in the velocity gauge.
+        if (velocity_gauge)
+        {
+            nonlocal = new TDNonlocalPW<T, Device>(isk, this->ppcell, ucell, wfc_basis);
+        }
+        else
+        {
+            // Ground-state and length-gauge calculations use the standard operator.
+            nonlocal = new Nonlocal<OperatorPW<T, Device>>(isk, this->ppcell, ucell, wfc_basis);
+        }
+
         if (this->ops == nullptr)
         {
             this->ops = nonlocal;
@@ -123,19 +174,22 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     }
     if (PARAM.inp.sc_mag_switch || PARAM.inp.dft_plus_u)
     {
-        Operator<T, Device>* onsite_proj = new OnsiteProj<OperatorPW<T, Device>>(isk,
-                                                                                 ucell,
-                                                                                 p_dftu,
-                                                                                 PARAM.inp.sc_mag_switch,
-                                                                                 (PARAM.inp.dft_plus_u > 0));
+        Operator<T, Device>* onsite_proj
+            = new OnsiteProj<OperatorPW<T, Device>>(isk, ucell, p_dftu, PARAM.inp.sc_mag_switch, (PARAM.inp.dft_plus_u > 0));
         this->ops->add(onsite_proj);
     }
-    if (GlobalC::exx_info.info_global.cal_exx)
+    if (exx_info && exx_info->cal_exx)
     {
-        bool separate_loop = GlobalC::exx_info.info_global.separate_loop;
-        double hybrid_alpha = GlobalC::exx_info.info_global.hybrid_alpha;
-        auto coulomb_param = GlobalC::exx_info.info_global.coulomb_param;
-        auto exx = new OperatorEXXPW<T, Device>(isk, wfc_basis, pot_in->get_rho_basis(), pkv, ucell, separate_loop, hybrid_alpha, coulomb_param);
+        auto exx = new OperatorEXXPW<T, Device>(isk,
+                                                wfc_basis,
+                                                pot_in->get_rho_basis(),
+                                                pkv,
+                                                ucell,
+                                                *exx_info,
+                                                PARAM.inp.nspin,
+                                                GlobalV::KPAR,
+                                                GlobalV::MY_RANK,
+                                                GlobalV::MY_POOL);
         if (this->ops == nullptr)
         {
             this->ops = exx;
@@ -155,6 +209,30 @@ HamiltPW<T, Device>::~HamiltPW()
     if (this->ops != nullptr)
     {
         delete this->ops;
+    }
+}
+
+template <typename T, typename Device>
+void HamiltPW<T, Device>::bind_td_state(const Real* veff, const ModuleBase::Vector3<double>& A_ha)
+{
+    Operator<T, Device>* op = this->ops;
+    while (op != nullptr)
+    {
+        if (op->get_cal_type() == calculation_type::pw_veff)
+        {
+            static_cast<Veff<OperatorPW<T, Device>>*>(op)->set_veff(veff);
+        }
+        else if (op->get_cal_type() == calculation_type::pw_ekinetic_td)
+        {
+            static_cast<TDEkineticPW<T, Device>*>(op)->set_A_ha(A_ha);
+        }
+        else if (op->get_cal_type() == calculation_type::pw_nonlocal)
+        {
+            TDNonlocalPW<T, Device>* td_nonlocal = dynamic_cast<TDNonlocalPW<T, Device>*>(op);
+            if (td_nonlocal != nullptr)
+                td_nonlocal->set_A_ha(A_ha);
+        }
+        op = op->next_op;
     }
 }
 
@@ -197,17 +275,7 @@ void HamiltPW<T, Device>::sPsi(const T* psi_in, // psi
             if (nbands == 1)
             {
                 int inc = 1;
-                gemv_op()(transa,
-                          npw,
-                          this->ppcell->nkb,
-                          &one,
-                          this->vkb,
-                          this->ppcell->vkbnc,
-                          psi_in,
-                          inc,
-                          &zero,
-                          becp,
-                          inc);
+                gemv_op()(transa, npw, this->ppcell->nkb, &one, this->vkb, this->ppcell->vkbnc, psi_in, inc, &zero, becp, inc);
             }
             else
             {
@@ -233,93 +301,74 @@ void HamiltPW<T, Device>::sPsi(const T* psi_in, // psi
         setmem_complex_op()(ps, 0, this->ppcell->nkb * nbands);
 
         // spsi = psi + sum qq <beta|psi> |beta>
-        if (PARAM.inp.noncolin)
+        // qq <beta|psi>
+        char transa = 'N';
+        char transb = 'N';
+        for (int it = 0; it < ucell->ntype; it++)
         {
-            // spsi_nc
-            std::cout << " noncolinear in uspp is not implemented yet " << std::endl;
-            exit(0);
+            Atom* atoms = &ucell->atoms[it];
+            if (atoms->ncpp.tvanp)
+            {
+                const int nh = atoms->ncpp.nh;
+                T* qqc = nullptr;
+                resmem_complex_op()(qqc, nh * nh, "Hamilt<PW>::qqc");
+                std::vector<T> qqc_host(nh * nh);
+                const double* qq_now_host = &this->ppcell->qq_nt.ptr[it * this->ppcell->nhm * this->ppcell->nhm];
+
+                for (int i = 0; i < nh; i++)
+                {
+                    for (int j = 0; j < nh; j++)
+                    {
+                        const int source_index = i * this->ppcell->nhm + j;
+                        const int target_index = i * nh + j;
+
+                        qqc_host[target_index] = static_cast<Real>(qq_now_host[source_index]) * one;
+                    }
+                }
+
+                syncmem_complex_h2d_op()(qqc, qqc_host.data(), qqc_host.size());
+
+                for (int ia = 0; ia < atoms->na; ia++)
+                {
+                    const int iat = ucell->itia2iat(it, ia);
+                    gemm_op()(transa,
+                              transb,
+                              nh,
+                              nbands,
+                              nh,
+                              &one,
+                              qqc,
+                              nh,
+                              &becp[this->ppcell->indv_ijkb0[iat]],
+                              this->ppcell->nkb,
+                              &zero,
+                              &ps[this->ppcell->indv_ijkb0[iat]],
+                              this->ppcell->nkb);
+                }
+                delmem_complex_op()(qqc);
+            }
+        }
+
+        if (nbands == 1)
+        {
+            const int inc = 1;
+            gemv_op()(transa, npw, this->ppcell->nkb, &one, this->vkb, this->ppcell->vkbnc, ps, inc, &one, spsi, inc);
         }
         else
         {
-            // qq <beta|psi>
-            char transa = 'N';
-            char transb = 'N';
-            for (int it = 0; it < ucell->ntype; it++)
-            {
-                Atom* atoms = &ucell->atoms[it];
-                if (atoms->ncpp.tvanp)
-                {
-                    const int nh = atoms->ncpp.nh;
-                    T* qqc = nullptr;
-                    resmem_complex_op()(qqc, nh * nh, "Hamilt<PW>::qqc");
-                    std::vector<T> qqc_host(nh*nh);
-                    const double* qq_now_host = &this->ppcell->qq_nt.ptr[it * this->ppcell->nhm * this->ppcell->nhm];
-
-                    for (int i = 0; i < nh; i++)
-                    {
-                        for (int j = 0; j < nh; j++)
-                        {
-                            const int source_index = i * this->ppcell->nhm + j;
-                            const int target_index = i * nh + j;
-
-                            qqc_host[target_index] = static_cast<Real>(qq_now_host[source_index]) * one;
-                        }
-                    }
-
-                    syncmem_complex_h2d_op()(qqc, qqc_host.data(), qqc_host.size());
-
-                    for (int ia = 0; ia < atoms->na; ia++)
-                    {
-                        const int iat = ucell->itia2iat(it, ia);
-                        gemm_op()(transa,
-                                  transb,
-                                  nh,
-                                  nbands,
-                                  nh,
-                                  &one,
-                                  qqc,
-                                  nh,
-                                  &becp[this->ppcell->indv_ijkb0[iat]],
-                                  this->ppcell->nkb,
-                                  &zero,
-                                  &ps[this->ppcell->indv_ijkb0[iat]],
-                                  this->ppcell->nkb);
-                    }
-                    delmem_complex_op()(qqc);
-                }
-            }
-
-            if (nbands == 1)
-            {
-                const int inc = 1;
-                gemv_op()(transa,
-                          npw,
-                          this->ppcell->nkb,
-                          &one,
-                          this->vkb,
-                          this->ppcell->vkbnc,
-                          ps,
-                          inc,
-                          &one,
-                          spsi,
-                          inc);
-            }
-            else
-            {
-                gemm_op()(transa,
-                          transb,
-                          npw,
-                          nbands,
-                          this->ppcell->nkb,
-                          &one,
-                          this->vkb,
-                          this->ppcell->vkbnc,
-                          ps,
-                          this->ppcell->nkb,
-                          &one,
-                          spsi,
-                          nrow);
-            }
+            gemm_op()(transa,
+                      transb,
+                      npw,
+                      nbands,
+                      this->ppcell->nkb,
+                      &one,
+                      this->vkb,
+                      this->ppcell->vkbnc,
+                      ps,
+                      this->ppcell->nkb,
+                      &one,
+                      spsi,
+                      nrow);
         }
         delmem_complex_op()(ps);
         delmem_complex_op()(becp);

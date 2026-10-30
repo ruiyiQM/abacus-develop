@@ -1,4 +1,5 @@
 #include "../sto_tool.h"
+#include "source_pw/module_pwdft/dftu_base.h"
 #include "mpi.h"
 
 #include <gtest/gtest.h>
@@ -8,12 +9,13 @@
  ***********************************************/
 
 template <typename T, typename Device>
-hamilt::HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in, 
-		ModulePW::PW_Basis_K* wfc_basis, 
+hamilt::HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
+		ModulePW::PW_Basis_K* wfc_basis,
 		K_Vectors* p_kv,
 		pseudopot_cell_vnl*,
-        Plus_U* p_dftu, // mohan add 20251108
-		const UnitCell*){}
+        Plus_U_Base* p_dftu,
+		const UnitCell*,
+        const General_Exx_Info*){}
 
 template <typename T, typename Device>
 hamilt::HamiltPW<T, Device>::~HamiltPW(){};
@@ -23,31 +25,31 @@ template <typename T, typename Device>
 void hamilt::HamiltPW<T, Device>::sPsi(T const*, T*, const int, const int, const int) const{}
 
 template <typename T, typename Device>
-hamilt::HamiltSdftPW<T, Device>::HamiltSdftPW(elecstate::Potential* pot_in,
-                                              ModulePW::PW_Basis_K* wfc_basis,
-                                              K_Vectors* p_kv,
-                                              pseudopot_cell_vnl* nlpp,
-                                              const UnitCell* ucell,
-                                              const int& npol,
-                                              Real* emin_in,
-                                              Real* emax_in)
-    : HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell), ngk(p_kv->ngk)
+StoHamiltPW<T, Device>::StoHamiltPW(elecstate::Potential* pot_in,
+                                    ModulePW::PW_Basis_K* wfc_basis,
+                                    K_Vectors* p_kv,
+                                    pseudopot_cell_vnl* nlpp,
+                                    const UnitCell* ucell,
+                                    const int& npol,
+                                    Real* emin_in,
+                                    Real* emax_in)
+    : hamilt::HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr), ngk(p_kv->ngk)
 {
 }
 
 template <typename T, typename Device>
-void hamilt::HamiltSdftPW<T, Device>::hPsi_norm(const T* psi_in, T* hpsi, const int& nbands){}
+void StoHamiltPW<T, Device>::hPsi_norm(const T* psi_in, T* hpsi, const int& nbands){}
 
 template class hamilt::HamiltPW<std::complex<double>, base_device::DEVICE_CPU>;
-template class hamilt::HamiltSdftPW<std::complex<double>, base_device::DEVICE_CPU>;
+template class StoHamiltPW<std::complex<double>, base_device::DEVICE_CPU>;
 template class hamilt::HamiltPW<std::complex<float>, base_device::DEVICE_CPU>;
-template class hamilt::HamiltSdftPW<std::complex<float>, base_device::DEVICE_CPU>;
+template class StoHamiltPW<std::complex<float>, base_device::DEVICE_CPU>;
 
 #if ((defined __CUDA) || (defined __ROCM))
 template class hamilt::HamiltPW<std::complex<double>, base_device::DEVICE_GPU>;
-template class hamilt::HamiltSdftPW<std::complex<double>, base_device::DEVICE_GPU>;
+template class StoHamiltPW<std::complex<double>, base_device::DEVICE_GPU>;
 template class hamilt::HamiltPW<std::complex<float>, base_device::DEVICE_GPU>;
-template class hamilt::HamiltSdftPW<std::complex<float>, base_device::DEVICE_GPU>;
+template class StoHamiltPW<std::complex<float>, base_device::DEVICE_GPU>;
 #endif
 
 /**

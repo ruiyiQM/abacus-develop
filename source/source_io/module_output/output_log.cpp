@@ -1,11 +1,16 @@
 #include "output_log.h"
 
+#include "source_estate/fp_energy.h"
 #include "source_io/module_parameter/parameter.h"
 #include "source_base/constants.h"
 #include "source_base/formatter.h"
 #include "source_base/global_variable.h"
 #include "source_base/parallel_reduce.h"
 #include "source_base/parallel_comm.h"
+#include "source_cell/mdcell.h"
+
+#include <cmath>
+#include <iomanip>
 
 #ifdef __MPI
 #include <mpi.h>
@@ -50,13 +55,23 @@ void output_after_relax(bool conv_ion, bool conv_esolver, std::ofstream& ofs_run
     }
 }
 
-void output_efermi(const bool &convergence, double& efermi, std::ofstream& ofs_running)
+void output_efermi(const bool &convergence, const elecstate::Efermi& eferm, std::ofstream& ofs_running)
 {
     if (convergence && PARAM.inp.out_level != "m")
     {
-// mohan comment out 2025-06-22
-//        ofs_running << std::setprecision(16);
-//        ofs_running << " EFERMI = " << std::setprecision(11) << efermi * ModuleBase::Ry_to_eV << " eV" << std::endl;
+        if (eferm.two_efermi)
+        {
+            ofs_running << " #FERMI ENERGY# "
+                        << std::setprecision(11) << eferm.ef_up * ModuleBase::Ry_to_eV
+                        << " " << eferm.ef_dw * ModuleBase::Ry_to_eV
+                        << " eV    # two fermi energies (up, down)" << std::endl;
+        }
+        else
+        {
+            ofs_running << " #FERMI ENERGY# "
+                        << std::setprecision(11) << eferm.ef * ModuleBase::Ry_to_eV
+                        << " eV" << std::endl;
+        }
     }
 }
 
@@ -258,17 +273,75 @@ void print_force(std::ofstream& ofs_running,
                  /*nrows=*/atom_label.size(), 
                  /*formats=*/{"%8s", "%20.10f", "%20.10f", "%20.10f"}, 
                  /*indent*/1,
-			     {FmtTable::Align::RIGHT,FmtTable::Align::RIGHT});
+                 {FmtTable::Align::RIGHT,FmtTable::Align::RIGHT});
 
 
-	fmt << atom_label << force_x << force_y << force_z;
-	table = fmt.str();
+    fmt << atom_label << force_x << force_y << force_z;
+    table = fmt.str();
     ofs_running << table; 
 
-	if (PARAM.inp.test_force) 
-	{ 
-		std::cout << table;
-	}
+    if (PARAM.inp.test_force) 
+    { 
+        std::cout << table;
+    }
+}
+
+void print_force(std::ofstream& ofs, const MDCell& cell, const std::string& name)
+{
+    const double output_acc = 1.0e-8;
+    const double force_unit = ModuleBase::Hartree_to_eV / ModuleBase::BOHR_TO_A;
+    const std::vector<LocalAtom>& owned_atoms = cell.owned_atoms();
+    const std::vector<std::string>& type_labels = cell.type_labels();
+
+    const auto print_atom = [&ofs, &type_labels, output_acc, force_unit](const LocalAtom& atom) {
+        const std::string& label = type_labels[static_cast<std::size_t>(atom.type)];
+        const double fx = std::abs(atom.force.x) > output_acc ? atom.force.x * force_unit : 0.0;
+        const double fy = std::abs(atom.force.y) > output_acc ? atom.force.y * force_unit : 0.0;
+        const double fz = std::abs(atom.force.z) > output_acc ? atom.force.z * force_unit : 0.0;
+        ofs << std::setw(9) << label + std::to_string(atom.type_index + 1)
+            << std::setw(20) << std::fixed << std::setprecision(10) << fx
+            << std::setw(20) << fy << std::setw(20) << fz << std::endl;
+    };
+
+#ifdef __MPI
+    int rank = 0;
+    int size = 1;
+    MPI_Comm_rank(cell.communicator(), &rank);
+    MPI_Comm_size(cell.communicator(), &size);
+    if (rank != 0)
+    {
+        const int nowned_atoms = cell.owned_atoms().size();
+        MPI_Send(&nowned_atoms, 1, MPI_INT, 0, 0, cell.communicator());
+        for (const LocalAtom& atom : owned_atoms)
+        {
+            MPI_Send(&atom.type, 1, MPI_INT, 0, 1, cell.communicator());
+            MPI_Send(&atom.type_index, 1, MPI_INT64_T, 0, 2, cell.communicator());
+            MPI_Send(&atom.force.x, 3, MPI_DOUBLE, 0, 3, cell.communicator());
+        }
+        return;
+    }
+#endif
+
+    ofs << "\n #" << name << "#" << std::endl;
+    ofs << std::setw(9) << "Atoms" << std::setw(20) << "Force_x" << std::setw(20)
+        << "Force_y" << std::setw(20) << "Force_z" << std::endl;
+    for (const LocalAtom& atom : owned_atoms) print_atom(atom);
+
+#ifdef __MPI
+    for (int source = 1; source < size; ++source)
+    {
+        int nlocal = 0;
+        MPI_Recv(&nlocal, 1, MPI_INT, source, 0, cell.communicator(), MPI_STATUS_IGNORE);
+        for (int iat = 0; iat < nlocal; ++iat)
+        {
+            LocalAtom atom;
+            MPI_Recv(&atom.type, 1, MPI_INT, source, 1, cell.communicator(), MPI_STATUS_IGNORE);
+            MPI_Recv(&atom.type_index, 1, MPI_INT64_T, source, 2, cell.communicator(), MPI_STATUS_IGNORE);
+            MPI_Recv(&atom.force.x, 3, MPI_DOUBLE, source, 3, cell.communicator(), MPI_STATUS_IGNORE);
+            print_atom(atom);
+        }
+    }
+#endif
 }
 
 void print_stress(const std::string& name, const ModuleBase::matrix& scs, 

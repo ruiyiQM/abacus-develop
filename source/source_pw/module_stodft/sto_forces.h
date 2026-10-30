@@ -1,7 +1,7 @@
 #ifndef STO_FORCES_H
 #define STO_FORCES_H
 
-#include "source_pw/module_pwdft/forces.h"
+#include "source_pw/module_pwdft/force_pw.h"
 #include "source_psi/psi.h"
 #include "sto_wf.h"
 
@@ -21,7 +21,11 @@ class Sto_Forces : public Forces<FPTYPE, Device>
     Sto_Forces(const int nat_in) : Forces<FPTYPE, Device>(nat_in){};
     ~Sto_Forces(){};
 
-    void cal_stoforce(ModuleBase::matrix& force,
+    void cal_stoforce(const int nspin,
+                      const bool domag,
+                      const bool domag_z,
+                      const int gga_grad,
+                      ModuleBase::matrix& force,
                       const elecstate::ElecState& elec,
                       ModulePW::PW_Basis* rho_basis,
                       ModuleSymmetry::Symmetry* p_symm,

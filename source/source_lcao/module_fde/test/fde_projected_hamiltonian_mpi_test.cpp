@@ -4,6 +4,7 @@
 #include <mpi.h>
 
 #include <algorithm>
+#include <complex>
 #include <cstddef>
 #include <vector>
 
@@ -16,6 +17,16 @@ template <>
 void synchronize_memory_op<double, DEVICE_CPU, DEVICE_CPU>::operator()(
     double* output,
     const double* input,
+    const std::size_t size)
+{
+    std::copy(input, input + size, output);
+}
+
+// The shared projection source instantiates both real and complex Hamiltonians.
+template <>
+void synchronize_memory_op<std::complex<double>, DEVICE_CPU, DEVICE_CPU>::operator()(
+    std::complex<double>* output,
+    const std::complex<double>* input,
     const std::size_t size)
 {
     std::copy(input, input + size, output);
@@ -54,15 +65,15 @@ class DistributedHamiltonian : public hamilt::Hamilt<double>
         }
     }
 
-    void matrix(hamilt::MatrixBlock<double>& hamiltonian,
-                hamilt::MatrixBlock<double>& overlap) override
+    void matrix(ModuleBase::MatrixBlock<double>& hamiltonian,
+                ModuleBase::MatrixBlock<double>& overlap) override
     {
-        hamiltonian = hamilt::MatrixBlock<double>{
+        hamiltonian = ModuleBase::MatrixBlock<double>{
             hamiltonian_.data(),
             static_cast<std::size_t>(distribution_.get_row_size()),
             static_cast<std::size_t>(distribution_.get_col_size()),
             distribution_.get_desc()};
-        overlap = hamilt::MatrixBlock<double>{
+        overlap = ModuleBase::MatrixBlock<double>{
             overlap_.data(),
             static_cast<std::size_t>(distribution_.get_row_size()),
             static_cast<std::size_t>(distribution_.get_col_size()),
@@ -93,8 +104,8 @@ TEST(FdeProjectedHamiltonianMpi, ProjectsEachBlockCyclicLocalMatrixEntry)
                                            {0, 2, 5},
                                            1.0e6);
 
-    hamilt::MatrixBlock<double> hamiltonian;
-    hamilt::MatrixBlock<double> overlap;
+    ModuleBase::MatrixBlock<double> hamiltonian;
+    ModuleBase::MatrixBlock<double> overlap;
     projected.matrix(hamiltonian, overlap);
     EXPECT_EQ(hamiltonian.row,
               static_cast<std::size_t>(distribution.get_row_size()));

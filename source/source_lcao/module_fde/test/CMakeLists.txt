@@ -32,6 +32,7 @@ AddTest(
   TARGET MODULE_FDE_runtime_config
   SOURCES fde_runtime_config_test.cpp
     ../runtime/fde_runtime_config.cpp
+    ../embedding/fde_semilocal_functional.cpp
     ../runtime/fde_state.cpp
     ../coupling/fde_coupling_policy.cpp
     ../embedding/fde_xc_policy.cpp
@@ -101,6 +102,7 @@ AddTest(
     ../coupling/fde_linearized_state.cpp
     ../coupling/fde_multistate_solver.cpp
     ../runtime/fde_runtime_config.cpp
+    ../embedding/fde_semilocal_functional.cpp
     ../coupling/fde_coupling_policy.cpp
     ../coupling/fde_coupling_provider_factory.cpp
     ../embedding/fde_xc_policy.cpp

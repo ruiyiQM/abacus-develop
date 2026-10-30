@@ -27,6 +27,10 @@ namespace elecstate
 {
 class ElecState;
 class Potential;
+}
+
+namespace module_dm
+{
 template <typename TK, typename TR>
 class DensityMatrix;
 }
@@ -95,7 +99,7 @@ class FdeLcaoDriver
     void solve_projected(hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
                          psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
                          elecstate::ElecState& electronic_state,
-                         elecstate::DensityMatrix<double, double>& density_matrix,
+                         module_dm::DensityMatrix<double, double>& density_matrix,
                          Charge& charge,
                          const Parallel_Orbitals& orbitals) const;
 
@@ -104,7 +108,7 @@ class FdeLcaoDriver
             full_hamiltonian,
         psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
         elecstate::ElecState& electronic_state,
-        elecstate::DensityMatrix<std::complex<double>, double>& density_matrix,
+        module_dm::DensityMatrix<std::complex<double>, double>& density_matrix,
         Charge& charge,
         const Parallel_Orbitals& orbitals) const;
 

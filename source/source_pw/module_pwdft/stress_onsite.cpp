@@ -1,9 +1,9 @@
 #include "source_base/module_device/device.h"
 #include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
-#include "source_pw/module_pwdft/onsite_proj.h"
+#include "source_pw/module_proj/onsite_proj.h"
 #include "source_io/module_parameter/parameter.h"
-#include "source_lcao/module_dftu/dftu.h"
+#include "source_pw/module_pwdft/dftu_base.h"
 #include "source_lcao/module_deltaspin/spin_constrain.h"
 #include "stress_func.h"
 
@@ -27,7 +27,7 @@ void Stress_Func<FPTYPE, Device>::stress_onsite(
     const ModuleBase::matrix& wg,
     const ModulePW::PW_Basis_K* wfc_basis,
     const UnitCell& ucell_in,
-    const Plus_U &dftu, // mohan add 2025-11-06
+    const Plus_U_Base& dftu,
     const void* psi_in,
     ModuleSymmetry::Symmetry* p_symm
 )
@@ -106,7 +106,7 @@ void Stress_Func<FPTYPE, Device>::stress_onsite(
                     
                     sigma_onsite[idx] += dftu_stress;
 #ifdef __DEBUG
-		    std::cout << " idx=" << idx << " stress=" << sigma_onsite[idx] << std::endl;
+            std::cout << " idx=" << idx << " stress=" << sigma_onsite[idx] << std::endl;
 #endif
                 }
                 
@@ -155,7 +155,7 @@ void Stress_Func<FPTYPE, Device>::stress_onsite(
     // Add to total stress
     for (int idx = 0; idx < 9; idx++)
     {
-	    std::cout << " idx=" << idx << " stress=" << sigma_onsite[idx] << std::endl;
+        std::cout << " idx=" << idx << " stress=" << sigma_onsite[idx] << std::endl;
     }
 #endif
 

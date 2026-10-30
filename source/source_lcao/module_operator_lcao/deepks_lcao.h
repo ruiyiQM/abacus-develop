@@ -1,11 +1,11 @@
 #ifndef DEEPKSLCAO_H
 #define DEEPKSLCAO_H
-#include "source_basis/module_ao/ORB_read.h"
+#include "source_basis/module_ao/orb_read.h"
 #include "source_basis/module_ao/parallel_orbitals.h"
 #include "source_basis/module_nao/two_center_integrator.h"
 #include "source_cell/module_neighbor/sltk_grid_driver.h"
 #include "source_estate/module_dm/density_matrix.h"
-#include "source_lcao/module_deepks/LCAO_deepks.h"
+#include "source_lcao/module_deepks/lcao_deepks.h"
 #include "source_hamilt/module_hcontainer/hcontainer.h"
 #include "operator_lcao.h"
 
@@ -39,7 +39,7 @@ class DeePKS<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
                                  const TwoCenterIntegrator* intor_orb_alpha,
                                  const LCAO_Orbitals* ptr_orb,
                                  const int& nks_in,
-                                 elecstate::DensityMatrix<TK, double>* DM_in
+                                 module_dm::DensityMatrix<TK, double>* DM_in
 #ifdef __MLALGO
                                  ,
                                  LCAO_Deepks<TK>* ld_in
@@ -67,7 +67,7 @@ class DeePKS<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
 #endif
 
   private:
-    elecstate::DensityMatrix<TK, double>* DM;
+    module_dm::DensityMatrix<TK, double>* DM;
 
     const UnitCell* ucell = nullptr;
     Grid_Driver* gridD = nullptr;

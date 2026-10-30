@@ -255,8 +255,8 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
                     const int* atom_nh,
                     const int* atom_na,
                     const FPTYPE* d_wg,
-                    const std::complex<FPTYPE>* vu,
-                    const int* orbital_corr,
+                    const std::complex<FPTYPE>* pot_onsite,
+                    const int* l_channel,
                     const std::complex<FPTYPE>* becp,
                     const std::complex<FPTYPE>* dbecp,
                     FPTYPE* stress)
@@ -266,7 +266,7 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
         int sum = 0;
         for (int it = 0; it < ntype; it++)
         {
-            const int orbital_l = orbital_corr[it];
+            const int orbital_l = l_channel[it];
             const int nproj = atom_nh[it];
             if(orbital_l == -1)
             {
@@ -294,7 +294,7 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
                             {
                                 const int m2 = ip2 - ip_begin;
                                 const int inkb2 = ib2 * nkb + sum + ia * nproj + ip2;
-                                local_stress -= fac * (vu[m1 * tlp1 + m2] * (conj(dbecp[inkb1]) * becp[inkb2])).real();
+                                local_stress -= fac * (pot_onsite[m1 * tlp1 + m2] * (conj(dbecp[inkb1]) * becp[inkb2])).real();
                             }
                         } // end ip
                         break;
@@ -309,7 +309,7 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
                                 std::complex<FPTYPE> ps[4];
                                 for(int i = 0; i < 4; i++)
                                 {
-                                    ps[i] = vu[(i * tlp1_2 + m1 * tlp1 + m2)];
+                                    ps[i] = pot_onsite[(i * tlp1_2 + m1 * tlp1 + m2)];
                                 }
                                 const int inkb2 = ib2 * nkb + sum + ia * nproj + ip2;
 
@@ -325,7 +325,7 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
                         break;
                     }
                 }// ib
-                vu += npol * npol * tlp1_2;// step for vu
+                pot_onsite += npol * npol * tlp1_2;// step for pot_onsite
             }// ia
             sum += atom_na[it] * nproj;
         } // end it
@@ -359,8 +359,9 @@ struct cal_stress_nl_op<FPTYPE, base_device::DEVICE_CPU>
                 if (npol == 2)
                 {
                     const std::complex<FPTYPE> coefficients0(lambda[iat*3+2], 0.0);
-                    const std::complex<FPTYPE> coefficients1(lambda[iat*3] , lambda[iat*3+1]);
-                    const std::complex<FPTYPE> coefficients2(lambda[iat*3] , -1 * lambda[iat*3+1]);
+                    // conj(d becp_up) * becp_down couples to lambda_x - i lambda_y.
+                    const std::complex<FPTYPE> coefficients1(lambda[iat*3], -lambda[iat*3+1]);
+                    const std::complex<FPTYPE> coefficients2(lambda[iat*3], lambda[iat*3+1]);
                     const std::complex<FPTYPE> coefficients3(-1 * lambda[iat*3+2], 0.0);
                     for (int ib = 0; ib < nbands_occ; ib++)
                     {
@@ -590,17 +591,17 @@ void Simpson_Integral
     assert(mesh&1);
 
     asum = 0.00;
-	const size_t end = mesh-2;
+    const size_t end = mesh-2;
     for( size_t i=1; i!=end; i+=2 )
     {
-		const double f1 = func[i]*rab[i];
-		asum += f1 + f1 + func[i+1]*rab[i+1];
+        const double f1 = func[i]*rab[i];
+        asum += f1 + f1 + func[i+1]*rab[i+1];
     }
-	const double f1 = func[mesh-2]*rab[mesh-2];
-	asum += f1+f1;
-	asum += asum;
-	asum += func[0]*rab[0] + func[mesh-1]*rab[mesh-1];
-	asum /= 3.0;
+    const double f1 = func[mesh-2]*rab[mesh-2];
+    asum += f1+f1;
+    asum += asum;
+    asum += func[0]*rab[0] + func[mesh-1]*rab[mesh-1];
+    asum /= 3.0;
     return;
 }// end subroutine simpson
 

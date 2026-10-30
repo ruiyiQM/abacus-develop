@@ -1,9 +1,9 @@
 #include "deepks_test.h"
 #include "source_base/global_variable.h"
 #include "source_basis/module_nao/two_center_bundle.h"
-#include "source_cell/read_pseudo.h"
+#include "source_cell/read_pp_ucell.h"
 #include "source_hamilt/module_xc/exx_info.h"
-#include "../../LCAO_nonlocal_info.h"
+#include "../../lcao_nonlocal_info.h"
 #include "source_io/module_parameter/parameter.h"
 #include "source_estate/param_update.h"
 
@@ -282,7 +282,7 @@ void test_deepks<T>::set_orbs(const bool use_modern_orbital_reader)
 
     auto* lcao_nl = new LCAONonlocalInfo();
     lcao_nl->setupNonlocal(ucell.ntype, ucell.atoms, GlobalV::ofs_running, ORB,
-                           basis_type, out_element_info, lspinorb, nspin);
+                           basis_type, out_element_info, lspinorb, nspin, GlobalV::MY_RANK);
     ucell.infoNL.reset(lcao_nl);
 
     double rmax = std::max(orb_.rcut_max(), alpha_.rcut_max());
@@ -319,6 +319,7 @@ void test_deepks<T>::setup_kpt()
                  ucell.G,
                  ucell.latvec,
                  GlobalV::ofs_running,
+                 GlobalV::ofs_warning,
                  use_ibz,
                  global_out_dir,
                  gamma_only_local,

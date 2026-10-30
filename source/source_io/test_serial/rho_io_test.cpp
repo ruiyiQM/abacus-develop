@@ -5,7 +5,7 @@
 #include "source_base/global_variable.h"
 #include "source_io/module_output/cube_io.h"
 #include "prepare_unitcell.h"
-#include "source_pw/module_pwdft/parallel_grid.h"
+#include "source_base/parallel_grid.h"
 
 Magnetism::Magnetism()
 {
@@ -17,12 +17,9 @@ Magnetism::Magnetism()
 Magnetism::~Magnetism()
 {
 }
-Parallel_Grid::~Parallel_Grid() {}
 
 
-#define private public
 #include "source_io/module_parameter/parameter.h"
-#undef private
 
 /***************************************************************
  *  unit test of read_rho, write_rho and trilinear_interpolate
@@ -100,7 +97,7 @@ TEST_F(RhoIOTest, Write)
     ucell->atoms[0].ncpp.zv = 4;
     Parallel_Grid pgrid(nx, ny, nz, nz, nrxx, nz, 1);
     ModuleIO::read_vdata_palgrid(pgrid, my_rank, ofs_running, "support/chg.cube", rho[0], ucell->nat);
-    ModuleIO::write_vdata_palgrid(pgrid, rho[0], 0, nspin, 0, "test_write_vdata_palgrid.cube", 0.461002, ucell, 11, 1, false, false);
+    ModuleIO::write_vdata_palgrid(pgrid, rho[0], 0, nspin, 0, "test_write_vdata_palgrid.cube", 0.461002, ucell, 11, 1, false, false, ofs_running, "charge density");
     std::ifstream ifs1("test_write_vdata_palgrid.cube", std::ifstream::binary | std::ifstream::ate);
     std::ifstream ifs2("support/chg.cube", std::ifstream::binary | std::ifstream::ate);
     EXPECT_EQ(ifs1.tellg(), ifs2.tellg());

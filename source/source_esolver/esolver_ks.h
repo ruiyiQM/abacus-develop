@@ -4,11 +4,14 @@
 #include "esolver_fp.h"                                // first-principles esolver
 #include "source_basis/module_pw/pw_basis_k.h"         // use plane wave
 #include "source_cell/klist.h"                         // use k-points in Brillouin zone
-#include "source_estate/module_charge/charge_mixing.h" // use charge mixing
+#include "source_estate/module_charge/chg_mix.h" // use charge mixing
 #include "source_hamilt/hamilt.h"                      // use Hamiltonian
 #include "source_hamilt/hamilt_base.h"                 // use Hamiltonian base class
-#include "source_lcao/module_dftu/dftu.h"              // mohan add 20251107
+#include "source_hamilt/module_xc/general_exx_info.h"  // ESolver owns General_Exx_Info value
+#include "source_pw/module_pwdft/dftu_base.h"          // Plus_U_Base for dftu_ member
 #include "source_pw/module_pwdft/vnl_pw.h"
+
+#include <memory> // std::unique_ptr for dftu_ member
 
 namespace ModuleESolver
 {
@@ -29,11 +32,34 @@ class ESolver_KS : public ESolver_FP
     virtual void after_all_runners(BaseCell& basecell) override;
 
   protected:
+    //! Maximum SCF iterations for the current electronic step.
+    virtual int scf_iter_limit(const int istep) const;
+
+    /** @brief Run SCF iterations without preparing or committing a physical endpoint. */
+    bool scf_loop(UnitCell& ucell, int istep, int iter_limit);
+    /** @brief Record an accepted iteration in JSON without changing its convergence status. */
+    void record_iteration(const UnitCell& ucell, double duration);
+    /** @brief Write current band expectations when iterative band output is requested. */
+    void write_iter_bands();
+
+    /** @brief Select whether the density is an endpoint predictor or an SCF iterate. */
+    enum class DensityStage
+    {
+        standard,
+        predictor
+    };
+
+    /** @brief Identify mandatory predictor stages before mixing and convergence checks. */
+    virtual DensityStage density_stage(const int istep, const int iter) const;
+
     //! Something to do before SCF iterations.
     virtual void before_scf(UnitCell& ucell, const int istep) override;
 
     //! Something to do before hamilt2rho function in each iter loop.
     virtual void iter_init(UnitCell& ucell, const int istep, const int iter);
+
+    //! Whether KS iterations defer output until the final state is accepted.
+    virtual bool defer_iter_output(const int istep) const;
 
     //! Something to do after hamilt2rho function in each iter loop.
     virtual void iter_finish(UnitCell& ucell, const int istep, int& iter, bool& conv_esolver) override;
@@ -43,6 +69,13 @@ class ESolver_KS : public ESolver_FP
 
     // calculate electron density from a specific Hamiltonian
     void hamilt2rho(UnitCell& ucell, const int istep, const int iter, const double ethr);
+
+    /**
+     * @brief Select the diagonalization threshold and error-control policy for the current stage.
+     *
+     * This policy does not change the requested solver type.
+     */
+    virtual std::string diag_policy(const int istep) const;
 
     //! Something to do after SCF iterations when SCF is converged or comes to the max iter step.
     virtual void after_scf(UnitCell& ucell, const int istep, const bool conv_esolver) override;
@@ -59,8 +92,9 @@ class ESolver_KS : public ESolver_FP
     //! nonlocal pseudopotentials
     pseudopot_cell_vnl ppcell;
 
-    //! DFT+U method, mohan add 2025-11-07
-    Plus_U dftu;
+    //! DFT+U method (PW and LCAO both news Plus_U_Base).
+    //! Owned by ESolver_KS via unique_ptr; released automatically in ~ESolver_KS.
+    std::unique_ptr<Plus_U_Base> dftu_;
 
     std::string basisname;          //! esolver_ks_lcao.cpp
     double esolver_KS_ne = 0.0;     //! number of electrons
@@ -69,10 +103,25 @@ class ESolver_KS : public ESolver_FP
     double scf_ene_thr;             //! scf energy threshold
     double drho;                    //! the difference between rho_in (before HSolver) and rho_out (After HSolver)
     double hsolver_error;           //! the error of HSolver
+    /// DeltaSpin RMS from the most recent lambda optimization loop; -1.0 means no DeltaSpin.
+    /// Set by ESolver_KS_LCAO after run_lambda_loop, read by ESolver_KS::iter_finish when calling print_etot.
+    double ds_rms_ = -1.0;
     int maxniter;                   //! maximum iter steps for scf
     int niter;                      //! iter steps actually used in scf
     bool oscillate_esolver = false; // whether esolver is oscillated
     bool scf_nmax_flag = false;     // whether scf has reached nmax, mohan add 20250921
+
+    /// Set by a subclass (e.g. ESolver_KS_PW via EXX) to request a fresh SCF
+    /// rerun from iter=1 after the current electronic iteration. ESolver_KS::
+    /// runner watches this flag at the bottom of each loop body and, when set,
+    /// clears it and restarts the SCF loop with iter=1. This replaces the
+    /// historical "iter=0 restart signal" trick that wrote 0 into the iter
+    /// reference, which crashed DFT+U occupation-matrix writers that validate
+    /// iter>=1.
+    bool scf_rerun_ = false;
+
+    /// General EXX info owned by ESolver, initialized from input parameters.
+    General_Exx_Info general_exx_info_;
 };
 } // namespace ModuleESolver
 #endif

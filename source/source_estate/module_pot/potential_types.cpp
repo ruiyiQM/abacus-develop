@@ -1,9 +1,11 @@
-#include "H_Hartree_pw.h"
+#include "h_hartree_pw.h"
 #include "efield.h"
 #include "gatefield.h"
 #include "pot_local.h"
+#include "pot_pcc.h"
+#include "pot_sccs.h"
 #include "pot_sep.h"
-#include "pot_surchem.hpp"
+#include "pot_surchem.h"
 #include "pot_xc.h"
 #include "potential_new.h"
 #include "source_base/global_function.h"
@@ -12,7 +14,7 @@
 #include "source_base/tool_quit.h"
 #include "source_base/tool_title.h"
 #include "source_io/module_parameter/parameter.h"
-#include "H_TDDFT_pw.h"
+#include "h_tddft_pw.h"
 #ifdef __MLALGO
 #include "pot_ml_exx.h"
 #endif
@@ -20,7 +22,28 @@
 namespace elecstate
 {
 
-PotBase* Potential::get_pot_type(const std::string& pot_type)
+PotBase* Potential::make_sccs_pot(const Input_para& input)
+{
+    ModuleSccs::SccsConfig config;
+    ModuleSccs::PolarizationSolverParameters solver;
+    sccs_cfg_input(input, config, solver);
+    if (this->ucell_ != nullptr)
+    {
+        const std::string structure_warning = check_sccs_cell(config, *this->ucell_);
+        if (!structure_warning.empty())
+        {
+            ModuleBase::WARNING("Potential::make_sccs_pot", structure_warning);
+        }
+        const std::string charge_warning = check_charge(config, *this->ucell_, input.nelec);
+        if (!charge_warning.empty())
+        {
+            ModuleBase::WARNING("Potential::make_sccs_pot", charge_warning);
+        }
+    }
+    return new PotSccs(this->rho_basis_, config, solver, input.nelec);
+}
+
+PotBase* Potential::get_pot_type(const std::string& pot_type, const Input_para& input)
 {
     ModuleBase::TITLE("Potential", "get_pot_type");
     if (pot_type == "local")
@@ -33,7 +56,21 @@ PotBase* Potential::get_pot_type(const std::string& pot_type)
     }
     else if (pot_type == "xc")
     {
-        return new PotXC(this->rho_basis_, this->etxc_, this->vtxc_, &(this->vofk_eff));
+        return new PotXC(PARAM.globalv.domag, PARAM.globalv.domag_z, input.gga_grad, this->rho_basis_, this->etxc_, this->vtxc_, &(this->vofk_eff));
+    }
+    else if (pot_type == "pcc" || pot_type == "pcc_2d")
+    {
+        const double electron_count = input.nelec;
+        if (pot_type == "pcc")
+        {
+            return new PotPcc(this->rho_basis_, electron_count);
+        }
+        const int open_axis = input.pcc_2d_axis;
+        return new PotPcc(this->rho_basis_, PotPcc::Dimension::slab, open_axis, electron_count);
+    }
+    else if (pot_type == "sccs")
+    {
+        return this->make_sccs_pot(input);
     }
     else if (pot_type == "surchem")
     {
@@ -41,7 +78,7 @@ PotBase* Potential::get_pot_type(const std::string& pot_type)
     }
     else if (pot_type == "efield")
     {
-        return new PotEfield(this->rho_basis_, this->ucell_, this->solvent_, PARAM.inp.dip_cor_flag);
+        return new PotEfield(this->rho_basis_, this->ucell_, this->solvent_, input.dip_cor_flag);
     }
     else if (pot_type == "gatefield")
     {

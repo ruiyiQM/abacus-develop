@@ -22,11 +22,12 @@ endif()
 
 list(APPEND objects
     pw_basis.cpp
+    pw_grid_geometry.cpp
     pw_basis_k.cpp
     pw_basis_sup.cpp
     pw_distributeg.cpp
-    pw_distributeg_method1.cpp
-    pw_distributeg_method2.cpp
+    pw_distg_method1.cpp
+    pw_distg_method2.cpp
     pw_distributer.cpp
     pw_init.cpp
     pw_transform.cpp
@@ -44,19 +45,17 @@ add_library(
 )
 
 if (USE_DSP)
-target_link_libraries(planewave  PRIVATE
-${MTBLAS_FFT_DIR}/libmtblas/lib/libmtfft.a)
-target_compile_definitions( planewave PUBLIC 
-FFT_DAT_DIR="${MTBLAS_FFT_DIR}/datfile/mt_fft_blas.dat") 
+target_compile_definitions( planewave PUBLIC
+FFT_DAT_DIR="${MTBLAS_FFT_DIR}/datfile/mt_fft_blas.dat")
 endif()
 if(ENABLE_COVERAGE)
   add_coverage(planewave)
 endif()
 
 if(BUILD_TESTING)
+  add_subdirectory(test_serial)
   if(ENABLE_MPI)
     add_subdirectory(test)
-    add_subdirectory(test_serial)
     add_subdirectory(kernels/test)
     add_subdirectory(test_gpu)
   endif()

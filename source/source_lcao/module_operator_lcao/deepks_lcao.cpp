@@ -3,7 +3,7 @@
 #include "source_base/timer.h"
 #include "source_base/tool_title.h"
 #include "source_cell/module_neighbor/sltk_grid_driver.h"
-#include "source_lcao/module_deepks/LCAO_deepks.h"
+#include "source_lcao/module_deepks/lcao_deepks.h"
 #include "source_lcao/module_deepks/deepks_descriptor.h"
 #include "source_lcao/module_deepks/deepks_pdm.h"
 #include "source_hamilt/module_hcontainer/hcontainer_funcs.h"
@@ -24,7 +24,7 @@ DeePKS<OperatorLCAO<TK, TR>>::DeePKS(HS_Matrix_K<TK>* hsk_in,
                                      const TwoCenterIntegrator* intor_orb_alpha,
                                      const LCAO_Orbitals* ptr_orb,
                                      const int& nks_in,
-                                     elecstate::DensityMatrix<TK, double>* DM_in
+                                     module_dm::DensityMatrix<TK, double>* DM_in
 #ifdef __MLALGO
                                      ,
                                      LCAO_Deepks<TK>* ld_in

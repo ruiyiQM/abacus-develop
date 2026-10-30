@@ -1,5 +1,7 @@
 #include "write_eig_occ.h"
 
+#include "source_base/module_parallel/para_bridge.h"
+#include "source_base/module_parallel/para_band_output.h"
 #include "source_io/module_parameter/parameter.h"
 #include "source_base/global_function.h"
 #include "source_base/global_variable.h"
@@ -10,16 +12,24 @@
 #include <mpi.h> // use MPI_Barrier
 #endif
 
-void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,const ModuleBase::matrix &wg, const K_Vectors& kv)
+void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,
+        const ModuleBase::matrix &wg,
+        const K_Vectors& kv,
+        const int nbands,
+        const int nspin)
 {
     ModuleBase::TITLE("ModuleIO","write_eig_iter");
-	ModuleBase::timer::start("ModuleIO", "write_eig_iter");
+    ModuleBase::timer::start("ModuleIO", "write_eig_iter");
 
-	GlobalV::ofs_running << "\n PRINT #EIGENVALUES# AND #OCCUPATIONS#" << std::endl;
+    GlobalV::ofs_running << "\n PRINT #EIGENVALUES# AND #OCCUPATIONS#" << std::endl;
 
-    const int nspin = PARAM.inp.nspin;
+    // Taoni fix bndpar on 2026-08-21
+    const Parallel::ParaBandOutput band_output(ekb.nc, nbands, Parallel::make_band_world());
+    const ModuleBase::matrix global_ekb = band_output.gather_matrix(ekb);
+    const ModuleBase::matrix global_wg = band_output.gather_matrix(wg);
+
     const int nks = kv.get_nks();
-	const int nkstot = kv.get_nkstot();
+    const int nkstot = kv.get_nkstot();
     const int nk_fac = nspin == 2 ? 2 : 1;
     const int nks_np = nks / nk_fac;
     const int nkstot_np = nkstot / nk_fac;
@@ -51,17 +61,17 @@ void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,const ModuleBase::ma
                     << std::setw(18) << "Eigenvalues(eV)"
                     << std::setw(18) << "Occupations" << std::endl;
 
-                    for (int ib = 0; ib < ekb.nc; ib++)
+                    for (int ib = 0; ib < global_ekb.nc; ib++)
                     {
                         GlobalV::ofs_running << std::setw(8) << ib + 1 
-                                << std::setw(18) << ekb(ik, ib) * ModuleBase::Ry_to_eV
-                                << std::setw(18) << wg(ik, ib) << std::endl;
+                                << std::setw(18) << global_ekb(ik, ib) * ModuleBase::Ry_to_eV
+                                << std::setw(18) << global_wg(ik, ib) << std::endl;
                     }
                     GlobalV::ofs_running << std::endl;
                 }
             }
 
-	    
+        
 // =============================================================
 // MPI communication: 
 // RANK 0 collect and print out #EIGENVALUES# AND #OCCUPATIONS# for all k-points
@@ -118,7 +128,7 @@ void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,const ModuleBase::ma
                     // for the current spin channel [is] and pool [ip] 
                     // MPI_Send the size of matrix, ik2iktot, ekb and wg to RANK=0
                     const int send_nks_np = nks_np;          
-                    const int send_nbands = ekb.nc;          
+                    const int send_nbands = global_ekb.nc;
                     const int is_offset = is * nks_np;     
                     int* send_ik2iktot = new int[send_nks_np];
                     for (int ik = 0; ik < send_nks_np; ++ik)
@@ -128,10 +138,10 @@ void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,const ModuleBase::ma
                     MPI_Send(&send_nks_np, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);    
                     MPI_Send(&send_nbands, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);    
                     MPI_Send(send_ik2iktot, send_nks_np, MPI_INT, 0, 2, MPI_COMM_WORLD); 
-                    MPI_Send(ekb.c + is_offset * send_nbands,   
+                    MPI_Send(global_ekb.c + is_offset * send_nbands,
                             send_nks_np * send_nbands,           
                             MPI_DOUBLE, 0, 3, MPI_COMM_WORLD);   
-                    MPI_Send(wg.c + is_offset * send_nbands,    
+                    MPI_Send(global_wg.c + is_offset * send_nbands,
                             send_nks_np * send_nbands,
                             MPI_DOUBLE, 0, 4, MPI_COMM_WORLD);   
 
@@ -151,45 +161,51 @@ void ModuleIO::write_eig_iter(const ModuleBase::matrix &ekb,const ModuleBase::ma
     }
 
     
-	ModuleBase::timer::end("ModuleIO", "write_eig_iter");
+    ModuleBase::timer::end("ModuleIO", "write_eig_iter");
 }
 
 void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
-		const ModuleBase::matrix &wg, 
-		const K_Vectors& kv,
-		const int istep)
+        const ModuleBase::matrix &wg,
+        const K_Vectors& kv,
+        const int nbands,
+        const int nspin,
+        const std::string& out_dir,
+        const int istep)
 {
-	ModuleBase::TITLE("ModuleIO","write_eig_file");
-	ModuleBase::timer::start("ModuleIO", "write_eig_file");
+    ModuleBase::TITLE("ModuleIO","write_eig_file");
+    ModuleBase::timer::start("ModuleIO", "write_eig_file");
 
 /*
-	GlobalV::ofs_running << "\n";
-	GlobalV::ofs_running << " >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>" << std::endl;
-	GlobalV::ofs_running << " |                                                                    |" << std::endl;
-	GlobalV::ofs_running << " |            #Print out the eigenvalues and occupations#             |" << std::endl;
-	GlobalV::ofs_running << " |                                                                    |" << std::endl;
-	GlobalV::ofs_running << " <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << std::endl;
-	GlobalV::ofs_running << "\n";
+    GlobalV::ofs_running << "\n";
+    GlobalV::ofs_running << " >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>" << std::endl;
+    GlobalV::ofs_running << " |                                                                    |" << std::endl;
+    GlobalV::ofs_running << " |            #Print out the eigenvalues and occupations#             |" << std::endl;
+    GlobalV::ofs_running << " |                                                                    |" << std::endl;
+    GlobalV::ofs_running << " <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << std::endl;
+    GlobalV::ofs_running << "\n";
 */
 
-    const int nspin = PARAM.inp.nspin;
+    // Taoni fix bndpar on 2026-08-21
+    const Parallel::ParaBandOutput band_output(ekb.nc, nbands, Parallel::make_band_world());
+    const ModuleBase::matrix global_ekb = band_output.gather_matrix(ekb);
+    const ModuleBase::matrix global_wg = band_output.gather_matrix(wg);
     const int nks = kv.get_nks();
-	const int nkstot = kv.get_nkstot();
+    const int nkstot = kv.get_nkstot();
 
     bool wrong = false;
 
-	for (int ik = 0; ik < nks; ++ik)
-	{
-		for (int ib = 0; ib < ekb.nc; ++ib)
-		{
-			if (std::abs(ekb(ik, ib)) > 1.0e10)
-			{
-				GlobalV::ofs_warning << " ik=" << ik + 1 << " ib=" << ib + 1
-					<< " " << ekb(ik, ib) << " Ry" << std::endl;
-				wrong = true;
-			}
-		}
-	}
+    for (int ik = 0; ik < nks; ++ik)
+    {
+        for (int ib = 0; ib < ekb.nc; ++ib)
+        {
+            if (std::abs(ekb(ik, ib)) > 1.0e10)
+            {
+                GlobalV::ofs_warning << " ik=" << ik + 1 << " ib=" << ib + 1
+                    << " " << ekb(ik, ib) << " Ry" << std::endl;
+                wrong = true;
+            }
+        }
+    }
 
 #ifdef __MPI
     MPI_Allreduce(MPI_IN_PLACE, &wrong, 1, MPI_C_BOOL, MPI_LOR, MPI_COMM_WORLD);
@@ -205,7 +221,7 @@ void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
 #endif    
 
     // file name to store eigenvalues
-    std::string filename = PARAM.globalv.global_out_dir + "eig_occ.txt";
+    std::string filename = out_dir + "eig_occ.txt";
 
     GlobalV::ofs_running << " Write eigenvalues and occupations to file: " << filename << std::endl;
 
@@ -216,14 +232,14 @@ void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
         const bool append = istep > 0
                             || (inp.calculation == "md" && inp.mdp.md_restart);
 
-		if (append)
-		{
-			ofs_eig0.open(filename.c_str(), std::ios::app);
-		}
-		else
-		{
-			ofs_eig0.open(filename.c_str());
-		}
+        if (append)
+        {
+            ofs_eig0.open(filename.c_str(), std::ios::app);
+        }
+        else
+        {
+            ofs_eig0.open(filename.c_str());
+        }
        
         ofs_eig0 << istep+1 << "     # ionic step" << std::endl;
         ofs_eig0 << " Electronic state energy (eV) and occupations" << std::endl;
@@ -244,7 +260,7 @@ void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
             MPI_Barrier(MPI_COMM_WORLD);
 #endif
 
-            bool ip_flag = PARAM.inp.out_alllog || (GlobalV::RANK_IN_POOL == 0 && GlobalV::MY_BNDGROUP == 0);
+            const bool ip_flag = GlobalV::RANK_IN_POOL == 0 && GlobalV::MY_BNDGROUP == 0;
 
             if (GlobalV::MY_POOL == ip && ip_flag)
             {
@@ -263,14 +279,14 @@ void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
 
                     ofs_eig << std::setprecision(16);
                     ofs_eig << std::setiosflags(std::ios::showpoint);
-                    for (int ib = 0; ib < ekb.nc; ib++)
+                    for (int ib = 0; ib < global_ekb.nc; ib++)
                     {
-                        double occupation = wg(ik, ib);
+                        double occupation = global_wg(ik, ib);
                         if (std::abs(occupation) < 1.0e-15)
                         {
                             occupation = 0.0;
                         }
-                        ofs_eig << " " << ib + 1 << " " << ekb(ik, ib) * ModuleBase::Ry_to_eV
+                        ofs_eig << " " << ib + 1 << " " << global_ekb(ik, ib) * ModuleBase::Ry_to_eV
                                 << " " << occupation << std::endl;
                     }
                     ofs_eig << std::endl;
@@ -284,6 +300,6 @@ void ModuleIO::write_eig_file(const ModuleBase::matrix &ekb,
 #endif
     }
 
-	ModuleBase::timer::end("ModuleIO", "write_eig_file");
-	return;
+    ModuleBase::timer::end("ModuleIO", "write_eig_file");
+    return;
 }

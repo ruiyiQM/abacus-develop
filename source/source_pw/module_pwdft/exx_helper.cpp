@@ -1,6 +1,6 @@
 #include "exx_helper.h"
 #include "source_io/module_parameter/parameter.h"
-#include "source_hamilt/module_xc/exx_info.h" // use GlobalC::exx_info
+#include "source_hamilt/module_xc/general_exx_info.h" // for General_Exx_Info type
 #include "source_hamilt/module_xc/xc_functional.h" // use XC_Functional
 #include "source_pw/module_pwdft/hamilt_pw.h" // use HamiltPW
 #include "source_estate/update_pot.h" // use elecstate::update_pot
@@ -9,20 +9,20 @@
 #include <chrono> // for timing
 
 template <typename T, typename Device>
-void Exx_Helper<T, Device>::init(const UnitCell& ucell, const Input_para& inp, const ModuleBase::matrix& wg)
+void Exx_Helper<T, Device>::init(const UnitCell& ucell, const Input_para& inp, const ModuleBase::matrix& wg, const General_Exx_Info& exx_info)
 {
-    if (inp.calculation != "scf" && inp.calculation != "relax" 
-        && inp.calculation != "cell-relax" && inp.calculation != "md")
+    if (inp.calculation != "scf" && inp.calculation != "relax"
+        && inp.calculation != "cell-relax" && inp.calculation != "md" && inp.calculation != "nscf")
     {
         return;
     }
 
-    if (!GlobalC::exx_info.info_global.cal_exx)
+    if (!exx_info.cal_exx)
     {
         return;
     }
 
-    if (GlobalC::exx_info.info_global.separate_loop)
+    if (exx_info.separate_loop && inp.calculation != "nscf")
     {
         XC_Functional::set_xc_first_loop(ucell);
         this->set_firstiter();
@@ -32,17 +32,17 @@ void Exx_Helper<T, Device>::init(const UnitCell& ucell, const Input_para& inp, c
 }
 
 template <typename T, typename Device>
-void Exx_Helper<T, Device>::before_scf(void* p_hamilt, void* psi, const Input_para& inp)
+void Exx_Helper<T, Device>::before_scf(void* p_hamilt, void* psi, const Input_para& inp, const General_Exx_Info& exx_info)
 {
     /// Return if not a valid calculation type
     if (inp.calculation != "scf" && inp.calculation != "relax"
-        && inp.calculation != "cell-relax" && inp.calculation != "md")
+        && inp.calculation != "cell-relax" && inp.calculation != "md" && inp.calculation != "nscf")
     {
         return;
     }
 
     /// Return if EXX is not enabled or not PW basis
-    if (!GlobalC::exx_info.info_global.cal_exx || inp.basis_type != "pw")
+    if (!exx_info.cal_exx || inp.basis_type != "pw")
     {
         return;
     }
@@ -58,8 +58,13 @@ void Exx_Helper<T, Device>::before_scf(void* p_hamilt, void* psi, const Input_pa
 template <typename T, typename Device>
 bool Exx_Helper<T, Device>::iter_finish(void* p_elec, Charge* p_charge, void* psi,
                                         UnitCell& ucell, const Input_para& inp,
-                                        bool& conv_esolver, int& iter)
+                                        bool& conv_esolver, int iter)
 {
+    if (inp.calculation == "nscf")
+    {
+        return false;
+    }
+
     /// Return if EXX is not enabled
     if (op_exx == nullptr)
     {
@@ -125,7 +130,7 @@ double Exx_Helper<T, Device>::cal_exx_energy(void* psi_)
 }
 
 template <typename T, typename Device>
-bool Exx_Helper<T, Device>::exx_after_converge(int &iter, bool ene_conv)
+bool Exx_Helper<T, Device>::exx_after_converge(int iter, bool ene_conv)
 {
     if (op_exx->first_iter)
     {
@@ -150,7 +155,13 @@ bool Exx_Helper<T, Device>::exx_after_converge(int &iter, bool ene_conv)
         return true;
     }
     GlobalV::ofs_running << "Updating EXX and rerun SCF" << std::endl;
-    iter = 0;
+    // SCF rerun is now signaled by returning false (not converged). The
+    // caller (ESolver_KS_PW::iter_finish) detects "SCF was converged but
+    // EXX says rerun" and sets ESolver_KS::scf_rerun_, which makes
+    // ESolver_KS::runner restart the loop at iter=1. The old trick of
+    // writing iter=0 here is removed: it crashed DFT+U occupation-matrix
+    // writers (append_ion_step_snapshot validates iter>=1) and broke the
+    // 1-based iteration invariant for every downstream reader of iter.
     return false;
 
 }

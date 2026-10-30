@@ -6,10 +6,10 @@
 #include "rdmft.h"
 #include "source_lcao/module_rdmft/rdmft_tools.h"
 #include "source_psi/psi.h"
-#include "source_estate/module_dm/cal_dm_psi.h"
+#include "source_estate/module_dm/dm_from_psi.h"
 
 #ifdef __EXX
-#include "source_lcao/module_ri/RI_2D_Comm.h"
+#include "source_lcao/module_ri/ri_2d_comm.h"
 #include "source_lcao/module_operator_lcao/op_exx_lcao.h"
 #endif
 #include "source_lcao/module_operator_lcao/ekinetic.h"
@@ -25,23 +25,14 @@ namespace rdmft
 template <typename TK, typename TR>
 void RDMFT<TK, TR>::get_DM_XC(std::vector< std::vector<TK> >& DM_XC)
 {
-    // get wk_funEta_wfc = wk*g(eta)*conj(wfc)
-    psi::Psi<TK> wk_funEta_wfc(wfc);
-    conj_psi(wk_funEta_wfc);
-    occNum_MulPsi(ParaV, wk_fun_occNum, wk_funEta_wfc, 0);
-
-    // get the special DM_XC used in constructing V_exx_XC
+    // get the special DM_XC used in constructing V_exx_XC.
+    // wk_fun_occNum holds wk*g(eta); dmk_from_psi applies the conjugation
+    // and the band weighting internally (g(eta) is used with symbol = 0,
+    // where occNum_func is the identity, so wk_fun_occNum is the weight itself).
     for(int ik=0; ik<wfc.get_nk(); ++ik)
     {
-        // after this, be careful with wfc.get_pointer(), we can use &wfc(ik,inbn,inbs) instead
-        wfc.fix_k(ik);
-        wk_funEta_wfc.fix_k(ik);
         TK* DM_Kpointer = DM_XC[ik].data();
-#ifdef __MPI
-        elecstate::psiMulPsiMpi(wk_funEta_wfc, wfc, DM_Kpointer, ParaV->desc_wfc, ParaV->desc);
-#else
-        elecstate::psiMulPsi(wk_funEta_wfc, wfc, DM_Kpointer);
-#endif            
+        module_dm::dmk_from_psi(ParaV, wk_fun_occNum, ik, wfc, DM_Kpointer);
     }
 }
 
@@ -164,17 +155,17 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
     // // //test
     // DM_XC_pass = DM_XC;
 
-    // elecstate::DensityMatrix<TK, double> DM_test(ParaV, nspin, kv->kvec_d, nk_total);
-    // elecstate::cal_dm_psi(ParaV, wg, wfc, DM_test);
-    // DM_test.init_DMR(this->gd, this->ucell);
-    // DM_test.cal_DMR();
+    // module_dm::DensityMatrix<TK, double> DM_test(ParaV, nspin, kv->kvec_d, nk_total);
+    // module_dm::dm_from_psi(ParaV, wg, wfc, DM_test);
+    // DM_test.init_dmr(this->gd, this->ucell);
+    // DM_test.cal_dmr(-1);
 
     // // compare DM_XC and DM get in update_charge(or ABACUS)
     // std::cout << "\n\ntest DM_XC - DM in ABACUS: \n" << std::endl;
     // double DM_XC_minus_DMtest = 0.0;
     // for(int ik=0; ik<nk_total; ++ik)
     // {
-    //     TK* dmk_pointer = DM_test.get_DMK_pointer(ik);
+    //     TK* dmk_pointer = DM_test.get_dmk_ptr(ik);
     //     for(int iloc=0; iloc<ParaV->nloc; ++iloc)
     //     {
     //         double test = std::abs(DM_XC[ik][iloc] - dmk_pointer[iloc]);
@@ -232,7 +223,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
     }
 
 #ifdef __EXX
-    if(GlobalC::exx_info.info_global.cal_exx)
+    if(this->exx_info_->info_global.cal_exx)
     {
         HR_exx_XC->set_zero();
 
@@ -247,7 +238,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
         for(int ik=0; ik<DM_XC.size(); ++ik) { DM_XC_pointer[ik] = &DM_XC[ik];
 }
 
-        if (GlobalC::exx_info.info_ri.real_number)
+        if (this->exx_info_->info_ri.real_number)
         {
             // transfer the DM_XC to appropriate format
             std::vector<std::map<int,std::map<std::pair<int,std::array<int,3>>,RI::Tensor<double>>>> 
@@ -256,7 +247,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
                 : RI_2D_Comm::split_m2D_ktoR<double>(ucell,*kv, DM_XC_pointer, *ParaV, nspin, this->exx_spacegroup_symmetry);
 
             // provide the Ds_XC to Vxc_fromRI(V_exx_XC)
-            if (this->exx_spacegroup_symmetry && GlobalC::exx_info.info_ri.exx_symmetry_realspace)
+            if (this->exx_spacegroup_symmetry && this->exx_info_->info_ri.exx_symmetry_realspace)
             {
                 Vxc_fromRI_d->cal_exx_elec(Ds_XC_d, ucell,*ParaV, &this->symrot_exx);
             }
@@ -273,6 +264,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
                 *kv,
                 &Vxc_fromRI_d->Hexxs,
                 nullptr,
+                this->exx_info_,
                 hamilt::Add_Hexx_Type::k
             );
         }
@@ -285,7 +277,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
                 : RI_2D_Comm::split_m2D_ktoR<std::complex<double>>(ucell,*kv, DM_XC_pointer, *ParaV, nspin, this->exx_spacegroup_symmetry);
 
             // // provide the Ds_XC to Vxc_fromRI(V_exx_XC)
-            if (this->exx_spacegroup_symmetry && GlobalC::exx_info.info_ri.exx_symmetry_realspace)
+            if (this->exx_spacegroup_symmetry && this->exx_info_->info_ri.exx_symmetry_realspace)
             {
                 Vxc_fromRI_c->cal_exx_elec(Ds_XC_c, ucell,*ParaV, &this->symrot_exx);
             }
@@ -302,6 +294,7 @@ void RDMFT<TK, TR>::cal_V_XC(const UnitCell& ucell)
                 *kv,
                 nullptr,
                 &Vxc_fromRI_c->Hexxs,
+                this->exx_info_,
                 hamilt::Add_Hexx_Type::k
             );
         }

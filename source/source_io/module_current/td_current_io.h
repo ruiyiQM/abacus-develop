@@ -7,6 +7,7 @@
 #include "source_lcao/module_rt/velocity_op.h"
 #include "source_lcao/setup_exx.h"
 #include "source_lcao/module_rt/td_info.h"
+#include "source_hamilt/module_xc/exx_info.h" // for Exx_Info
 #ifdef __EXX
 #include <RI/global/Tensor.h>
 #endif
@@ -53,13 +54,14 @@ void write_current(
     TD_info* td_p,
     const hamilt::HContainer<TR>* sR,
     const hamilt::HContainer<TR>* hR,
-    const Exx_NAO<std::complex<double>>& exx_nao
+    const Exx_NAO<std::complex<double>>& exx_nao,
+    const Exx_Info& exx_info
 );
 void set_rR_from_hR(const UnitCell& ucell,
                     const Grid_Driver& GridD,
                     const LCAO_Orbitals& orb,
                     const Parallel_Orbitals* pv,
-                    cal_r_overlap_R& r_calculator,
+                    Position_op& r_calculator,
                     const hamilt::HContainer<std::complex<double>>* hR,
                     ModuleBase::Vector3<hamilt::HContainer<double>*>& rR);
 template <typename TR>
@@ -69,7 +71,9 @@ void sum_HR(
     const K_Vectors& kv,
     const hamilt::HContainer<TR>* hR,
     hamilt::HContainer<std::complex<double>>* full_hR,
-    const Exx_NAO<std::complex<double>>& exx_nao
+    const Exx_NAO<std::complex<double>>& exx_nao,
+    const Exx_Info& exx_info,
+    const TD_info& td_info
 );
 
 template <typename Tadd, typename Tfull>

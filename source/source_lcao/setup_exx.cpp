@@ -1,8 +1,7 @@
 #include "source_lcao/setup_exx.h"
 
 #ifdef __EXX
-#include "source_lcao/module_ri/Exx_LRI_interface.h"
-#include "source_hamilt/module_xc/exx_info.h" // use the global Exx_Info
+#include "source_lcao/module_ri/exx_lri_interface.h"
 #endif
 
 template <typename TK>
@@ -13,7 +12,7 @@ Exx_NAO<TK>::~Exx_NAO(){}
 
 
 template <typename TK>
-void Exx_NAO<TK>::init(const UnitCell& ucell)
+void Exx_NAO<TK>::init(const UnitCell& ucell, Exx_Info& exx_info)
 {
 #ifdef __EXX
     // 1. currently this initialization must be put in constructor rather than `before_all_runners()`
@@ -26,34 +25,35 @@ void Exx_NAO<TK>::init(const UnitCell& ucell)
     // broadcast with it). Copy them into the EXX info here, before Exx_LRI copies
     // info_ri below. This keeps the EXX-specific routing (which list feeds info_ri
     // vs info_opt_abfs) in the LCAO EXX layer, so source_cell stays decoupled.
-    GlobalC::exx_info.info_ri.files_abfs = ucell.abfs_orbital_files;
-    GlobalC::exx_info.info_opt_abfs.files_abfs = ucell.abfs_orbital_files;
-    GlobalC::exx_info.info_opt_abfs.files_jles = ucell.jle_orbital_files;
+    exx_info.info_ri.files_abfs = ucell.abfs_orbital_files;
+    exx_info.info_opt_abfs.files_abfs = ucell.abfs_orbital_files;
+    exx_info.info_opt_abfs.files_jles = ucell.jle_orbital_files;
 
-    if (GlobalC::exx_info.info_ri.real_number)
+    if (exx_info.info_ri.real_number)
     {
-        this->exd = std::make_shared<Exx_LRI_Interface<TK, double>>(GlobalC::exx_info.info_ri, GlobalC::exx_info.info_global);
+        this->exd = std::make_shared<Exx_LRI_Interface<TK, double>>(exx_info.info_ri, exx_info.info_global);
     }
     else
     {
-        this->exc = std::make_shared<Exx_LRI_Interface<TK, std::complex<double>>>(GlobalC::exx_info.info_ri, GlobalC::exx_info.info_global);
+        this->exc = std::make_shared<Exx_LRI_Interface<TK, std::complex<double>>>(exx_info.info_ri, exx_info.info_global);
     }
 #endif
 }
 
 template <typename TK>
 void Exx_NAO<TK>::before_runner(
-		UnitCell& ucell, // unitcell
-		K_Vectors &kv, // k points
-        const LCAO_Orbitals &orb, // orbital info 
+        UnitCell& ucell, // unitcell
+        K_Vectors &kv, // k points
+        const LCAO_Orbitals &orb, // orbital info
         const Parallel_Orbitals &pv, // parallel orbitals
-		const Input_para& inp)
+        const Input_para& inp,
+        Exx_Info& exx_info)
 {
 #ifdef __EXX
     if (inp.calculation == "scf" || inp.calculation == "relax" || inp.calculation == "cell-relax"
         || inp.calculation == "md")
     {
-        if (GlobalC::exx_info.info_global.cal_exx)
+        if (exx_info.info_global.cal_exx)
         {
             if (inp.init_wfc != "file")
             { // if init_wfc==file, directly enter the EXX loop
@@ -61,7 +61,7 @@ void Exx_NAO<TK>::before_runner(
             }
 
             // initialize 2-center radial tables for EXX-LRI
-            if (GlobalC::exx_info.info_ri.real_number)
+            if (exx_info.info_ri.real_number)
             {
                 this->exd->init(MPI_COMM_WORLD, ucell, kv, orb);
                 this->exd->exx_before_all_runners(kv, ucell, pv);
@@ -76,9 +76,9 @@ void Exx_NAO<TK>::before_runner(
     else if (inp.calculation == "nscf" && (inp.init_chg == "dm" || inp.init_chg == "dm_no_renormalize"))
     {
         // init exx integration tables for Cs/Vs, but not use symmetry for nscf
-        if (GlobalC::exx_info.info_global.cal_exx)
+        if (exx_info.info_global.cal_exx)
         {
-            if (GlobalC::exx_info.info_ri.real_number)
+            if (exx_info.info_ri.real_number)
             {
                 this->exd->init(MPI_COMM_WORLD, ucell, kv, orb);
             }
@@ -94,29 +94,34 @@ void Exx_NAO<TK>::before_runner(
 
 template <typename TK>
 void Exx_NAO<TK>::before_scf(
-		const UnitCell &ucell, // unitcell
-		const K_Vectors &kv,
-		const LCAO_Orbitals &orb, // orbital info
-		Charge_Mixing* p_chgmix,
-		const int istep,
-		const Input_para& inp)
+        const UnitCell &ucell, // unitcell
+        const K_Vectors &kv,
+        const LCAO_Orbitals &orb, // orbital info
+        const Parallel_Orbitals& pv,
+        Charge_Mixing* p_chgmix,
+        const int istep,
+        const Input_para& inp,
+        Exx_Info& exx_info)
 {
 #ifdef __EXX
-    if (PARAM.inp.calculation != "nscf")
+    if (inp.calculation != "nscf")
     {
-        if (GlobalC::exx_info.info_ri.real_number)
+        const bool update_symmetry = inp.calculation == "cell-relax"
+                                     && istep > 0
+                                     && ModuleSymmetry::Symmetry::symm_flag == 1;
+        if (exx_info.info_ri.real_number)
         {
-            this->exd->exx_beforescf(istep, kv, *p_chgmix, ucell, orb);
+            this->exd->exx_beforescf(istep, kv, *p_chgmix, ucell, orb, pv, update_symmetry);
         }
         else
         {
-            this->exc->exx_beforescf(istep, kv, *p_chgmix, ucell, orb);
+            this->exc->exx_beforescf(istep, kv, *p_chgmix, ucell, orb, pv, update_symmetry);
         }
-	}
-	else
-	{
-		// do nothing
-	}
+    }
+    else
+    {
+        // do nothing
+    }
 #endif
 }
 

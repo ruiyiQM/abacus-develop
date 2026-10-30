@@ -3,6 +3,7 @@
 #include "md_parameter.h"
 #include "source_base/vector3.h"
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ struct Input_para
     std::string calculation = "scf";    ///< "scf" : self consistent calculation.
                                         ///< "nscf" : non-self consistent calculation.
                                         ///< "relax" : cell relaxations
+    bool socket_driver = false;         ///< run ABACUS as an i-PI socket client
     std::string esolver_type = "ksdft"; ///< the energy solver: ksdft, sdft, ofdft, tddft, lj, dp
     /* symmetry level:
       -1, no symmetry at all;
@@ -33,7 +35,8 @@ struct Input_para
     int kpar = 1;                                 ///< ecch pool is for one k point
     int bndpar = 1;                               ///< parallel for stochastic/deterministic bands
     std::string latname = "user_defined_lattice"; ///< lattice name
-    std::string assume_isolated = "none";         ///< isolated-system correction: none or makov-payne
+    std::string assume_isolated = "none";         ///< isolated-system correction
+    int pcc_2d_axis = 2;                          ///< open lattice vector for PCC 2D
     double ecutwfc = 0;                           ///< energy cutoff for wavefunctions
     double ecutrho = 0;                           ///< energy cutoff for charge/potential
 
@@ -45,7 +48,8 @@ struct Input_para
     double erf_height = 0;              ///< the height of the energy step for reciprocal vectors
     double erf_sigma = 0.1;             ///< the width of the energy step for reciprocal vectors
     int fft_mode = 0;                   ///< fftw mode 0: estimate, 1: measure, 2: patient, 3: exhaustive
-    std::string init_wfc = "atomic";    ///< "file","atomic","random"
+    std::string init_wfc = "atomic";         ///< "file", "atomic", "random", etc.
+    std::string init_wfc_file_format = "";   ///< normalized file format: "txt" or "binary"
     int pw_seed = 0;                    ///< random seed for initializing wave functions
     std::string init_chg = "atomic";    ///< "file","atomic"
     bool dm_to_rho = false;             ///< read density matrix from npz format and calculate charge density
@@ -54,6 +58,7 @@ struct Input_para
 
     std::string input_file = "INPUT";   ///< input file name
     std::string stru_file = "STRU";     ///< file contains atomic positions --
+    std::vector<int> cell_replica = {1, 1, 1}; ///< replicate the input STRU along its lattice vectors
                                         ///< xiaohui modify 2015-02-01
     std::string kpoint_file = "KPT";    ///< file contains k-points -- xiaohui modify 2015-02-01
     std::string pseudo_dir = "";        ///< directory of pseudopotential
@@ -82,6 +87,7 @@ struct Input_para
     double nelec_delta = 0.0;          ///< change in the number of total electrons
     double nupdown = 0.0;
     std::string dft_functional = "default"; ///< input DFT functional.
+    int gga_grad = 0; ///< Noncollinear GGA: 0 original, 1 local axis, 2 regularized mapped-density LCA.
     double xc_temperature = 0.0;            ///< only relevant if finite temperature functional is used
     double pseudo_rcut = 15.0;              ///< cut-off radius for calculating msh
     bool pseudo_mesh = false;               ///< 0: use msh to normalize radial wave functions; 1:
@@ -112,7 +118,7 @@ struct Input_para
     double mixing_gg0_min = 0.1;
     double mixing_angle = -10.0;
     bool mixing_tau = false;  ///< whether to mix tau in mgga
-    bool mixing_dftu = false; ///< whether to mix locale in DFT+U
+    bool mixing_dftu = false; ///< whether to mix occ_mat in DFT+U
     bool mixing_dmr = false;  ///< whether to mix real space density matrix
 
     bool gamma_only = false;   ///< for plane wave.
@@ -157,11 +163,11 @@ struct Input_para
     //  int		bessel_nao_lmax;		///< lmax used in descriptor
 
     // ==============   #Parameters (4.Relaxation) ===========================
-    std::vector<std::string> relax_method = {"cg", "2"}; ///< relaxation algorithm and optional variant
+    std::string relax_method = "cg"; ///< geometry optimization method
 
     bool uses_simultaneous_relaxation() const
     {
-        return relax_method.size() == 2 && relax_method[0] == "cg" && relax_method[1] == "2";
+        return relax_method == "cg";
     }
     bool relax = false; ///< allow relaxation along the specific direction
     double relax_scale_force = 0.5;
@@ -186,6 +192,16 @@ struct Input_para
 
     // ==============   #Parameters (5.Molecular dynamics) ===========================
     MD_para mdp;
+    // FIXME(liuyu): ref_cell_factor is currently DISABLED. Setting any
+    // non-1.0 value triggers WARNING_QUIT in read_input_item_md.cpp.
+    // The reference-cell mechanism has design problems: when
+    // ref_cell_factor > 1, PW_Basis::lat0/tpiba/G/GGT/omega hold
+    // reference-cell values, but external code (sum_rho, get_local_pp_energy,
+    // cal_delta_escf, makov_payne, wfc IO, DFPT, OFDFT) reads them as
+    // physical-cell quantities, producing wrong results in variable-cell
+    // (NPT) calculations. To re-enable, PW_Basis must be refactored to
+    // separate reference-cell grid (FFT dims nx/ny/nz) from physical-cell
+    // lattice quantities (lat0/tpiba/G/GGT/omega).
     double ref_cell_factor = 1;         ///< construct a reference cell bigger than the
                                         ///< initial cell liuyu 2023-03-21
     std::vector<int> cal_syns = {0, 8}; ///< calculate asynchronous S matrix to output {enable, precision}
@@ -302,16 +318,34 @@ struct Input_para
 
     // ==============   #Parameters (9.rt-tddft) ===========================
     double td_dt = -1.0;       ///< time step for propagation
+    int td_max_halvings = 0;   ///< Maximum depth of PW real-time interval bisection; zero disables retries.
+    int td_scf_nmax = 100;     ///< SCF limit per real-time propagation attempt, independent of initial-state SCF.
     int estep_per_md = 1;      ///< number of electronic steps per MD step
+    std::string lin_solver = "gmres"; ///< linear solver for real-time propagation
+    std::string td_orthonormal = "cholesky"; ///< Orthonormalization for PW real-time propagation.
+    bool td_out_stat = false; ///< Output PW real-time conservation diagnostics.
+    std::string td_out_mag = "voronoi"; ///< RT-TDDFT spinor magnetic moment partition.
+    bool td_out_torque = false; ///< Output XC and SOC spin angular momentum torques.
+    bool td_out_spincur = false; ///< Output the macroscopic spin angular momentum current.
+    int lin_gmres_restart = 20; ///< Maximum Arnoldi steps per GMRES cycle.
+    bool td_cn_init = true; ///< CN subspace initial guess and residual reuse.
+    bool lin_reconstruct = true; ///< Explicit GMRES residual reconstruction with periodic audits.
+    std::string lin_precond = "kinetic_recycle"; ///< right preconditioner for PW propagation
+    double lin_thr = 0.0;               ///< zero selects the precision-dependent tolerance
+    int lin_maxiter = 500;              ///< maximum iterations per linear solve
     double td_force_dt = 0.02; ///<"fs"
     bool td_vext = false;      ///< add extern potential or not
     // std::string td_vext_dire = "1";   ///< vext direction
     std::vector<int> td_vext_dire = {1}; ///< vector of vext direction
 
-    bool init_vecpot_file = false;   ///< initialize the vector potential, though file or integral
+    bool init_vecpot = false;        ///< initialize the vector potential, though file or integral
     double td_print_eij = -1.0;      ///< threshold to output Eij elements
     int td_edm = 0;                  ///< 0: new edm method   1: old edm method
     int propagator = 0;              ///< method of propagator
+    std::string td_exp_method = "lanczos"; ///< PW ETRS exponential backend.
+    int td_exp_order = 4; ///< Fixed Taylor polynomial order.
+    double td_exp_thr = 0.0; ///< Zero selects the precision-dependent exponential tolerance.
+    int td_exp_krylov_dim = 32; ///< Maximum Lanczos dimension before frozen-operator subdivision.
     int td_stype = 0;                ///< type of space domain  0 : length gauge  1: velocity gauge
     std::vector<int> td_ttype = {0}; ///< type of time domain
     ///<  0  Gauss type function.
@@ -369,6 +403,12 @@ struct Input_para
 
     // ==============   #Parameters (10.lr-tddft) ===========================
     int lr_nstates = 1;                              ///< the number of 2-particle states to be solved
+    int lr_target_state = 0;                         ///< which excited state the geometry relaxation follows (0-based)
+    std::string lr_target_spin = "singlet";          ///< spin channel of that state: singlet / triplet / updown
+    double lr_degen_thr
+        = 0.0; ///< max excitation-energy spread of a degenerate multiplet whose gradient matrix is computed (Ry); 0 disables
+    std::string lr_degen_mode = "state";       ///< what a relaxation follows when the target state sits in a degenerate multiplet: state / average
+    std::string lr_grad_solver = "cg";               ///< the linear solver of the Z-vector equation for LR-TDDFT gradients: cg / lapack / scalapack / scalapack_chol / elpa
     std::vector<std::string> lr_init_xc_kernel = {}; ///< The method to initalize the xc kernel
     int nocc = -1;                                   ///< the number of occupied orbitals to form the 2-particle basis
     int nvirt = 1;                              ///< the number of virtual orbitals to form the 2-particle basis (nocc + nvirt <= nbands)
@@ -379,10 +419,42 @@ struct Input_para
     bool lr_unrestricted = false;               ///< whether to use the unrestricted construction for LR-TDDFT
     std::vector<double> abs_wavelen_range = {}; ///< the range of wavelength(nm) to output the absorption spectrum
     double abs_broadening = 0.01;               ///< the broadening (eta) for LR-TDDFT absorption spectrum
-    std::string abs_gauge = "length";          ///< whether to use length or velocity gauge to calculate the absorption spectrum in LR-TDDFT
+    std::string abs_gauge = "velocity"; ///< optical gauge: length, velocity, or none to skip the spectrum
     std::string ri_hartree_benchmark = "none"; ///< whether to use the RI approximation for the Hartree potential in
                                                ///< LR-TDDFT for benchmark (with FHI-aims/ABACUS read-in style)
-    std::vector<int> aims_nbasis = {};         ///< the number of basis functions for each atom type used in FHI-aims (for benchmark)
+    std::vector<int> aims_nbasis = {}; ///< the number of basis functions for each atom type used in FHI-aims (for benchmark)
+    std::string bse_tda = "tda"; ///< TDA type can be: "tda", "full", "both"
+    std::vector<std::string> bse_spin_types = {"singlet", "triplet"}; ///< spin types for close-shell case to be calculated
+    bool bse_mem_save = false;    ///< whether to save memory by adding V and W to BSE matrix directly
+    bool bse_ri_hartree = true; ///< whether to use RI approximation for Hartree term in BSE
+    int bse_use_fine_kgrid = 0; ///< 0: coarse k-grid; 1: uniform fine k-grid; 2: non-uniform fine k-grid
+    int bse_q_approx_mode = 0;   ///< q→kpair mapping mode: 0=exact, 1=coarse q grid, 2=mixed, 3=truncate
+    double bse_q_approx_threshold = 0.1; ///< threshold radius (in unit of 2*pi/lat0) for exact q in mode 2, or |q| truncation in mode 3
+    bool out_bse_ab = false;    ///< whether to output the AB matrix to file
+    int bse_continue = 0; ///< which step to continue from previous BSE calculation
+                          ///< 0: new; 1: continue from A_V; 2: A_V and A_W; 3: A_V, A_W and B_V; 4: A_V, A_W, B_V and B_W
+    int plot_istate = 0; ///< the index of excited state to be plotted (starting from 0)
+    std::string exciton_plot_type = "average"; ///< exciton density plot type: "average" or "conditional"
+    std::string exciton_plot_format = "cube"; ///< average: "cube", "slice", or "both"; conditional: "slice"
+    std::vector<double> exciton_fixed_coordinate = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; ///< fixed hole and electron coordinates (Bohr): hx hy hz ex ey ez
+    std::string exciton_slice_plane = "ab"; ///< cross-section plane for conditional density: "ab", "bc", "ca"
+    double exciton_slice_pos = 0.0; ///< offset along perpendicular direction (Bohr) for slice
+    int exciton_slice_npoints = 200; ///< grid points per dimension for slice
+    std::vector<int> exciton_slice_range = {-1, 2, -1, 2}; ///< cell range: ustart uend vstart vend
+
+    // ==============   #Parameters (10b.dfpt) ===========================
+    std::vector<int> dfpt_qmesh = {1, 1, 1}; ///< Monkhorst-Pack q mesh for DFPT (gamma-centered)
+    std::string dfpt_qfile = "";              ///< file containing the DFPT q-point list; empty means dfpt_qmesh
+    bool dfpt_compute_q0 = false;             ///< compute epsilon_inf and Born effective charges at q = 0
+    bool dfpt_loto = false;                   ///< apply the LO-TO non-analytic correction at q = 0
+    double dfpt_conv_thr = 1.0e-8;            ///< convergence threshold of the DFPT first-order density
+    int dfpt_max_iter = 100;                  ///< max iterations of the DFPT first-order density mixing
+    double dfpt_mix_beta = 0.4;               ///< mixing coefficient of the DFPT first-order density
+    std::string dfpt_asr = "no";              ///< acoustic sum rule on the Gamma dynamical matrix: no | simple | crystal
+    std::string dfpt_mix_type = "v_sc_broyden"; ///< mixing scheme: rho_plain | rho_kerker | rho_broyden | v_sc_plain | v_sc_broyden
+    double dfpt_kerker_a2 = 1.0;              ///< Kerker screening parameter a^2 in 1/lat0^2 (kerker only)
+    int dfpt_broyden_ndim = 8;                ///< Broyden history depth (broyden variants)
+
     // ==============   #Parameters (11.Output) ===========================
     int out_stru = 1;                         ///< output stru file each ion step
                                               ///< 0: no output, 1: STRU format, 2: CIF format
@@ -391,6 +463,8 @@ struct Input_para
                                               ///< 0: output only when ion steps are finished
     int out_freq_td = 0;                      ///< output interval in RT-TDDFT
     std::vector<int> out_chg = {0, 3};        ///< output charge density. 0: no; 1: yes
+    bool out_occ_mat = true;                  ///< output DFT+U occupation matrices;
+                                              ///< frequency controlled by out_freq_ion/out_freq_elec
     std::vector<int> out_xc_r = {-1, 3};      ///< output xc(r). -1: no; >=0: output the order of xc(r)
     std::vector<int> out_pot = {0, 8};        ///< output potential
     int out_wfc_pw = 0;                       ///< 0: no; 1: txt; 2: dat
@@ -422,7 +496,6 @@ struct Input_para
     std::vector<int> out_mat_dh_vnl = {0, 8}; ///< output nonlocal pseudopotential dH/dR (dV^NL/dR) matrices
     std::vector<int> out_mat_dh_vh = {0, 8};  ///< output Hartree dH/dR (dV^H/dR) matrices
     std::vector<int> out_mat_dh_vxc = {0, 8}; ///< output XC dH/dR (dV^XC/dR) matrices
-    std::vector<int> out_mat_dh_exx = {0, 8}; ///< output exact-exchange dH/dR (dV^EXX/dR) matrices
     std::vector<int> out_mat_ds = {0, 8};     ///< output dS/dR matrices with precision
     bool out_mat_xc = false;                  ///< output exchange-correlation matrix in
                                               ///< KS-orbital representation.
@@ -431,7 +504,6 @@ struct Input_para
     bool out_hr_npz = false;                  ///< output H(R) matrix in npz format
     bool out_hsr_npz = false;                 ///< output H(R) and S(R) matrices in npz format
     bool out_dm_npz = false;                  ///< output DM(R) matrix in npz format
-    int out_interval = 1;
     bool out_app_flag = true;                ///< whether output r(R), H(R), S(R), T(R), and dH(R) matrices
                                              ///< in an append manner during MD liuyu 2023-03-20
     int out_ndigits = 8;                     ///< Assuming 8 digits precision is needed for matrices output
@@ -447,18 +519,20 @@ struct Input_para
     std::vector<int> cal_symm_repr = {0, 3}; ///< output the symmetry representation matrix
     bool restart_save = false;               ///< restart //Peize Lin add 2020-04-04
     bool rpa = false;                        ///< rpa calculation
+    bool rpa_out_vel = false;                ///< whether to output velocity matrix for librpa
+    std::string rpa_outdir = "OUT.librpa";   ///< output directory for librpa
     std::vector<int> out_pchg = {};          ///< specify the bands to be calculated for partial charge
     std::vector<int> out_wfc_norm = {};      ///< specify the bands to be calculated for norm of wfc
     std::vector<int> out_wfc_re_im = {};     ///< specify the bands to be calculated for real and imaginary parts of wfc
-    bool if_separate_k = false;              ///< whether to write partial charge for all k-points to individual files or merge them
-    std::vector<int> out_elf = {0, 3};       ///< output the electron localization function (ELF). 0: no; 1: yes
-    int out_spillage = 0;                    ///< output the spillage of the wave function
-    std::string spillage_outdir = "./";      ///< output directory for spillage
+    bool if_separate_k = false; ///< whether to write partial charge for all k-points to individual files or merge them
+    std::vector<int> out_elf = {0, 3}; ///< output the electron localization function (ELF). 0: no; 1: yes
+    int out_spillage = 0;       ///< output the spillage of the wave function
+    std::string spillage_outdir = "./"; ///< output directory for spillage
 
     // ==============   #Parameters (12.Postprocess) ===========================
     double dos_emin_ev = -15.0;
     double dos_emax_ev = 15.0;
-    double dos_edelta_ev = 0.01;
+    double dos_edelta_ev = 0.03;
     double dos_scale = 0.01;
     double dos_sigma = 0.07;                      ///< pengfei 2014-10-13
     int dos_nche = 100;                           ///< orders of Chebyshev expansions for dos
@@ -523,12 +597,25 @@ struct Input_para
     double block_height = 0.1; ///< height of the block
 
     //    implicit solvation model       Menglin Sun added on 2022-04-04
-    bool imp_sol = false;    ///< true: implicit solvation correction; false:
-                             ///< vacuum calculation(default)
+    int imp_sol = 0;         ///< 0: vacuum, 1: legacy solvation, 2: SCCS
     double eb_k = 80;        ///< the relative permittivity of the bulk solvent
     double tau = 1.0798e-05; ///< the effective surface tension parameter
     double sigma_k = 0.6;    ///< the width of the diffuse cavity
     double nc_k = 0.00037;   ///< the cut-off charge density
+    std::string sccs_preset = "custom";
+    double sccs_epsilon = 1.0; // Environ env_static_permittivity default
+    double sccs_rho_min = 1e-4;
+    double sccs_rho_max = 5e-3;
+    double sccs_gamma = 0.0; // dyn/cm
+    double sccs_pressure = 0.0; // GPa
+    int sccs_maxiter = 200;
+    double sccs_tol_rms = 1e-10;
+    double sccs_tol_max = 1e-8;
+    double sccs_surface_eta = 1e-8; // Bohr^-1
+    double sccs_lowpass_p1 = -1.0; // PCC switching-derivative filter slope
+    double sccs_lowpass_p2 = -1.0; // PCC switching-derivative filter offset
+    std::string sccs_solvent_mode = "electronic";
+    std::vector<double> sccs_corespread = {0.5}; // Bohr: one value or one per atom
 
     // ==============  #Parameters (14.vdW Correction) ===========================
     // ==========================================================
@@ -539,7 +626,7 @@ struct Input_para
     std::string vdw_s6 = "default";                         ///< scale parameter of d2/d3_0/d3_bj
     std::string vdw_s8 = "default";                         ///< scale parameter of d3_0/d3_bj
     std::string vdw_a1 = "default";                         ///< damping parameter of d3_0/d3_bj
-    std::string vdw_a2 = "default";                         ///< damping parameter of d3_bj
+    std::string vdw_a2 = "default";                         ///< rs8 for d3_0 or a2 for d3_bj
     double vdw_d = 20.0;                                    ///< damping parameter of d2
     bool vdw_abc = false;                                   ///< third-order term?
     std::string vdw_C6_file = "default";                    ///< filename of C6
@@ -550,6 +637,8 @@ struct Input_para
                                                             ///< structure, radius or period
     std::string vdw_cutoff_radius = "default";              ///< radius cutoff for periodic structure
     std::string vdw_radius_unit = "Bohr";                   ///< unit of radius cutoff for periodic structure
+    double vdw_cutoff_width2 = 0.05;               ///< smooth cutoff width for two-body dispersion, Bohr
+    double vdw_cutoff_width3 = 0.0;                ///< smooth cutoff width for three-body dispersion, Bohr
     double vdw_cn_thr = 40.0;                               ///< radius cutoff for cn
     std::string vdw_cn_thr_unit = "Bohr";                   ///< unit of cn_thr, Bohr or Angstrom
     std::string vdw_d4_xc = "default";                      ///< functional name passed to DFT-D4
@@ -595,6 +684,7 @@ struct Input_para
     double shrink_LU_inv_thr = 1e-6; ///< threshold to get inverse of overlap matrix by LU decomposition in auxiliary basis representation
     bool out_ri_cv = false;          ///< Whether to output the coefficient tensor C and ABFs-representation Coulomb matrix V
     bool out_unshrinked_v = false;   ///< whether to output the large Vq matrix in unshrinked auxiliary basis
+    int out_librpa_ver = 0; ///< 0: legacy ABACUS LibRPA text files; 1: LibRPA reader-v1 binary files
     bool exx_coul_moment = false;    ///< whether to use moment method for Coulomb calculation
     bool exx_rotate_abfs = false;    ///< whether to rotate auxiliary basis for Coulomb calculation
     double exx_multip_moments_threshold = 1e-10; ///< threshold to screen multipole moments in Coulomb calculation
@@ -605,10 +695,13 @@ struct Input_para
     bool yukawa_potential = false;         ///< default: false
     double yukawa_lambda = -1.0;           ///< default: -1.0, which means we calculate lambda
     double uramping_eV = -1.0;             ///< U-Ramping method (eV)
-    int omc = 0;                           ///< the mode of occupation matrix control
+    int init_occ_mat = 0;                  ///< mode of occupation-matrix initialization: 0: no;
+                                           ///< 1: read the initial matrix from file, then update it in SCF;
+                                           ///< 2: read the matrix from file and keep it fixed
+    int omc = 0;                           ///< legacy alias for init_occ_mat
     double onsite_radius = 0.0;            ///< radius of the sphere for onsite projection (Bohr)
     std::vector<double> hubbard_u_eV = {}; ///< Hubbard Coulomb interaction parameter U(ev)
-    std::vector<int> orbital_corr = {};    ///< which correlated orbitals need corrected ; d:2 ,f:3, do not
+    std::vector<int> l_channel = {};    ///< which correlated orbitals need corrected ; d:2 ,f:3, do not
                                            ///< need correction:-1
 
     // ==============   #Parameters (17.non-collinear spin-constrained DFT) =========
@@ -704,10 +797,11 @@ struct Input_para
     // ==============   #Parameters (22.EXX PW) =====================
     // EXX for planewave basis, rhx0820 2025-03-10
     bool exxace = true;                   // exxace, exact exchange for planewave basis, https://doi.org/10.1021/acs.jctc.6b00092
-    bool exx_gamma_extrapolation = true;  // gamma point extrapolation for exx, https://doi.org/10.1103/PhysRevB.79.205114
+    bool exx_gamma_extra = true;  // gamma point extrapolation for exx, https://doi.org/10.1103/PhysRevB.79.205114
     std::string exx_thr_type = "density"; ///< threshold type for exx outer loop
     double exx_ene_thr = 1e-5;            ///< threshold when exx_thr_type = energy
     double ecutexx = 0.0;                 ///< energy cutoff for exx calculation, Ry
+    int exx_batch_size = 0;               ///< band chunk width of the EXX batched path, 0 = all bands
 
     // ====   #Parameters (23.XC external parameterization) ========
     /*

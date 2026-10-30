@@ -11,10 +11,12 @@
 #include "source_estate/module_charge/charge.h"
 #include "source_pw/module_pwdft/vnl_pw.h"
 #include "source_pw/module_pwdft/kernels/stress_op.h"
-#include "source_pw/module_pwdft/structure_factor.h"
+#include "source_cell/stru_fac.h"
 #include "source_base/kernels/math_kernel_op.h"
 #include "source_psi/psi.h"
-#include "source_lcao/module_dftu/dftu.h" // mohan add 2025-11-06
+#include "source_pw/module_pwdft/dftu_base.h"
+
+class pseudopot_cell_vl;
 
 //-------------------------------------------------------------------
 // mohan reconstruction note: 2021-02-07
@@ -117,7 +119,12 @@ class Stress_Func
                    const Structure_Factor* p_sf,
                    const bool is_pw,
                    const bool *numeric,
-                   const Charge* const chr); // nonlinear core correction stress in PW or LCAO basis
+                   const Charge* const chr,
+                   const int nspin,
+                   const bool domag,
+                   const bool domag_z,
+                   const int gga_grad,
+                   const bool gamma_only_pw); // nonlinear core correction stress in PW or LCAO basis
 
     void deriv_drhoc(const bool& numeric,
                      const double& omega,
@@ -134,7 +141,11 @@ class Stress_Func
     void stress_gga(const UnitCell& ucell,
                     ModuleBase::matrix& sigma,
                     ModulePW::PW_Basis* rho_basis,
-                    const Charge* const chr); // gga part in both PW and LCAO basis
+                    const Charge* const chr,
+                    const int nspin,
+                    const bool domag,
+                    const bool domag_z,
+                    const int gga_grad); // gga part in both PW and LCAO basis
     void stress_mgga(const UnitCell& ucell,
                      ModuleBase::matrix& sigma,
                      const ModuleBase::matrix& wg,
@@ -143,6 +154,31 @@ class Stress_Func
                      K_Vectors* p_kv,
                      ModulePW::PW_Basis_K* wfc_basis,
                      const psi::Psi <std::complex<FPTYPE>, Device>* psi_in); // gga part in PW basis
+
+    /**
+     * @brief Compute the plane-wave-basis stress terms shared by PW and LCAO:
+     * vlocal, hartree, ewald, non-linear core correction and exchange-correlation.
+     *
+     * This is the former LCAO_domain::cal_stress_pw, moved here so the PW-part
+     * stress assembly lives in the PW module. All terms are double precision and
+     * independent of the electronic template type T used by LCAO.
+     */
+    void stress_pw_terms(UnitCell& ucell,
+                         ModuleBase::matrix& sigmadvl,
+                         ModuleBase::matrix& sigmahar,
+                         ModuleBase::matrix& sigmaewa,
+                         ModuleBase::matrix& sigmacc,
+                         ModuleBase::matrix& sigmaxc,
+                         const double& etxc,
+                         const Charge* const chr,
+                         ModulePW::PW_Basis* rhopw,
+                         const pseudopot_cell_vl& locpp,
+                         const Structure_Factor& sf,
+                         const int nspin,
+                         const bool domag,
+                         const bool domag_z,
+                         const int gga_grad,
+                         const bool gamma_only_pw);
 
     // 7) the stress from the non-local pseudopotentials
     /**
@@ -179,7 +215,7 @@ class Stress_Func
                        const ModuleBase::matrix& wg,
                        const ModulePW::PW_Basis_K* wfc_basis,
 		               const UnitCell& ucell_in,
-		               const Plus_U &dftu, // mohan add 2025-11-06
+		               const Plus_U_Base& dftu,
 		               const void* psi_in,
                        ModuleSymmetry::Symmetry* p_symm); // nonlocal part in PW basis
 

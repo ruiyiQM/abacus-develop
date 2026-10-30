@@ -1,4 +1,5 @@
 #include "../embedding/fde_projected_hamiltonian.h"
+#include "source_hamilt/hamilt_hs_adapter.h"
 
 #include <gtest/gtest.h>
 
@@ -60,10 +61,10 @@ class DenseHamiltonian : public hamilt::Hamilt<double>
         refreshed = yes;
     }
 
-    void matrix(hamilt::MatrixBlock<double>& h, hamilt::MatrixBlock<double>& s) override
+    void matrix(ModuleBase::MatrixBlock<double>& h, ModuleBase::MatrixBlock<double>& s) override
     {
-        h = hamilt::MatrixBlock<double>{hamiltonian.data(), 4, 4, nullptr};
-        s = hamilt::MatrixBlock<double>{overlap.data(), 4, 4, nullptr};
+        h = ModuleBase::MatrixBlock<double>{hamiltonian.data(), 4, 4, nullptr};
+        s = ModuleBase::MatrixBlock<double>{overlap.data(), 4, 4, nullptr};
     }
 
     std::vector<double> hamiltonian;
@@ -107,15 +108,15 @@ class ComplexKPointHamiltonian
     {
     }
 
-    void matrix(hamilt::MatrixBlock<std::complex<double>>& h,
-                hamilt::MatrixBlock<std::complex<double>>& s) override
+    void matrix(ModuleBase::MatrixBlock<std::complex<double>>& h,
+                ModuleBase::MatrixBlock<std::complex<double>>& s) override
     {
-        h = hamilt::MatrixBlock<std::complex<double>>{
+        h = ModuleBase::MatrixBlock<std::complex<double>>{
             hamiltonians.at(static_cast<std::size_t>(current_kpoint)).data(),
             4,
             4,
             nullptr};
-        s = hamilt::MatrixBlock<std::complex<double>>{
+        s = ModuleBase::MatrixBlock<std::complex<double>>{
             overlaps.at(static_cast<std::size_t>(current_kpoint)).data(),
             4,
             4,
@@ -139,10 +140,10 @@ TEST(FdeProjectedHamiltonian, RetainsOnlyActivePrincipalSubspace)
                                            4,
                                            {0, 2},
                                            1.0e6);
-    projected.updateHk(0);
-    hamilt::MatrixBlock<double> h;
-    hamilt::MatrixBlock<double> s;
-    projected.matrix(h, s);
+    hamilt::HamiltHSMatrix<double> hs(&projected);
+    ModuleBase::MatrixBlock<double> h;
+    ModuleBase::MatrixBlock<double> s;
+    hs.hs_at_k(0, h, s);
 
     EXPECT_EQ(full.last_kpoint, 0);
     EXPECT_DOUBLE_EQ(h.p[0 + 0 * 4], 1.0);
@@ -187,8 +188,8 @@ TEST(FdeProjectedHamiltonian, PreservesFactorizedOverlapWithinOneSolve)
                                            4,
                                            {0, 2},
                                            1.0e6);
-    hamilt::MatrixBlock<double> h;
-    hamilt::MatrixBlock<double> s;
+    ModuleBase::MatrixBlock<double> h;
+    ModuleBase::MatrixBlock<double> s;
     projected.matrix(h, s);
 
     // Generalized ELPA factorizes S in place after solving alpha.  The beta
@@ -214,8 +215,8 @@ TEST(FdeProjectedHamiltonian, CanShareGammaOverlapAcrossSpinKPointIndices)
                                            1.0e6,
                                            2,
                                            {0, 0});
-    hamilt::MatrixBlock<double> h;
-    hamilt::MatrixBlock<double> s;
+    ModuleBase::MatrixBlock<double> h;
+    ModuleBase::MatrixBlock<double> s;
     projected.updateHk(0);
     projected.matrix(h, s);
     s.p[0] = 8.0;
@@ -237,22 +238,20 @@ TEST(FdeProjectedHamiltonian, KeepsIndependentComplexOverlapForEachKPoint)
                                                   {0, 2},
                                                   1.0e6,
                                                   2);
-    hamilt::MatrixBlock<std::complex<double>> h;
-    hamilt::MatrixBlock<std::complex<double>> s;
+    hamilt::HamiltHSMatrix<std::complex<double>> hs(&projected);
+    ModuleBase::MatrixBlock<std::complex<double>> h;
+    ModuleBase::MatrixBlock<std::complex<double>> s;
 
-    projected.updateHk(0);
-    projected.matrix(h, s);
+    hs.hs_at_k(0, h, s);
     s.p[0] = std::complex<double>(7.0, 0.5);
 
-    projected.updateHk(1);
-    projected.matrix(h, s);
+    hs.hs_at_k(1, h, s);
     EXPECT_EQ(h.p[2], std::complex<double>(12.0, 1.25));
     EXPECT_EQ(s.p[2], std::complex<double>(0.02, 0.02));
     EXPECT_EQ(s.p[1 + 1 * 4], std::complex<double>(1.0, 0.0));
     EXPECT_THROW(projected.updateHk(2), std::out_of_range);
 
-    projected.updateHk(0);
-    projected.matrix(h, s);
+    hs.hs_at_k(0, h, s);
     EXPECT_EQ(s.p[0], std::complex<double>(7.0, 0.5));
     EXPECT_EQ(h.p[2], std::complex<double>(2.0, 0.25));
 }

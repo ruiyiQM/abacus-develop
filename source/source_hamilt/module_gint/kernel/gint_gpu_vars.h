@@ -1,10 +1,12 @@
-#pragma once
+#ifndef ABACUS_SOURCE_HAMILT_MODULE_GINT_KERNEL_GINT_GPU_VARS_H
+#define ABACUS_SOURCE_HAMILT_MODULE_GINT_KERNEL_GINT_GPU_VARS_H
+
 
 #include <cuda_runtime.h>
 #include "set_const_mem.cuh"
 #include "source_cell/unitcell.h"
 #include "source_hamilt/module_gint/biggrid_info.h"
-#include "source_basis/module_ao/ORB_atomic.h"
+#include "source_basis/module_ao/orb_atomic.h"
 
 namespace ModuleGint
 {
@@ -38,3 +40,5 @@ class GintGpuVars
 };
 
 }
+
+#endif // ABACUS_SOURCE_HAMILT_MODULE_GINT_KERNEL_GINT_GPU_VARS_H

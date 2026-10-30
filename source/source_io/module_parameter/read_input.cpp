@@ -1,4 +1,8 @@
 #include "read_input.h"
+#include "availability_validator.h"
+#ifdef __MPI
+#include "source_base/parallel_common.h"
+#endif
 
 
 #include <algorithm>
@@ -11,6 +15,7 @@
 #include <cassert>
 #include <cctype>
 #include <limits>
+#include <stdexcept>
 #include "source_base/formatter.h"
 #include "source_base/global_file.h"
 #include "source_base/global_function.h"
@@ -84,7 +89,7 @@ void read_information(std::stringstream& ifs, std::vector<std::string>& output, 
     std::string word;
     while (iss >> word)
     {
-        if (delimiters.find(word[0]) != std::string::npos)
+        if (delimiters.find(word[0]) != std::string::npos || (word == "//" && !output.empty()))
         {
             break;
         }
@@ -97,40 +102,40 @@ bool ReadInput::check_mode = false;
 bool filter_nonascii_and_comment(std::ifstream& ifs,
                        std::stringstream& out_ascii_stream)
 {
-	if (!ifs.is_open()) 
-	{
-		if (!ifs) return false;
+    if (!ifs.is_open()) 
+    {
+        if (!ifs) return false;
     }
 
     std::streampos old_pos = ifs.tellg();
     ifs.clear();
     ifs.seekg(0, std::ios::beg);
 
-	char c = '\0';
-	while (ifs.get(c)) 
-	{
-		// If comment start, skip until end of line (but keep the newline)
-		if (c == '#') 
-		{
-			char d = '\0';
-			bool newline_found = false;
-			while (ifs.get(d)) 
-			{
-				if (d == '\n' || d == '\r') 
-				{
-					// preserve line break in output
-					out_ascii_stream.put('\n');
-					// If CRLF, consume the LF after CR (already wrote a single '\n')
-					if (d == '\r' && ifs.peek() == '\n') 
-					{
-						ifs.get(d); // consume '\n'
-					}
-					newline_found = true;
-					break;
-				}
+    char c = '\0';
+    while (ifs.get(c)) 
+    {
+        // If comment start, skip until end of line (but keep the newline)
+        if (c == '#') 
+        {
+            char d = '\0';
+            bool newline_found = false;
+            while (ifs.get(d)) 
+            {
+                if (d == '\n' || d == '\r') 
+                {
+                    // preserve line break in output
+                    out_ascii_stream.put('\n');
+                    // If CRLF, consume the LF after CR (already wrote a single '\n')
+                    if (d == '\r' && ifs.peek() == '\n') 
+                    {
+                        ifs.get(d); // consume '\n'
+                    }
+                    newline_found = true;
+                    break;
+                }
             }
-			if (!newline_found) 
-			{
+            if (!newline_found) 
+            {
                 // reached EOF while skipping comment
                 break;
             }
@@ -138,15 +143,15 @@ bool filter_nonascii_and_comment(std::ifstream& ifs,
         }
 
         unsigned char uc = static_cast<unsigned char>(c);
-		if (uc <= 0x7F) 
-		{
-			// ASCII character
+        if (uc <= 0x7F) 
+        {
+            // ASCII character
             out_ascii_stream.put(c);
         }
-		else 
-		{
-			// replace non-ASCII with space character
-			out_ascii_stream.put(' ');
+        else 
+        {
+            // replace non-ASCII with space character
+            out_ascii_stream.put(' ');
         }
     }
 
@@ -174,12 +179,37 @@ ReadInput::ReadInput(const int& rank)
     this->item_rt_tddft();
     this->item_tdofdft();
     this->item_lr_tddft();
+    this->item_bse();
+    this->item_dfpt();
     this->item_output();
     this->item_postprocess();
     this->item_model();
     this->item_exx();
     this->item_dftu();
     this->item_others();
+
+    if (!this->input_lists.empty())
+    {
+        std::map<std::string, AvailabilityValueKind> parameter_types;
+        std::map<std::string, AvailabilityExpr> expressions;
+        std::map<std::string, AvailabilityValueKind> bound_types;
+        for (const auto& entry : this->input_lists)
+        {
+            parameter_types[entry.first] = availability_value_kind(entry.second.type);
+            expressions[entry.first] = entry.second.get_availability_expr();
+            if (entry.second.domain.bound()) { bound_types[entry.first] = entry.second.domain.kind(); }
+        }
+        for (const auto& entry : this->input_lists)
+        {
+            entry.second.domain.validate_schema(entry.first, bound_types);
+            validate_availability_expr(entry.first,
+                                       entry.second.get_availability_expr(),
+                                       parameter_types);
+            validate_availability_self_contained(entry.first,
+                                                 entry.second.get_availability_expr(),
+                                                 expressions);
+        }
+    }
 }
 
 void ReadInput::read_parameters(Parameter& param, const std::string& filename_in)
@@ -187,10 +217,21 @@ void ReadInput::read_parameters(Parameter& param, const std::string& filename_in
     ModuleBase::TITLE("ReadInput", "read_parameters");
 
     // 1. only rank 0 read the input file
+    std::string input_error;
     if (this->rank == 0)
     {
         // We can also easily add other input file formats here
-        this->read_txt_input(param, filename_in);
+        input_error = this->read_txt_input(param, filename_in);
+    }
+#ifdef __MPI
+    // All ranks must leave together before the parameter broadcasts below.
+    Parallel_Common::bcast_string(input_error);
+#endif
+    if (!input_error.empty())
+    {
+        const std::string message = "Invalid parameters in " + filename_in + ":\n" + input_error;
+        ModuleBase::WARNING_QUIT("ReadInput", message);
+        return;
     }
 
     // 2. check the number of atom types from STRU file
@@ -258,7 +299,8 @@ void ReadInput::create_directory(const Parameter& param)
     //----------------------------------------------------------
     bool out_dir = false;
     if (!param.input.out_app_flag
-        && (param.input.out_hsr[0] == 1 || param.input.out_mat_r[0] || param.input.out_mat_t[0]
+        && ((param.input.out_hsr[0] == 1 || param.input.out_hsr[0] == 2)
+            || param.input.out_mat_r[0] || param.input.out_mat_t[0]
             || param.input.out_mat_dh[0] || param.input.out_mat_ds[0]))
     {
         out_dir = true;
@@ -303,27 +345,26 @@ void ReadInput::write_parameters(const Parameter& param, const std::string& file
     }
 }
 
-void ReadInput::read_txt_input(Parameter& param, const std::string& filename)
+std::string ReadInput::read_txt_input(Parameter& param, const std::string& filename)
 {
     ModuleBase::TITLE("ReadInput", "read_txt_input");
 
     std::stringstream ascii_stream;
 
-	std::ifstream ifs(filename.c_str(), std::ios::in);
+    std::ifstream ifs(filename.c_str(), std::ios::in);
 
-	if (!ifs)
-	{
-		std::cout << " Can't find the INPUT file." << std::endl;
-		ModuleBase::WARNING_QUIT("Input::Init", "Error during readin parameters.", 1);
-	}
+    if (!ifs)
+    {
+        return "Cannot open the INPUT file. Check the file path and read permissions.\n";
+    }
 
-	ifs.clear();
-	ifs.seekg(0);
+    ifs.clear();
+    ifs.seekg(0);
 
-	filter_nonascii_and_comment(ifs, ascii_stream);
-	ifs.clear();
+    filter_nonascii_and_comment(ifs, ascii_stream);
+    ifs.clear();
 
-	// file close after reading
+    // file close after reading
 
     int ierr = 0;
     ascii_stream.rdstate();
@@ -341,32 +382,33 @@ void ReadInput::read_txt_input(Parameter& param, const std::string& filename)
 
     if (ierr == 0)
     {
-        std::cout << " Error parameter list. "
-                  << " The parameter list always starts with key word "
-                     "'INPUT_PARAMETERS'. "
-                  << std::endl;
-        ModuleBase::WARNING_QUIT("Input", 
-            "Bad parameter, please check the input parameters in file INPUT", 1);
+        return "Missing INPUT_PARAMETERS header. The parameter list must start with INPUT_PARAMETERS.\n"
+               "See https://abacus.deepmodeling.com/en/latest/advanced/input_files/input-main.html\n";
     }
 
     ascii_stream.rdstate();
     while (ascii_stream.good())
     {
         std::string word; // temporary variable to store the keyword read-in
-        ascii_stream >> word;
-        if (ascii_stream.eof()) { break; }
+        if (!(ascii_stream >> word)) { break; }
         word = FmtCore::lower(word); // the lowercase of the keyword
         auto it = std::find_if(input_lists.begin(), input_lists.end(),
             [&word](const std::pair<std::string, Input_Item>& item) { return item.first == word; });
         if (it != this->input_lists.end()) // find the keyword
         {
             Input_Item* p_item = &(it->second);
-            this->readvalue_items.push_back(p_item);
-            if(p_item->is_read())
+            // Preserve the legacy EOF handling until a domain declares the
+            // required token count. Some legacy readers accept empty values.
+            if (ascii_stream.eof() && p_item->domain.empty())
             {
-                std::string warningstr = "The parameter " + p_item->label + " has been read twice.";
-                ModuleBase::WARNING_QUIT("ReadInput", warningstr);
+                break;
             }
+            if (std::find(readvalue_items.begin(), readvalue_items.end(), p_item) != readvalue_items.end())
+            {
+                return "The parameter " + p_item->label + " has been read twice. Specify it only once.\nSee "
+                       + input_manual_link(p_item->label) + "\n";
+            }
+            this->readvalue_items.push_back(p_item);
             // qianrui delete '/' 2024-07-10, because path has '/' head.
             read_information(ascii_stream, p_item->str_values, "#!");
         }
@@ -374,9 +416,8 @@ void ReadInput::read_txt_input(Parameter& param, const std::string& filename)
         {
             if (word[0] != '#' && word[0] != '/' && word[0] != '!') // if not recognized
             {
-                std::cout << " THE PARAMETER NAME '" << word << "' IS INCORRECT!" << std::endl;
-                ModuleBase::WARNING_QUIT("Input",
-                    "Bad parameter, please check the input parameters in file INPUT", 1);
+                return "Unknown INPUT parameter '" + word + "'. Check the parameter name.\n"
+                       "See https://abacus.deepmodeling.com/en/latest/advanced/input_files/input-main.html\n";
             }
             // otherwise, it is a comment. However, ...
             // but it is not always to be shorter than 150 characters
@@ -391,15 +432,29 @@ void ReadInput::read_txt_input(Parameter& param, const std::string& filename)
         }
         else if (ascii_stream.bad())
         {
-            ModuleBase::WARNING_QUIT("Input", 
-                                    " Bad input parameters. ", 1);
+            return "Cannot read the INPUT parameter list: stream error.\n";
         }
         else if (ascii_stream.fail())
         {
-            ascii_stream.clear();
-            ModuleBase::WARNING_QUIT("Input", 
-                                    " fail to read parameters. ", 1);
+            return "Cannot read the INPUT parameter list: failed to extract a parameter.\n";
         }
+    }
+
+    return this->prepare_input(param);
+}
+
+std::string ReadInput::prepare_input(Parameter& param)
+{
+    // Validate original tokens before any reader or default hook can discard
+    // an invalid value. In particular, std::stoi alone accepts numeric prefixes.
+    std::string errors;
+    for (const auto* item : this->readvalue_items)
+    {
+        errors += item->domain.validate_explicit(item->label, item->str_values);
+    }
+    if (!errors.empty())
+    {
+        return errors;
     }
 
     // 1) read the value of the parameters
@@ -408,18 +463,81 @@ void ReadInput::read_txt_input(Parameter& param, const std::string& filename)
         readvalue_item->read_value(*readvalue_item, param);
     }
 
+    InputValues supplied_values;
+    for (const auto* item : this->readvalue_items)
+    {
+        if (item->domain.bound()) { supplied_values[item->label] = item->domain.value(param); }
+    }
+
     // 2) reset this value when some conditions are met
     //    e.g. if (calulation_type == "nscf") then set "init_chg" to "file".
     for (auto& input_item: this->input_lists)
     {
         Input_Item* resetvalue_item = &(input_item.second);
         if (resetvalue_item->reset_value != nullptr) 
-		{
-			resetvalue_item->reset_value(*resetvalue_item, param);
+        {
+            resetvalue_item->reset_value(*resetvalue_item, param);
         }
     }
 
     this->normalize_hs_output_options(param);
+    this->normalize_occ_mat_options(param);
+
+    // Snapshot typed effective values once for shared domain and dependency checks.
+    InputValues values;
+    for (const auto& entry : this->input_lists)
+    {
+        if (entry.second.domain.bound()) { values[entry.first] = entry.second.domain.value(param); }
+    }
+
+    // Evaluate requirements with explicit values taking precedence over defaults,
+    // so a reset cannot hide a conflicting user request.
+    InputValues requested_values = values;
+    for (const auto& supplied : supplied_values) { requested_values[supplied.first] = supplied.second; }
+    for (const auto& entry : this->input_lists)
+    {
+        errors += entry.second.domain.validate_requirements(entry.first, requested_values);
+    }
+    if (!errors.empty()) { return errors; }
+
+    // Check effective values, including defaults, through the same domains.
+    for (const auto& entry : this->input_lists)
+    {
+        errors += entry.second.domain.validate_resolved(entry.first, values);
+    }
+    if (!errors.empty()) { return errors; }
+    for (const auto& entry : this->input_lists)
+    {
+        errors += entry.second.domain.validate_requirements(entry.first, values);
+    }
+    return errors;
+}
+
+void ReadInput::normalize_occ_mat_options(Parameter& param)
+{
+    // init_occ_mat is the current name of the former omc parameter; keep
+    // accepting omc so that INPUT files written by older versions still work.
+    const auto item_is_read = [this](const std::string& label) {
+        const auto item = std::find_if(
+            this->input_lists.begin(),
+            this->input_lists.end(),
+            [&label](const std::pair<std::string, Input_Item>& entry) { return entry.first == label; });
+        return item != this->input_lists.end() && item->second.is_read();
+    };
+
+    const bool init_occ_mat_is_read = item_is_read("init_occ_mat");
+    const bool omc_is_read = item_is_read("omc");
+    if (init_occ_mat_is_read)
+    {
+        if (omc_is_read)
+        {
+            ModuleBase::WARNING("ReadInput", "both init_occ_mat and omc are set; init_occ_mat takes precedence");
+        }
+    }
+    else
+    {
+        param.input.init_occ_mat = param.input.omc;
+    }
 }
 
 void ReadInput::normalize_hs_output_options(Parameter& param)
@@ -488,6 +606,8 @@ void ReadInput::write_txt_input(const Parameter& param, const std::string& filen
     for (auto& item: this->input_lists)
     {
         Input_Item* p_item = &(item.second);
+        // Do not serialize an inactive internal marker as a public INPUT value.
+        if (!p_item->domain.can_write(param)) { continue; }
         if (p_item->get_final_value == nullptr) {
             continue;
 }

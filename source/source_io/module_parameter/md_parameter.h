@@ -19,7 +19,9 @@ struct MD_para
     double md_tfirst = -1.0;           ///< Temperature (in Hartree, 1 Hartree ~ 3E5 K)
     double md_tlast = -1.0;            ///< Target temperature
     int md_dumpfreq = 1;               ///< The period to dump MD information
+    double md_neighbor_skin = 0.0;     ///< Extra neighbor-list radius in Angstrom for MDCell solvers
     int md_restartfreq = 5;            ///< The period to output MD restart information
+    bool md_out_force = true;          ///< output all atomic forces into running_md.log
     int md_seed = -1;                  ///< random seed for MD
     int md_prec_level = 0;             ///< precision level for vc-md
 
@@ -62,6 +64,10 @@ struct MD_para
 
     double md_tolerance = 100.0; ///< tolerance for velocity rescaling (K)
     int md_nraise = 1;           ///< parameters used when md_type=nvt
+
+    bool plumed = false;          ///< use PLUMED for collective variables and enhanced
+                                  ///< sampling (requires ABACUS compiled with PLUMED)
+    std::string plumed_file = "plumed.dat"; ///< input file of PLUMED
 
     bool dump_force = true;  ///< output atomic forces into the file MD_dump or
                              ///< not. liuyu 2023-03-01
