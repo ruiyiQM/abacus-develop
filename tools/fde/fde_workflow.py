@@ -443,6 +443,7 @@ def validate_spec(spec: Mapping[str, object]) -> None:
             raise WorkflowError("adaptive_scf requires at least two stages")
         previous_minimum = math.inf
         previous_tolerance = math.inf
+        stage_names = set()
         for index, stage in enumerate(stages):
             if not isinstance(stage, dict):
                 raise WorkflowError("every adaptive SCF stage must be a JSON object")
@@ -452,7 +453,10 @@ def validate_spec(spec: Mapping[str, object]) -> None:
             }
             if unknown_stage:
                 raise WorkflowError("adaptive SCF stage contains unsupported keys")
-            _label(stage.get("name", ""), "adaptive SCF stage name")
+            name = _label(stage.get("name", ""), "adaptive SCF stage name")
+            if name in stage_names:
+                raise WorkflowError("adaptive SCF stage names must be unique")
+            stage_names.add(name)
             minimum = stage.get("minimum_density_rms")
             tolerance = stage.get("density_tolerance")
             iterations = stage.get("maximum_iterations")
@@ -1720,6 +1724,7 @@ def checkpoint_input_fingerprint(spec: Mapping[str, object],
     files = {path.resolve() for path in template.rglob("*") if path.is_file()}
     files.update(Path(path).resolve() for path in initial.values())
     files.add(Path(__file__).resolve())
+    files.add(Path(__file__).resolve().parent / "workflow" / "scf_policy.py")
     for key in ("abacus_command", "session_command", "postprocess_command"):
         command = spec.get(key, spec["abacus_command"])
         executable = shutil.which(command[0])

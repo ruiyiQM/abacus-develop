@@ -291,6 +291,10 @@ class FdeWorkflowTest(unittest.TestCase):
             },
         }
         fde_workflow.validate_spec(spec)
+        spec["controls"]["adaptive_scf"]["stages"][1]["name"] = "loose"
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "stage names must be unique"):
+            fde_workflow.validate_spec(spec)
+        spec["controls"]["adaptive_scf"]["stages"][1]["name"] = "strict"
         spec["controls"]["adaptive_scf"]["auto_tune"] = {
             "enabled": True, "iteration_pressure_fraction": 1.5,
         }

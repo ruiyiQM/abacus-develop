@@ -131,6 +131,15 @@ set_tests_properties(MODULE_FDE_workflow_serial PROPERTIES
 )
 
 add_test(
+  NAME MODULE_FDE_scf_policy
+  COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/fde/workflow/test_scf_policy.py -v
+)
+set_tests_properties(MODULE_FDE_scf_policy PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/fde"
+)
+
+add_test(
   NAME MODULE_FDE_band_folding
   COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tools/fde/test_compare_band_folding.py -v

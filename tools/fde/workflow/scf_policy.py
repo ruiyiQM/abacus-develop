@@ -70,11 +70,18 @@ def select_adaptive_stage(
     if not stages:
         raise ValueError("adaptive SCF requires at least one stage")
     baseline = _baseline_index(stages, previous_density_rms)
-    selected = baseline
+    stage_indices = {str(stage["name"]): index
+                     for index, stage in enumerate(stages)}
+    previous = max((stage_indices.get(str(item.get("scf_mode", "")), 0)
+                    for item in history), default=0)
+    selected = max(baseline, previous)
     reason = "initial_stage" if previous_density_rms is None else "residual_threshold"
+    if selected > baseline:
+        reason = "previous_stage"
     forced = cycle >= force_strict_cycle
     evidence: Dict[str, object] = {
         "baseline_stage": str(stages[baseline]["name"]),
+        "previous_stage": str(stages[previous]["name"]) if history else None,
         "previous_density_rms": previous_density_rms,
         "forced_strict": forced,
     }

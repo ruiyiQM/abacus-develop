@@ -291,6 +291,29 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_checkpoint_fingerprint_tracks_scf_policy_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            state = spec["states"][0]
+            geometry = spec["geometries"][0]
+            driver = root / "driver" / "fde_workflow.py"
+            policy = driver.parent / "workflow" / "scf_policy.py"
+            policy.parent.mkdir(parents=True)
+            driver.write_bytes(MODULE_PATH.read_bytes())
+            policy.write_text("original SCF policy", encoding="utf-8")
+
+            def fingerprint():
+                return fde_workflow.checkpoint_input_fingerprint(
+                    spec, geometry, state, geometry["initial_densities"][state["label"]],
+                    work / "g0" / state["label"])
+
+            with mock.patch.object(fde_workflow, "__file__", str(driver)):
+                original = fingerprint()
+                policy.write_text("changed SCF policy", encoding="utf-8")
+                self.assertNotEqual(fingerprint(), original)
+
     def test_fingerprint_resolves_relative_resources_and_launched_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

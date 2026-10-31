@@ -41,6 +41,31 @@ class ScfPolicyTest(unittest.TestCase):
         result = self.select(2e-3, pressure, {"enabled": True})
         self.assertEqual(result["decision"]["reason"], "iteration_pressure")
 
+    def test_keeps_promoted_stage_when_iteration_pressure_subsides(self):
+        history = [{"scf_mode": "loose", "density_rms": 8.4e-3},
+                   {"scf_mode": "medium", "density_rms": 1.8e-3,
+                    "inner_scf": {"F": {"retry_count": 0, "iterations": 19,
+                                         "maximum_iterations": 60}}}]
+        result = self.select(1.8e-3, history, {"enabled": True})
+        self.assertEqual(result["stage"]["name"], "medium")
+        self.assertEqual(result["decision"]["reason"], "previous_stage")
+
+    def test_preserves_strict_stage_from_checkpoint_history(self):
+        history = [{"scf_mode": "strict", "density_rms": 1.5e-5},
+                   {"scf_mode": "medium", "density_rms": 2e-3}]
+        for auto in ({"enabled": True}, {"enabled": False}):
+            with self.subTest(auto=auto):
+                result = self.select(2e-3, history, auto)
+                self.assertEqual(result["stage"]["name"], "strict")
+
+    def test_promotes_once_from_retained_stage_under_pressure(self):
+        history = [{"scf_mode": "medium", "density_rms": 2e-3,
+                    "inner_scf": {"F": {"retry_count": 0, "iterations": 60,
+                                         "maximum_iterations": 60}}}]
+        result = self.select(2e-3, history, {"enabled": True})
+        self.assertEqual(result["stage"]["name"], "strict")
+        self.assertEqual(result["decision"]["reason"], "iteration_pressure")
+
 
 if __name__ == "__main__":
     unittest.main()
