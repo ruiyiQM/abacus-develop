@@ -135,6 +135,20 @@ if(ENABLE_LIBXC)
   )
 endif()
 
+if(ENABLE_JSON AND ENABLE_LIBXC)
+  add_test(
+    NAME MODULE_FDE_session_json
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_session_json.py
+      $<TARGET_FILE:${ABACUS_BIN_NAME}>
+      ${CMAKE_SOURCE_DIR}
+  )
+  set_tests_properties(MODULE_FDE_session_json PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    TIMEOUT 60
+  )
+endif()
+
 add_test(
   NAME MODULE_FDE_workflow_serial
   COMMAND ${Python3_EXECUTABLE}

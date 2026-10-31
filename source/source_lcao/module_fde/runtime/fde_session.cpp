@@ -4,6 +4,7 @@
 
 #include "source_esolver/esolver.h"
 #include "source_esolver/esolver_ks_lcao.h"
+#include "source_io/module_json/output_info.h"
 #include "source_io/module_parameter/input_parameter.h"
 
 #include <algorithm>
@@ -85,6 +86,10 @@ bool run_request(ModuleESolver::ESolver& solver,
         return false;
     }
     lcao->reload_fde_session(command.config_path, unit_cell);
+#ifdef __JSON
+    // Persistent requests bypass the ionic driver that starts each JSON record.
+    Json::init_output_array_obj();
+#endif
     lcao->runner(unit_cell, warm_start.ionic_step);
     return true;
 }
