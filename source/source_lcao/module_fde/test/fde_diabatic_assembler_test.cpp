@@ -146,6 +146,44 @@ TEST(FdeDiabaticAssembler, ImplementsPaperLBlockRetentionRule)
     EXPECT_FALSE(policy.retain("B", "C"));
 }
 
+TEST(FdeDiabaticAssembler, TruncatesDensityBlocksAndPreservesBothSpinTraces)
+{
+    std::vector<fde::DiabaticDeterminantArtifact> states = determinants();
+    states[0].beta = states[0].alpha;
+    states[2].beta = states[2].alpha;
+    const fde::FdeDiabFragmentOverlapPolicy policy({"A"});
+    const fde::CouplingValidationControls validation{1.0e-12, 1.0e-12};
+    const CountingTransitionEnergy energy;
+    const fde::ElectronicCouplingResult pair
+        = fde::ElectronicCoupling::evaluate_symmetric_with_policy(
+            states[0], states[2], ao_overlap(), policy, energy, validation, 1.0e-12);
+    EXPECT_LE(pair.maximum_transition_density_trace_error, 1.0e-12);
+    const std::vector<double>& forward = pair.forward_density_matrix.alpha;
+    const std::vector<double>& reverse = pair.reverse_density_matrix.alpha;
+    EXPECT_DOUBLE_EQ(forward[2 + 4 * 6], 0.0);
+    EXPECT_DOUBLE_EQ(forward[3 + 4 * 6], 0.0);
+    EXPECT_DOUBLE_EQ(forward[4 + 2 * 6], 0.0);
+    EXPECT_NE(forward[0 + 2 * 6], 0.0);
+    for (std::size_t column = 0; column < 6; ++column)
+    {
+        for (std::size_t row = 0; row < 6; ++row)
+        {
+            EXPECT_NEAR(forward[row + column * 6], reverse[column + row * 6], 1.0e-12);
+        }
+    }
+    EXPECT_EQ(forward, pair.forward_density_matrix.beta);
+    EXPECT_EQ(reverse, pair.reverse_density_matrix.beta);
+
+    const fde::FdeDiabFragmentOverlapPolicy full({"A", "B", "C"});
+    const fde::DeterminantTransition unrestricted = fde::ElectronicCoupling::transition(
+        states[0], states[2], ao_overlap(), 1.0e-12);
+    const fde::DeterminantTransition retained = fde::ElectronicCoupling::transition_with_policy(
+        states[0], states[2], ao_overlap(), full, 1.0e-12);
+    EXPECT_DOUBLE_EQ(retained.normalized_overlap, unrestricted.normalized_overlap);
+    EXPECT_EQ(retained.density_matrix.alpha, unrestricted.density_matrix.alpha);
+    EXPECT_EQ(retained.density_matrix.beta, unrestricted.density_matrix.beta);
+}
+
 TEST(FdeDiabaticAssembler, RejectsLFragmentsOutsideMSelection)
 {
     const CountingTransitionEnergy energy;

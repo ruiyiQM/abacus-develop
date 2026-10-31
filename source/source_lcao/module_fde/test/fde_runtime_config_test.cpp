@@ -47,7 +47,7 @@ OVERLAP_EIGENVALUE_CUTOFF 1e-9
 SYMMETRY_TOLERANCE 1e-10
 RESIDUAL_TOLERANCE 1e-8
 MINIMUM_ROOT_OVERLAP 0.5
-CALCULATE_FORCE true
+CALCULATE_FORCE false
 HARTREE_RECIPROCITY_TOLERANCE_RY 1e-8
 END_FDE_CONFIG
 )";
@@ -76,10 +76,26 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(config.coupling_provider, "symmetric_linearized");
     EXPECT_DOUBLE_EQ(config.transition_density_trace_tolerance, 1.0e-8);
     EXPECT_DOUBLE_EQ(config.mixing_beta, 0.25);
-    EXPECT_TRUE(config.calculate_force);
+    EXPECT_FALSE(config.calculate_force);
     ASSERT_EQ(config.linearized_state_artifacts.size(), 2);
     EXPECT_EQ(config.linearized_state_artifacts[1].label, "product");
     EXPECT_EQ(fde::FdeRuntimeConfigIO::state_index(config, "product"), 1);
+}
+
+TEST(FdeRuntimeConfig, RejectsUnsupportedNativeForceRequest)
+{
+    std::string text(fluoride_substitution_config());
+    const std::string setting = "CALCULATE_FORCE false";
+    text.replace(text.find(setting), setting.size(), "CALCULATE_FORCE true");
+    std::istringstream input(text);
+    EXPECT_THROW(fde::FdeRuntimeConfigIO::read(input), std::invalid_argument);
+
+    std::istringstream valid(fluoride_substitution_config());
+    fde::FdeRuntimeConfig config = fde::FdeRuntimeConfigIO::read(valid);
+    config.calculate_force = true;
+    std::ostringstream output;
+    EXPECT_THROW(fde::FdeRuntimeConfigIO::write(output, config), std::invalid_argument);
+    EXPECT_TRUE(output.str().empty());
 }
 
 TEST(FdeRuntimeConfig, ParsesAndCanonicalizesIndependentXcChoices)

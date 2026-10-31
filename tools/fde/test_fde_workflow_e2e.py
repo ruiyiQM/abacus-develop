@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("fde_workflow.py")
@@ -290,6 +291,138 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_fingerprint_resolves_relative_resources_and_launched_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            state = spec["states"][0]
+            geometry = spec["geometries"][0]
+            state_directory = work / "g0" / state["label"]
+            resource = state_directory / "shared.upf"
+            resource.parent.mkdir(parents=True)
+            resource.write_text("original pseudo", encoding="utf-8")
+            (root / "template" / "INPUT").write_text(
+                "INPUT_PARAMETERS\npseudo_dir ../..\n", encoding="utf-8")
+            (root / "template" / "STRU").write_text(
+                "ATOMIC_SPECIES\nH 1 shared.upf\nLATTICE_CONSTANT\n1\n", encoding="utf-8")
+            executable = root / "checkpoint-test-abacus"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            spec["abacus_command"] = ["env", executable.name]
+
+            def fingerprint():
+                return fde_workflow.checkpoint_input_fingerprint(
+                    spec, geometry, state, geometry["initial_densities"][state["label"]],
+                    state_directory)
+
+            with mock.patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"]}):
+                original = fingerprint()
+                resource.write_text("changed pseudo", encoding="utf-8")
+                self.assertNotEqual(fingerprint(), original)
+                resource.write_text("original pseudo", encoding="utf-8")
+                self.assertEqual(fingerprint(), original)
+                executable.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+                self.assertNotEqual(fingerprint(), original)
+
+    def test_restart_checks_input_resources_and_executable_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            resources = root / "resources"
+            resources.mkdir()
+            pseudo = resources / "H.upf"
+            orbital = resources / "H.orb"
+            pseudo.write_text("pseudopotential\n", encoding="utf-8")
+            orbital.write_text("numerical orbital\n", encoding="utf-8")
+            template = root / "template"
+            (template / "INPUT").write_text(
+                f"INPUT_PARAMETERS\npseudo_dir {resources}\norbital_dir {resources}\n",
+                encoding="utf-8")
+            (template / "STRU").write_text(
+                "ATOMIC_SPECIES\nH 1 H.upf\nNUMERICAL_ORBITAL\nH.orb\n"
+                "LATTICE_CONSTANT\n1\nATOMIC_POSITIONS\nDirect\n", encoding="utf-8")
+            fde_workflow.run_workflow(spec_path)
+            checkpoint = work / "g0" / "reactant" / "checkpoint.json"
+            original_checkpoint = checkpoint.read_bytes()
+            with mock.patch.object(fde_workflow, "run_fragment_scf", side_effect=AssertionError("SCF rerun")):
+                fde_workflow.run_workflow(spec_path)
+            self.assertEqual(checkpoint.read_bytes(), original_checkpoint)
+
+            for path in (template / "INPUT", template / "STRU", pseudo, orbital,
+                         root / "seeds" / "reactant_F.fde_seed", root / "fake_abacus.py"):
+                with self.subTest(path=path.name):
+                    original = path.read_bytes()
+                    try:
+                        path.write_bytes(original + b"\n# changed in place\n")
+                        with self.assertRaisesRegex(fde_workflow.WorkflowError, "checkpoint inputs changed"):
+                            fde_workflow.run_workflow(spec_path)
+                        self.assertEqual(checkpoint.read_bytes(), original_checkpoint)
+                    finally:
+                        path.write_bytes(original)
+            specification = json.loads(spec_path.read_text(encoding="utf-8"))
+            specification["controls"]["scf_density_tolerance"] = 1e-9
+            spec_path.write_text(json.dumps(specification), encoding="utf-8")
+            with self.assertRaisesRegex(fde_workflow.WorkflowError, "checkpoint inputs changed"):
+                fde_workflow.run_workflow(spec_path)
+
+    def test_restart_rejects_legacy_and_damaged_completed_checkpoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work, spec_path = prepare_case(Path(directory))
+            fde_workflow.run_workflow(spec_path)
+            checkpoint_path = work / "g0" / "reactant" / "checkpoint.json"
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            legacy = dict(checkpoint)
+            del legacy["input_fingerprint"]
+            checkpoint_path.write_text(json.dumps(legacy), encoding="utf-8")
+            with self.assertRaisesRegex(fde_workflow.WorkflowError, "provenance is absent"):
+                fde_workflow.run_workflow(spec_path)
+            checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+            for key in ("determinant", "linearized_state"):
+                with self.subTest(artifact=key):
+                    path = Path(checkpoint[key])
+                    original = path.read_bytes()
+                    path.write_bytes(original + b"corrupted\n")
+                    with self.assertRaisesRegex(fde_workflow.WorkflowError, "checkpoint artifacts changed"):
+                        fde_workflow.run_workflow(spec_path)
+                    path.unlink()
+                    with self.assertRaisesRegex(fde_workflow.WorkflowError, "artifact is missing"):
+                        fde_workflow.run_workflow(spec_path)
+                    path.write_bytes(original)
+
+    def test_interrupted_finalization_keeps_previous_checkpoint_and_resumes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work, spec_path = prepare_case(Path(directory))
+            atomic_text = fde_workflow._atomic_text
+
+            def interrupt_linearized(path, value):
+                if path.suffix == ".fde_linearized_state":
+                    raise OSError("simulated final artifact write failure")
+                atomic_text(path, value)
+
+            with mock.patch.object(fde_workflow, "_atomic_text", side_effect=interrupt_linearized):
+                with self.assertRaisesRegex(OSError, "simulated final artifact"):
+                    fde_workflow.run_workflow(spec_path)
+            state_directory = work / "g0" / "reactant"
+            checkpoint_path = state_directory / "checkpoint.json"
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertFalse(checkpoint["converged"])
+            self.assertEqual(checkpoint["cycle"], 1)
+            self.assertTrue((state_directory / "cycle-001").is_dir())
+            specification = json.loads(spec_path.read_text(encoding="utf-8"))
+            original_spec = spec_path.read_bytes()
+            specification["geometries"][0]["coordinate_angstrom"] = 0.3
+            spec_path.write_text(json.dumps(specification), encoding="utf-8")
+            with self.assertRaisesRegex(fde_workflow.WorkflowError, "checkpoint inputs changed"):
+                fde_workflow.run_workflow(spec_path)
+            spec_path.write_bytes(original_spec)
+            fde_workflow.run_workflow(spec_path)
+            completed = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertTrue(completed["converged"])
+            self.assertEqual(completed["cycle"], 2)
+            self.assertTrue(Path(completed["linearized_state"]).is_file())
+            self.assertFalse((state_directory / "cycle-001").exists())
+
     def test_persistent_session_reuses_fixed_fragment_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

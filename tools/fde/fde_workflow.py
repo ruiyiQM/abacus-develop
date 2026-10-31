@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from array import array
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import math
 import os
@@ -1231,7 +1232,7 @@ def compose_state(state_label: str,
                                      + " ".join(format(value, ".17g")
                                                 for value in orbital["coefficients"]))
     determinant_lines.append("END")
-    determinant_path.write_text("\n".join(determinant_lines) + "\n", encoding="utf-8")
+    _atomic_text(determinant_path, "\n".join(determinant_lines) + "\n")
 
     matrix_size = dimension * dimension
     average_alpha = [sum(float(fragment["hamiltonian_alpha_ry"][index]) for fragment in fragments)
@@ -1246,7 +1247,7 @@ def compose_state(state_label: str,
                     + " ".join(format(value, ".17g") for value in average_alpha),
                     "HAMILTONIAN_BETA_RY " + str(matrix_size) + " "
                     + " ".join(format(value, ".17g") for value in average_beta), "END"]
-    linear_path.write_text("\n".join(linear_lines) + "\n", encoding="utf-8")
+    _atomic_text(linear_path, "\n".join(linear_lines) + "\n")
     return {"determinant": str(determinant_path.resolve()),
             "linearized_state": str(linear_path.resolve())}
 
@@ -1702,6 +1703,94 @@ def run_fragment_scf(
     }
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def checkpoint_input_fingerprint(spec: Mapping[str, object],
+                                 geometry: Mapping[str, object],
+                                 state: Mapping[str, object],
+                                 initial: Mapping[str, object],
+                                 state_directory: Path) -> str:
+    template = Path(geometry["template_directory"])
+    files = {path.resolve() for path in template.rglob("*") if path.is_file()}
+    files.update(Path(path).resolve() for path in initial.values())
+    files.add(Path(__file__).resolve())
+    for key in ("abacus_command", "session_command", "postprocess_command"):
+        command = spec.get(key, spec["abacus_command"])
+        executable = shutil.which(command[0])
+        if executable is None:
+            raise WorkflowError(f"cannot identify checkpoint executable: {command[0]}")
+        files.add(Path(executable).resolve())
+        for token in command[1:]:
+            executable = shutil.which(token)
+            if executable is not None:
+                files.add(Path(executable).resolve())
+            elif Path(token).is_file():
+                files.add(Path(token).resolve())
+
+    inputs = {}
+    for line in (template / "INPUT").read_text(encoding="utf-8").splitlines():
+        fields = line.split("#", 1)[0].split("//", 1)[0].split()
+        if len(fields) >= 2:
+            inputs[fields[0].lower()] = fields[1]
+    # Relative resource paths are resolved in the copied fragment job, as ABACUS does.
+    def resource_path(value: str, job: Path) -> Path:
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        copied = (job / path).resolve()
+        try:
+            return template / copied.relative_to(job.resolve())
+        except ValueError:
+            return copied
+
+    for fragment in spec["fragments"]:
+        job = state_directory / "cycle-001" / str(fragment["label"])
+        if "kpoint_file" in inputs:
+            files.add(resource_path(inputs["kpoint_file"], job).resolve())
+        stru = resource_path(inputs.get("stru_file", "STRU"), job)
+        if not stru.is_file():
+            continue
+        files.add(stru.resolve())
+        section = ""
+        for line in stru.read_text(encoding="utf-8").splitlines():
+            fields = line.split("#", 1)[0].split("//", 1)[0].split()
+            if not fields:
+                continue
+            if len(fields) == 1 and re.fullmatch(r"[A-Z_]+", fields[0]):
+                section = fields[0]
+            elif section == "ATOMIC_SPECIES" and len(fields) >= 3:
+                pseudo = Path(inputs.get("pseudo_dir", ".")) / fields[2]
+                files.add(resource_path(str(pseudo), job).resolve())
+            elif section == "NUMERICAL_ORBITAL":
+                orbital = Path(inputs.get("orbital_dir", ".")) / fields[0]
+                files.add(resource_path(str(orbital), job).resolve())
+    try:
+        hashes = {str(path): _file_sha256(path) for path in sorted(files)}
+    except OSError as error:
+        raise WorkflowError(f"cannot fingerprint checkpoint input: {error}") from error
+    payload = {"spec": spec, "geometry": geometry, "state": state, "files": hashes}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def checkpoint_artifact_hashes(checkpoint: Mapping[str, object]) -> Dict[str, str]:
+    paths = list(checkpoint["densities"].values()) + list(checkpoint["fragments"].values())
+    if checkpoint.get("converged"):
+        for key in ("determinant", "linearized_state"):
+            if key not in checkpoint:
+                raise WorkflowError(f"incomplete converged checkpoint: missing {key}")
+            paths.append(checkpoint[key])
+    try:
+        return {str(path): _file_sha256(Path(path)) for path in paths}
+    except OSError as error:
+        raise WorkflowError(f"checkpoint artifact is missing or unreadable: {error}") from error
+
+
 def _run_state(spec: Mapping[str, object],
                geometry: Mapping[str, object],
                state: Mapping[str, object],
@@ -1728,6 +1817,7 @@ def _run_state(spec: Mapping[str, object],
     if set(initial) != set(labels):
         raise WorkflowError(f"state {state['label']} requires one initial density per fragment")
     densities = {label: Path(initial[label]).resolve() for label in labels}
+    input_fingerprint = checkpoint_input_fingerprint(spec, geometry, state, initial, state_directory)
     start_cycle = 1
     previous_complete_energy = None
     previous_cycle_complete = False
@@ -1735,6 +1825,12 @@ def _run_state(spec: Mapping[str, object],
     history: List[Dict[str, object]] = []
     if checkpoint_path.exists():
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        if checkpoint.get("input_fingerprint") != input_fingerprint:
+            raise WorkflowError(
+                f"checkpoint inputs changed or provenance is absent: {checkpoint_path}; "
+                "use a new work_directory for the new calculation")
+        if checkpoint_artifact_hashes(checkpoint) != checkpoint.get("artifact_hashes"):
+            raise WorkflowError(f"checkpoint artifacts changed: {checkpoint_path}")
         if checkpoint.get("converged"):
             return checkpoint
         densities = {label: Path(checkpoint["densities"][label]) for label in labels}
@@ -1835,7 +1931,8 @@ def _run_state(spec: Mapping[str, object],
                         "strict_confirmations": strict_confirmations,
                         "inner_scf": cycle_scf})
         checkpoint: Dict[str, object] = {
-            "schema_version": 1, "geometry": geometry["label"], "state": state["label"],
+            "schema_version": 2, "geometry": geometry["label"], "state": state["label"],
+            "input_fingerprint": input_fingerprint,
             "cycle": cycle, "converged": converged, "density_rms": residual,
             "energy_ry": energy, "energy_change_ry": energy_change,
             "scf_mode": schedule["mode"],
@@ -1850,6 +1947,11 @@ def _run_state(spec: Mapping[str, object],
             "fragments": {label: str(path) for label, path in cycle_fragment_paths.items()},
             "history": history,
         }
+        if converged:
+            checkpoint.update(compose_state(
+                str(state["label"]), [cycle_fragment_paths[label] for label in labels],
+                float(energy), state_directory))
+        checkpoint["artifact_hashes"] = checkpoint_artifact_hashes(checkpoint)
         _atomic_json(checkpoint_path, checkpoint)
         write_state_performance(state_directory, history)
         outer_settings = controls.get("outer_mixing", {})
@@ -1859,11 +1961,6 @@ def _run_state(spec: Mapping[str, object],
         prune_completed_cycles(
             state_directory, cycle, max(retain_completed_cycles, outer_history))
         if converged:
-            composed = compose_state(str(state["label"]),
-                                     [cycle_fragment_paths[label] for label in labels],
-                                     float(energy), state_directory)
-            checkpoint.update(composed)
-            _atomic_json(checkpoint_path, checkpoint)
             return checkpoint
         previous_cycle_complete = strict_cycle_complete
         previous_complete_energy = energy if strict_cycle_complete else None

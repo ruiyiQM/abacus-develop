@@ -135,6 +135,34 @@ TEST_F(InputTest, NativeFdeInput)
                 "");
 }
 
+TEST_F(InputTest, NativeFdeRejectsForcesAndStress)
+{
+    ModuleIO::ReadInput readinput(0);
+    Parameter param;
+    auto task = find_label("fde_task", readinput.input_lists);
+    ASSERT_NE(task, readinput.input_lists.end());
+    Input_para& input = TestParameters::input(param);
+    input.calculation = "scf";
+    input.basis_type = "lcao";
+    input.nspin = 2;
+    input.dft_functional = "pbe";
+    for (const std::string& name : {"embedded_scf", "embedded_session", "diabatic_postprocess"})
+    {
+        input.fde_task = name;
+        input.cal_force = false;
+        input.cal_stress = false;
+        EXPECT_NO_THROW(task->second.check_value(task->second, param));
+        input.cal_force = true;
+        EXPECT_EXIT(task->second.check_value(task->second, param), ::testing::ExitedWithCode(1), "");
+        input.cal_force = false;
+        input.cal_stress = true;
+        EXPECT_EXIT(task->second.check_value(task->second, param), ::testing::ExitedWithCode(1), "");
+    }
+    input.fde_task = "none";
+    input.cal_force = true;
+    EXPECT_NO_THROW(task->second.check_value(task->second, param));
+}
+
 TEST_F(InputTest, NativeFdeMetaGgaCapability)
 {
     EXPECT_EQ(ModuleIO::classify_fde_xc_functional("PBE"),

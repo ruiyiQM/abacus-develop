@@ -111,6 +111,17 @@ AddTest(
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+  NAME MODULE_FDE_runtime_cli
+  COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fde_runtime_cli_test.py
+    $<TARGET_FILE:${ABACUS_BIN_NAME}>
+)
+set_tests_properties(MODULE_FDE_runtime_cli PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1"
+  TIMEOUT 30
+)
+
+add_test(
   NAME MODULE_FDE_workflow_serial
   COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tools/fde/test_fde_workflow_e2e.py -v

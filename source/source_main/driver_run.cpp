@@ -18,6 +18,7 @@
 #include <ATen/kernels/blas.h>
 #include <ATen/kernels/lapack.h>
 
+#include <exception>
 #include <iostream>
 #ifdef __MPI
 #include <mpi.h>
@@ -56,11 +57,18 @@ void Driver::driver_run()
 #endif
         if (world_rank == 0)
         {
-            const fde::DiabaticPostprocessResult result
-                = fde::DiabaticPostprocessor::run(input.fde_config);
-            std::cout << " FDE diabatic postprocess completed with "
-                      << result.adiabatic_solution.eigenvalues_ry.size()
-                      << " retained adiabatic roots." << std::endl;
+            try
+            {
+                const fde::DiabaticPostprocessResult result
+                    = fde::DiabaticPostprocessor::run(input.fde_config);
+                std::cout << " FDE diabatic postprocess completed with "
+                          << result.adiabatic_solution.eigenvalues_ry.size()
+                          << " retained adiabatic roots." << std::endl;
+            }
+            catch (const std::exception& error)
+            {
+                ModuleBase::WARNING_QUIT("Driver::diabatic_postprocess", error.what());
+            }
         }
         return;
 #else

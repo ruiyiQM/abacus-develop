@@ -152,6 +152,11 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
     {
         throw std::invalid_argument("FDE_CONFIG schema version must be 1");
     }
+    if (config.calculate_force)
+    {
+        throw std::invalid_argument(
+            "FDE analytic forces are not connected to the native runtime; CALCULATE_FORCE must be false");
+    }
     if (config.atom_count == 0 || config.fragments.size() < 2 || config.states.size() < 2)
     {
         throw std::invalid_argument("FDE_CONFIG requires atoms, at least two fragments, and at least two states");

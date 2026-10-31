@@ -90,7 +90,8 @@ void ReadInput::item_fde()
 * none: run an ordinary ABACUS calculation.
 * embedded_scf: run one subsystem-in-environment LCAO SCF job described by fde_config.
 * embedded_session: keep one fixed subsystem worker alive and accept RUN requests on standard input.
-* diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.)";
+* diabatic_postprocess: before UnitCell setup, assemble determinant overlaps, linearized couplings, and nonorthogonal adiabatic roots from fde_config.
+Native FDE tasks require cal_force=false and cal_stress=false; analytic forces and stress are not connected to this runtime.)";
         item.default_value = "none";
         item.unit = "";
         item.domain.set_choices({"none", "embedded_scf", "embedded_session", "diabatic_postprocess"});
@@ -122,6 +123,12 @@ void ReadInput::item_fde()
             if (task == "none")
             {
                 return;
+            }
+            if (para.input.cal_force || para.input.cal_stress)
+            {
+                ModuleBase::WARNING_QUIT(
+                    "ReadInput",
+                    "native FDE forces and stress are not supported; set cal_force and cal_stress to false");
             }
             if (para.input.fde_config.empty())
             {

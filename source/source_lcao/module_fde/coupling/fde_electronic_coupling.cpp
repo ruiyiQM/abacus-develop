@@ -149,7 +149,8 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
 std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
                                        const OccupiedSpinOrbitals& ket,
                                        const std::vector<double>& inverse_overlap,
-                                       const std::size_t ao_dimension)
+                                       const std::size_t ao_dimension,
+                                       const OccupiedOverlapPolicy& overlap_policy)
 {
     const std::size_t count
         = DeterminantArtifactIO::occupied_count(bra, ao_dimension);
@@ -163,6 +164,12 @@ std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
             {
                 for (std::size_t bra_orbital = 0; bra_orbital < count; ++bra_orbital)
                 {
+                    // The density contraction must use the same retained blocks as the overlap.
+                    if (!overlap_policy.retain(bra.source_fragment_labels[bra_orbital],
+                                               ket.source_fragment_labels[ket_orbital]))
+                    {
+                        continue;
+                    }
                     value += ket.coefficients[row + ket_orbital * ao_dimension]
                              * inverse_overlap[ket_orbital
                                                + bra_orbital * count]
@@ -301,9 +308,9 @@ DeterminantTransition ElectronicCoupling::transition_with_policy(
         throw std::runtime_error("FDE normalized determinant overlap is invalid");
     }
     result.density_matrix.alpha
-        = transition_density(bra.alpha, ket.alpha, alpha.inverse, dimension);
+        = transition_density(bra.alpha, ket.alpha, alpha.inverse, dimension, overlap_policy);
     result.density_matrix.beta
-        = transition_density(bra.beta, ket.beta, beta.inverse, dimension);
+        = transition_density(bra.beta, ket.beta, beta.inverse, dimension, overlap_policy);
     return result;
 }
 
