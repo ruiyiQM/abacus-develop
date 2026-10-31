@@ -7,6 +7,8 @@
 #include "prepare_unitcell.h"
 #include "source_base/parallel_grid.h"
 
+#include <cstdio>
+
 Magnetism::Magnetism()
 {
     this->tot_mag = 0.0;
@@ -97,12 +99,25 @@ TEST_F(RhoIOTest, Write)
     ucell->atoms[0].ncpp.zv = 4;
     Parallel_Grid pgrid(nx, ny, nz, nz, nrxx, nz, 1);
     ModuleIO::read_vdata_palgrid(pgrid, my_rank, ofs_running, "support/chg.cube", rho[0], ucell->nat);
-    ModuleIO::write_vdata_palgrid(pgrid, rho[0], 0, nspin, 0, "test_write_vdata_palgrid.cube", 0.461002, ucell, 11, 1, false, false, ofs_running, "charge density");
-    std::ifstream ifs1("test_write_vdata_palgrid.cube", std::ifstream::binary | std::ifstream::ate);
-    std::ifstream ifs2("support/chg.cube", std::ifstream::binary | std::ifstream::ate);
-    EXPECT_EQ(ifs1.tellg(), ifs2.tellg());
-    ifs1.close();
-    ifs2.close();
+    const std::string path = testing::TempDir() + "abacus_write_vdata.cube";
+    ModuleIO::write_vdata_palgrid(pgrid, rho[0], 0, nspin, 0, path, 0.461002, ucell, 11, 1, false, false, ofs_running, "charge density");
+    std::ifstream written(path);
+    std::string line;
+    const int header_lines = 6 + ucell->nat;
+    for (int i = 0; i < header_lines; ++i)
+    {
+        std::getline(written, line);
+    }
+    for (int i = 0; i < nrxx; ++i)
+    {
+        double value = 0.0;
+        written >> value;
+        const bool valid = !written.fail();
+        ASSERT_TRUE(valid);
+        EXPECT_DOUBLE_EQ(value, rho[0][i]);
+    }
+    written.close();
+    std::remove(path.c_str());
 }
 
 TEST_F(RhoIOTest, TrilinearInterpolate)
@@ -213,14 +228,57 @@ TEST_F(CubeIOTest, WriteCube)
 			dx, dy, dz, 
 			atom_type, atom_charge, atom_pos, data_read);
 
-	ModuleIO::write_cube("test_write.cube", 
+    const std::string path = testing::TempDir() + "abacus_write_cube.cube";
+    const std::vector<double> original_data = data_read;
+	ModuleIO::write_cube(path,
 			comment, natom, origin, 
 			nx_read, ny_read, nz_read, 
 			dx, dy, dz, atom_type, 
 			atom_charge, atom_pos, data_read, 11);
-    std::ifstream ifs1("test_write.cube", std::ifstream::binary | std::ifstream::ate);
-    std::ifstream ifs2("./support/chg.cube", std::ifstream::binary | std::ifstream::ate);
-    EXPECT_EQ(ifs1.tellg(), ifs2.tellg());
-    ifs1.close();
-    ifs2.close();
+    const bool read = ModuleIO::read_cube(path, comment, natom, origin,
+                                          nx_read, ny_read, nz_read, dx, dy, dz,
+                                          atom_type, atom_charge, atom_pos, data_read);
+    ASSERT_TRUE(read);
+    EXPECT_EQ(data_read, original_data);
+    std::remove(path.c_str());
+}
+
+TEST_F(CubeIOTest, PreservesGeometryAtLowDataPrecision)
+{
+    const std::string path = testing::TempDir() + "abacus_cube_geometry.cube";
+    const std::vector<std::string> comments = {"geometry round trip", "low data precision"};
+    const double side = 24.0 * 1.8897261254578281;
+    const int nx = 192;
+    const int ny = 1;
+    const int nz = 1;
+    const double step = side / nx;
+    const std::vector<double> initial_origin = {0.1234567890123456, 0.0, 0.0};
+    const std::vector<double> initial_dx = {step, 0.0, 0.0};
+    const std::vector<double> initial_dy = {0.0, side, 0.0};
+    const std::vector<double> initial_dz = {0.0, 0.0, side};
+    const std::vector<int> types = {1};
+    const std::vector<double> charges = {1.0};
+    const std::vector<std::vector<double>> positions = {{0.3333333333333333, 0.0, 0.0}};
+    const std::vector<double> values(nx, 1.0);
+    const int atom_count = 1;
+    const int data_precision = 2;
+    const int values_per_line = 6;
+    ModuleIO::write_cube(path, comments, atom_count, initial_origin, nx, ny, nz,
+                         initial_dx, initial_dy, initial_dz, types, charges,
+                         positions, values, data_precision, values_per_line);
+    const bool read = ModuleIO::read_cube(path, comment, natom, origin,
+                                          nx_read, ny_read, nz_read, dx, dy, dz,
+                                          atom_type, atom_charge, atom_pos, data_read);
+    ASSERT_TRUE(read);
+    EXPECT_DOUBLE_EQ(origin[0], initial_origin[0]);
+    EXPECT_DOUBLE_EQ(dx[0], step);
+    EXPECT_DOUBLE_EQ(dy[1], side);
+    EXPECT_DOUBLE_EQ(dz[2], side);
+    EXPECT_DOUBLE_EQ(atom_pos[0][0], positions[0][0]);
+    const double volume = nx_read * dx[0] * dy[1] * dz[2];
+    const double expected_volume = side * side * side;
+    const double tolerance = expected_volume * 1.0e-14;
+    EXPECT_NEAR(volume, expected_volume, tolerance);
+    EXPECT_EQ(data_read, values);
+    std::remove(path.c_str());
 }

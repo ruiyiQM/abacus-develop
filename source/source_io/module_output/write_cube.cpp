@@ -4,6 +4,7 @@
 #include "source_io/module_output/cube_io.h"
 
 #include <vector>
+#include <limits>
 
 #ifdef __MPI
 #include <mpi.h>
@@ -229,12 +230,12 @@ void ModuleIO::write_cube(const std::string& file,
         ofs << comment[i] << "\n";
     }
 
-    ofs << std::fixed;
-    ofs << std::setprecision(1); // as before
+    // Geometry determines grid volume independently of the data precision.
+    const int header_precision = std::numeric_limits<double>::max_digits10;
+    ofs << std::setprecision(header_precision);
 
     ofs << natom << " " << origin[0] << " " << origin[1] << " " << origin[2] << " \n";
 
-    ofs << std::setprecision(6); // as before
     ofs << nx << " " << dx[0] << " " << dx[1] << " " << dx[2] << "\n";
     ofs << ny << " " << dy[0] << " " << dy[1] << " " << dy[2] << "\n";
     ofs << nz << " " << dz[0] << " " << dz[1] << " " << dz[2] << "\n";

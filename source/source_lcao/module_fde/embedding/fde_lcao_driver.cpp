@@ -453,6 +453,20 @@ double dot(const double ax,
     return ax * bx + ay * by + az * bz;
 }
 
+void validate_cell_volume(const FrozenDensityArtifact& artifact,
+                          const UnitCell& unit_cell)
+{
+    const double difference = artifact.cell_volume_bohr3 - unit_cell.omega;
+    const double absolute_difference = std::fabs(difference);
+    const double scale = std::max(artifact.cell_volume_bohr3, unit_cell.omega);
+    const double tolerance = 1.0e-10 * scale;
+    if (absolute_difference > tolerance)
+    {
+        throw std::invalid_argument(
+            "FDE density artifact cell volume does not match the ABACUS unit cell");
+    }
+}
+
 UniformGrid make_grid(const FrozenDensityArtifact& artifact,
                       const ModulePW::PW_Basis& basis,
                       const UnitCell& unit_cell)
@@ -506,6 +520,7 @@ FdeLcaoDriver::FdeLcaoDriver(
     const int nspin,
     const bool use_gpu,
     const double electron_count,
+    const double cell_volume_bohr3,
     const int active_alpha_electrons,
     const int active_beta_electrons,
     const FrozenDensityArtifact& active_initial,
@@ -519,6 +534,7 @@ FdeLcaoDriver::FdeLcaoDriver(
       nspin_(nspin),
       use_gpu_(use_gpu),
       electron_count_(electron_count),
+      cell_volume_bohr3_(cell_volume_bohr3),
       active_alpha_electrons_(active_alpha_electrons),
       active_beta_electrons_(active_beta_electrons),
       active_initial_(active_initial),
@@ -669,6 +685,7 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
                           config.fragment_xc,
                           config.electron_tolerance,
                           orbitals);
+    validate_cell_volume(active_initial, unit_cell);
 
     return std::unique_ptr<FdeLcaoDriver>(
         new FdeLcaoDriver(config,
@@ -680,6 +697,7 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
                           input.nspin,
                           input.device == "gpu",
                           input.nelec,
+                          unit_cell.omega,
                           population.alpha,
                           population.beta,
                           active_initial,
@@ -770,6 +788,7 @@ void FdeLcaoDriver::reload_session_config(
                           requested.fragment_xc,
                           requested.electron_tolerance,
                           orbitals);
+    validate_cell_volume(active, unit_cell);
 
     std::vector<double> active_alpha_local;
     std::vector<double> active_beta_local;
@@ -1171,7 +1190,7 @@ void FdeLcaoDriver::solve_projected(
                  density_matrix,
                  charge,
                  nspin_,
-                 active_initial_.cell_volume_bohr3,
+                 cell_volume_bohr3_,
                  false);
     // ABACUS' general LCAO path normalizes only the total density.  The
     // projected alpha and beta quadratures can have different grid errors, so
@@ -1187,7 +1206,7 @@ void FdeLcaoDriver::solve_projected(
                                static_cast<std::size_t>(charge.nrxx),
                                active_alpha_electrons_,
                                active_beta_electrons_,
-                               active_initial_.cell_volume_bohr3,
+                               cell_volume_bohr3_,
                                5.0e-2,
                                *density_basis_);
     }
@@ -1233,7 +1252,7 @@ void FdeLcaoDriver::solve_projected(
                  density_matrix,
                  charge,
                  nspin_,
-                 active_initial_.cell_volume_bohr3,
+                 cell_volume_bohr3_,
                  false);
     if (nspin_ == 2)
     {
@@ -1242,7 +1261,7 @@ void FdeLcaoDriver::solve_projected(
                                static_cast<std::size_t>(charge.nrxx),
                                active_alpha_electrons_,
                                active_beta_electrons_,
-                               active_initial_.cell_volume_bohr3,
+                               cell_volume_bohr3_,
                                5.0e-2,
                                *density_basis_);
     }
@@ -1589,7 +1608,7 @@ void FdeLcaoDriver::write_scf_artifacts(
                                            local_grid_size,
                                            active_alpha_electrons_,
                                            active_beta_electrons_,
-                                           active_initial_.cell_volume_bohr3,
+                                           cell_volume_bohr3_,
                                            *density_basis_);
         SpinDensity active_density;
         active_density.alpha_bohr3 = local_alpha;
@@ -1681,6 +1700,7 @@ void FdeLcaoDriver::write_scf_artifacts(
     {
         const ScopedFdeTimer timer("write_density_checkpoint");
         density = active_initial_;
+        density.cell_volume_bohr3 = cell_volume_bohr3_;
         density.schema_version = 2;
         density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
         density.scf_converged = status.converged;
@@ -1857,7 +1877,7 @@ void FdeLcaoDriver::write_scf_artifacts(
                                            local_grid_size,
                                            active_alpha_electrons_,
                                            active_beta_electrons_,
-                                           active_initial_.cell_volume_bohr3,
+                                           cell_volume_bohr3_,
                                            *density_basis_);
         SpinDensity active_density;
         active_density.alpha_bohr3 = local_alpha;
@@ -1885,6 +1905,7 @@ void FdeLcaoDriver::write_scf_artifacts(
     {
         const ScopedFdeTimer timer("write_density_checkpoint");
         density = active_initial_;
+        density.cell_volume_bohr3 = cell_volume_bohr3_;
         density.schema_version = 2;
         density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
         density.scf_converged = status.converged;

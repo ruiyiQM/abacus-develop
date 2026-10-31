@@ -141,6 +141,7 @@ class FdeLcaoDriver
                   int nspin,
                   bool use_gpu,
                   double electron_count,
+                  double cell_volume_bohr3,
                   int active_alpha_electrons,
                   int active_beta_electrons,
                   const FrozenDensityArtifact& active_initial,
@@ -155,6 +156,7 @@ class FdeLcaoDriver
     int nspin_;
     bool use_gpu_;
     double electron_count_;
+    const double cell_volume_bohr3_;
     int active_alpha_electrons_;
     int active_beta_electrons_;
     FrozenDensityArtifact active_initial_;

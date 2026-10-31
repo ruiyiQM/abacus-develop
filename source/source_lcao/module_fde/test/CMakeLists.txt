@@ -121,6 +121,20 @@ set_tests_properties(MODULE_FDE_runtime_cli PROPERTIES
   TIMEOUT 30
 )
 
+if(ENABLE_LIBXC)
+  add_test(
+    NAME MODULE_FDE_cell_volume
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_cell_volume.py
+      $<TARGET_FILE:${ABACUS_BIN_NAME}>
+      ${CMAKE_SOURCE_DIR}
+  )
+  set_tests_properties(MODULE_FDE_cell_volume PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    TIMEOUT 100
+  )
+endif()
+
 add_test(
   NAME MODULE_FDE_workflow_serial
   COMMAND ${Python3_EXECUTABLE}
