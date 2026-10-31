@@ -1,6 +1,7 @@
 #include "source_lcao/module_fde/io/fde_density_artifact.h"
 
 #include <algorithm>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -507,8 +508,12 @@ void DensityArtifactIO::validate_compatible_pair(const FrozenDensityArtifact& fi
     require_equal(first.orbital_fingerprint, second.orbital_fingerprint, "orbital bases");
     require_equal(first.xc_functional, second.xc_functional, "XC functionals");
     require_equal(first.kinetic_functional, second.kinetic_functional, "kinetic functionals");
+    const double volume_difference = first.cell_volume_bohr3 - second.cell_volume_bohr3;
+    const double absolute_volume_difference = std::fabs(volume_difference);
+    const double volume_scale = std::max(first.cell_volume_bohr3, second.cell_volume_bohr3);
+    const double volume_tolerance = 1.0e-10 * volume_scale;
     if (first.grid_x != second.grid_x || first.grid_y != second.grid_y
-        || first.grid_z != second.grid_z || first.cell_volume_bohr3 != second.cell_volume_bohr3)
+        || first.grid_z != second.grid_z || absolute_volume_difference > volume_tolerance)
     {
         throw std::invalid_argument("FDE density artifacts have incompatible real-space grids");
     }

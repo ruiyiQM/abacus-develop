@@ -62,6 +62,28 @@ def main():
                 if not path.exists():
                     path = root / "result.partial.fde_density"
                 assert read_density(path)["cell_volume"] == 4096.0
+                config = root / "FDE_CONFIG"
+                config.write_text(config.read_text().replace("ACTIVE_DENSITY A.fde_seed",
+                                                          f"ACTIVE_DENSITY {path}")
+                                  .replace("OUTPUT_PREFIX result", "OUTPUT_PREFIX repeat"), encoding="utf-8")
+                repeated = subprocess.run([str(executable)], cwd=root, text=True,
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+                assert repeated.returncode == 0, repeated.stdout
+
+        root = Path(directory) / "matching"
+        input_path = root / "INPUT"
+        input_path.write_text(input_path.read_text().replace("embedded_scf", "embedded_session"), encoding="utf-8")
+        config = root / "FDE_CONFIG"
+        bad = root / "FDE_CONFIG_BAD"
+        bad.write_text(config.read_text().replace("FROZEN_DENSITY B B.fde_seed",
+                                                 "FROZEN_DENSITY B ../rounded/B.fde_seed")
+                       .replace("ACTIVE_DENSITY " + str(root / "result.partial.fde_density"),
+                                "ACTIVE_DENSITY ../rounded/A.fde_seed"), encoding="utf-8")
+        result = subprocess.run([str(executable)], cwd=root,
+                                input=f"RUN valid {config}\nRUN invalid {bad}\nSTOP\n", text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+        assert "FDE_SESSION_DONE valid " in result.stdout, result.stdout
+        assert "FDE_SESSION_ERROR invalid " in result.stdout and diagnostic in result.stdout, result.stdout
     print("Native FDE rejects mismatched volumes and exports the actual unit-cell volume.")
 
 

@@ -92,6 +92,30 @@ TEST(FdeDensityArtifact, ValidatesCompatibleFragmentPairs)
                  std::invalid_argument);
 }
 
+TEST(FdeDensityArtifact, AllowsVolumeRoundoffButRejectsDifferentCells)
+{
+    const fde::FrozenDensityArtifact first = artifact("A");
+    fde::FrozenDensityArtifact second = artifact("B");
+    const double roundoff_scale = 1.0 + 1.0e-12;
+    second.cell_volume_bohr3 *= roundoff_scale;
+    for (std::size_t point = 0; point < second.rho_alpha_bohr3.size(); ++point)
+    {
+        second.rho_alpha_bohr3[point] /= roundoff_scale;
+        second.rho_beta_bohr3[point] /= roundoff_scale;
+    }
+    EXPECT_NO_THROW(fde::DensityArtifactIO::validate_compatible_pair(first, second, 1.0e-12));
+
+    const double different_cell_scale = 1.0 + 1.0e-6;
+    second.cell_volume_bohr3 *= different_cell_scale;
+    for (std::size_t point = 0; point < second.rho_alpha_bohr3.size(); ++point)
+    {
+        second.rho_alpha_bohr3[point] /= different_cell_scale;
+        second.rho_beta_bohr3[point] /= different_cell_scale;
+    }
+    EXPECT_THROW(fde::DensityArtifactIO::validate_compatible_pair(first, second, 1.0e-12),
+                 std::invalid_argument);
+}
+
 TEST(FdeDensityArtifact, RejectsIncorrectElectronIntegrals)
 {
     fde::FrozenDensityArtifact invalid = artifact("A");
