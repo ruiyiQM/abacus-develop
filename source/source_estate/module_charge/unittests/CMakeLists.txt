@@ -19,6 +19,27 @@ AddTest(
   KEEP_FEATURE_DEFINITIONS __MPI
 )
 
+add_test(NAME MODULE_CHARGE_rhog_io_failure_2np
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:MODULE_CHARGE_rhog_io>
+          ${MPIEXEC_POSTFLAGS} --gtest_filter=ReadRhogTest.WriteFileFail:ReadRhogTest.WriteAppendFail:ReadRhogTest.WriteFlushFail
+)
+set_tests_properties(MODULE_CHARGE_rhog_io_failure_2np PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+  PROCESSORS 2
+  TIMEOUT 30
+)
+add_test(NAME MODULE_CHARGE_rhog_io_roundtrip_2np
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:MODULE_CHARGE_rhog_io>
+          ${MPIEXEC_POSTFLAGS} --gtest_filter=ReadRhogTest.WriteRoundTripNspin2
+)
+set_tests_properties(MODULE_CHARGE_rhog_io_roundtrip_2np PROPERTIES
+  ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+  PROCESSORS 2
+  TIMEOUT 30
+)
+
 AddTest(
   TARGET MODULE_CHARGE_charge
   LIBS parameter planewave_serial base device cell_info

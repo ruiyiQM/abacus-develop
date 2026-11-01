@@ -17,6 +17,28 @@ inline void warn(std::ostream* os, const Parallel::ParaWorld& pw_world, const st
         *os << " " << file << "  warning : " << desc << std::endl;
     }
 }
+
+bool finish_rhog_write(std::ofstream& output,
+                       const std::string& path,
+                       const int writer,
+                       const Parallel::ParaWorld& pw_world,
+                       std::ostream* warning)
+{
+    bool failed = false;
+    if (pw_world.rank() == writer)
+    {
+        output.close();
+        failed = output.fail();
+    }
+    // Every rank must leave the write phase together, including on I/O errors.
+    Parallel::bcast_bool(failed, pw_world, writer);
+    if (failed)
+    {
+        const std::string message = "File I/O failure: cannot write file " + path;
+        warn(warning, pw_world, "module_charge::write_rhog", message);
+    }
+    return !failed;
+}
 } // namespace
 
 void module_charge::write_density_restart(Charge& charge,
@@ -294,11 +316,6 @@ bool module_charge::write_rhog(const std::string& fchg,
     if (irank == 0)
     {
         ofs.open(fchg, std::ios::binary);
-        if (!ofs)
-        {
-            warn(os_warning, pw_world, "module_charge::write_rhog", "File I/O failure: cannot open file " + fchg);
-            return false;
-        }
         ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
         ofs.write(reinterpret_cast<char*>(&gam), sizeof(gam));
         ofs.write(reinterpret_cast<char*>(&ngm_g), sizeof(ngm_g));
@@ -313,10 +330,11 @@ bool module_charge::write_rhog(const std::string& fchg,
             ofs.write(reinterpret_cast<char*>(&b[i]), sizeof(b[i]));
         }
         ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
-        ofs.close();
     }
-    Parallel::barrier(pw_world);
-    Parallel::barrier(pw_world);
+    if (!finish_rhog_write(ofs, fchg, 0, pw_world, os_warning))
+    {
+        return false;
+    }
 
     // write the G-vectors in Miller indices
     size = 3 * ngm_g;
@@ -324,9 +342,11 @@ bool module_charge::write_rhog(const std::string& fchg,
     {
         ofs.open(fchg, std::ios::binary | std::ios::app);
         ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
-        ofs.close();
     }
-    Parallel::barrier(pw_world);
+    if (!finish_rhog_write(ofs, fchg, 0, pw_world, os_warning))
+    {
+        return false;
+    }
 
     for (int i = 0; i < nrank; ++i)
     {
@@ -341,18 +361,22 @@ bool module_charge::write_rhog(const std::string& fchg,
                 ofs.write(reinterpret_cast<char*>(&miller[1]), sizeof(miller[1]));
                 ofs.write(reinterpret_cast<char*>(&miller[2]), sizeof(miller[2]));
             }
-            ofs.close();
         }
-        Parallel::barrier(pw_world);
+        if (!finish_rhog_write(ofs, fchg, i, pw_world, os_warning))
+        {
+            return false;
+        }
     }
 
     if (irank == 0)
     {
         ofs.open(fchg, std::ios::binary | std::ios::app);
         ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
-        ofs.close();
     }
-    Parallel::barrier(pw_world);
+    if (!finish_rhog_write(ofs, fchg, 0, pw_world, os_warning))
+    {
+        return false;
+    }
 
     // write the rho(G) values
     std::complex<double> sum_check;
@@ -363,9 +387,11 @@ bool module_charge::write_rhog(const std::string& fchg,
         {
             ofs.open(fchg, std::ios::binary | std::ios::app);
             ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
-            ofs.close();
         }
-        Parallel::barrier(pw_world);
+        if (!finish_rhog_write(ofs, fchg, 0, pw_world, os_warning))
+        {
+            return false;
+        }
 
         for (int i = 0; i < nrank; ++i)
         {
@@ -378,18 +404,22 @@ bool module_charge::write_rhog(const std::string& fchg,
                     sum_check += rhog[ispin][ig];
                     ofs.write(reinterpret_cast<char*>(&rhog[ispin][ig]), sizeof(rhog[ispin][ig]));
                 }
-                ofs.close();
             }
-            Parallel::barrier(pw_world);
+            if (!finish_rhog_write(ofs, fchg, i, pw_world, os_warning))
+            {
+                return false;
+            }
         }
 
         if (irank == 0)
         {
             ofs.open(fchg, std::ios::binary | std::ios::app);
             ofs.write(reinterpret_cast<char*>(&size), sizeof(size));
-            ofs.close();
         }
-        Parallel::barrier(pw_world);
+        if (!finish_rhog_write(ofs, fchg, 0, pw_world, os_warning))
+        {
+            return false;
+        }
     }
     return true;
 }

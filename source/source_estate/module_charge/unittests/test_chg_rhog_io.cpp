@@ -4,6 +4,7 @@
 #include "source_base/module_parallel/para_world.h"
 #include "source_base/module_parallel/para_tag.h"
 #include "source_base/module_parallel/para_bridge.h"
+#include "source_base/module_parallel/para_mpi_func.h"
 #ifdef __MPI
 #include "source_basis/module_pw/test/test_tool.h"
 #include "mpi.h"
@@ -13,6 +14,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unistd.h>
 
 /**
  * - Tested Functions:
@@ -347,15 +349,57 @@ TEST_F(ReadRhogTest, WriteFileFail)
     EXPECT_FALSE(result);
 }
 
+TEST_F(ReadRhogTest, WriteAppendFail)
+{
+    if (pw_world.size() < 2)
+    {
+        GTEST_SKIP() << "requires a non-root writer";
+    }
+    setup_pw_basis();
+    fill_rhog(1);
+    const std::string scratch = testing::TempDir();
+    std::string path = scratch;
+    if (pw_world.rank() == 0)
+    {
+        const std::string pid = std::to_string(getpid());
+        path += "/abacus-rhog-append-" + pid + ".dat";
+    }
+    const ModuleBase::Matrix3 lattice = latvec();
+    std::ostringstream warning;
+    const bool result = module_charge::write_rhog(path, rhopw.gamma_only, &rhopw, 1, lattice, rhog.data(), pw_world, &warning);
+    EXPECT_FALSE(result);
+    if (pw_world.rank() == 0)
+    {
+        EXPECT_NE(warning.str().find(scratch), std::string::npos);
+        std::remove(path.c_str());
+    }
+}
+
+TEST_F(ReadRhogTest, WriteFlushFail)
+{
+    if (access("/dev/full", W_OK) != 0)
+    {
+        GTEST_SKIP() << "requires /dev/full";
+    }
+    setup_pw_basis();
+    fill_rhog(1);
+    const ModuleBase::Matrix3 lattice = latvec();
+    const bool result = module_charge::write_rhog("/dev/full", rhopw.gamma_only, &rhopw, 1, lattice, rhog.data(), pw_world, nullptr);
+    EXPECT_FALSE(result);
+}
+
 // Test write_rhog with nspin=2, round-trip both channels
 TEST_F(ReadRhogTest, WriteRoundTripNspin2)
 {
     setup_pw_basis();
     fill_rhog(2);
 
-    std::string tmpfile = "test_rhog_roundtrip_nspin2.dat";
+    const std::string pid = std::to_string(getpid());
+    std::string tmpfile = testing::TempDir() + "/abacus-rhog-nspin2-" + pid + ".dat";
+    Parallel::bcast_string(tmpfile, pw_world);
+    const ModuleBase::Matrix3 lattice = latvec();
 
-    bool write_result = module_charge::write_rhog(tmpfile, rhopw.gamma_only, &rhopw, 2, latvec(), rhog.data(), pw_world, nullptr);
+    bool write_result = module_charge::write_rhog(tmpfile, rhopw.gamma_only, &rhopw, 2, lattice, rhog.data(), pw_world, nullptr);
     EXPECT_TRUE(write_result);
 
     std::vector<std::vector<std::complex<double>>> rhog_read_data(2, std::vector<std::complex<double>>(rhopw.npw));
@@ -379,7 +423,11 @@ TEST_F(ReadRhogTest, WriteRoundTripNspin2)
     }
     EXPECT_EQ(diff_count, 0) << diff_count << " planewave values differ after nspin=2 round-trip";
 
-    std::remove(tmpfile.c_str());
+    Parallel::barrier(pw_world);
+    if (pw_world.rank() == 0)
+    {
+        std::remove(tmpfile.c_str());
+    }
 }
 
 // Test write_rhog with nspin=4, round-trip all 4 channels
