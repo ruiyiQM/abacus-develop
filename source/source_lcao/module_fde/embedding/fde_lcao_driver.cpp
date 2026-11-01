@@ -15,6 +15,7 @@
 #include "source_basis/module_pw/pw_basis.h"
 #include "source_base/module_external/scalapack_connector.h"
 #include "source_base/timer.h"
+#include "source_base/module_parallel/para_mpi_func.h"
 #include "source_cell/unitcell.h"
 #include "source_cell/klist.h"
 #include "source_estate/elecstate.h"
@@ -1519,6 +1520,34 @@ FdeKPointBandArtifact make_kpoint_band_artifact(
     return artifact;
 }
 
+template <typename Writer>
+void write_root_artifacts(const Parallel_Orbitals& orbitals, const Writer& writer)
+{
+#ifdef __MPI
+    const Parallel::ParaWorld world = Parallel::ParaWorld::make_mpi("fde_artifacts", orbitals.comm());
+#else
+    (void)orbitals;
+    const Parallel::ParaWorld world = Parallel::ParaWorld::serial("fde_artifacts");
+#endif
+    std::string error;
+    if (world.rank() == 0)
+    {
+        try
+        {
+            writer();
+        }
+        catch (const std::exception& failure)
+        {
+            error = failure.what();
+        }
+    }
+    Parallel::bcast_string(error, world);
+    if (!error.empty())
+    {
+        throw std::runtime_error(error);
+    }
+}
+
 void close_artifact(std::ofstream& output,
                     const std::string& path,
                     const char* description)
@@ -1688,127 +1717,124 @@ void FdeLcaoDriver::write_scf_artifacts(
         }
     }
 
-    if (rank != 0)
-    {
-        return;
-    }
-
-    FrozenDensityArtifact density;
-    const std::string density_path
-        = config_.output_prefix
-          + (status.converged ? ".fde_density" : ".partial.fde_density");
-    {
-        const ScopedFdeTimer timer("write_density_checkpoint");
-        density = active_initial_;
-        density.cell_volume_bohr3 = cell_volume_bohr3_;
-        density.schema_version = 2;
-        density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-        density.scf_converged = status.converged;
-        density.scf_iterations = status.iterations;
-        density.scf_density_residual = status.density_residual;
-        density.kinetic_functional
-            = kinetic_functional_name(config_.kinetic_functional);
-        density.xc_functional = config_.fragment_xc;
-        density.rho_alpha_bohr3.swap(global_alpha);
-        density.rho_beta_bohr3.swap(global_beta);
-        std::ofstream density_output(density_path.c_str(), std::ios::binary);
-        if (!density_output)
+    write_root_artifacts(orbitals, [&]() {
+        FrozenDensityArtifact density;
+        const std::string density_path
+            = config_.output_prefix
+              + (status.converged ? ".fde_density" : ".partial.fde_density");
         {
-            throw std::runtime_error(
-                "Cannot create FDE density artifact: " + density_path);
+            const ScopedFdeTimer timer("write_density_checkpoint");
+            density = active_initial_;
+            density.cell_volume_bohr3 = cell_volume_bohr3_;
+            density.schema_version = 2;
+            density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+            density.scf_converged = status.converged;
+            density.scf_iterations = status.iterations;
+            density.scf_density_residual = status.density_residual;
+            density.kinetic_functional
+                = kinetic_functional_name(config_.kinetic_functional);
+            density.xc_functional = config_.fragment_xc;
+            density.rho_alpha_bohr3.swap(global_alpha);
+            density.rho_beta_bohr3.swap(global_beta);
+            std::ofstream density_output(density_path.c_str(), std::ios::binary);
+            if (!density_output)
+            {
+                throw std::runtime_error(
+                    "Cannot create FDE density artifact: " + density_path);
+            }
+            DensityArtifactIO::write_binary(density_output, density);
+            close_artifact(density_output, density_path, "density");
         }
-        DensityArtifactIO::write_binary(density_output, density);
-        close_artifact(density_output, density_path, "density");
-    }
 
-    // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
-    // valid inputs to diabatic postprocessing.  Persist only the normalized
-    // density checkpoint until the embedded SCF has genuinely converged.
-    if (!status.converged)
-    {
-        return;
-    }
-
-    {
-        const ScopedFdeTimer timer("write_kpoint_bands");
-        const FdeKPointBandArtifact bands
-            = make_kpoint_band_artifact(electronic_state,
-                                        kpoints,
-                                        density,
-                                        config_.active_state,
-                                        config_.active_fragment,
-                                        full_ao_dimension_,
-                                        global_band_count,
-                                        nspin_);
-        FdeKPointBandArtifactIO::validate(
-            bands,
-            std::max(config_.symmetry_tolerance, 1.0e-12));
-        const std::string band_path = config_.output_prefix + ".fde_kbands";
-        std::ofstream band_output(band_path.c_str());
-        if (!band_output)
+        // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
+        // valid inputs to diabatic postprocessing.  Persist only the normalized
+        // density checkpoint until the embedded SCF has genuinely converged.
+        if (!status.converged)
         {
-            throw std::runtime_error(
-                "Cannot create FDE k-point band artifact: " + band_path);
+            return;
         }
-        FdeKPointBandArtifactIO::write(
-            band_output,
-            bands,
-            std::max(config_.symmetry_tolerance, 1.0e-12));
-        close_artifact(band_output, band_path, "k-point band");
-    }
 
-    {
-        const ScopedFdeTimer timer("write_fragment_artifact");
-        FragmentScfArtifact fragment;
-        fragment.schema_version = 1;
-        fragment.state_label = config_.active_state;
-        fragment.fragment_label = config_.active_fragment;
-        fragment.geometry_fingerprint = density.geometry_fingerprint;
-        fragment.orbital_fingerprint = density.orbital_fingerprint;
-        fragment.density_path = density_path;
-        fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
-        fragment.scf_converged = true;
-        fragment.ao_dimension = full_ao_dimension_;
-        fragment.active_orbitals = active_orbitals_;
-        append_occupied_spin(global_wavefunctions[0],
-                             electronic_state,
-                             spin_kpoint[0],
-                             active_alpha_electrons_,
-                             full_ao_dimension_,
-                             global_band_count,
-                             config_.active_fragment,
-                             fragment.alpha);
-        append_occupied_spin(global_wavefunctions[1],
-                             electronic_state,
-                             spin_kpoint[1],
-                             active_beta_electrons_,
-                             full_ao_dimension_,
-                             global_band_count,
-                             config_.active_fragment,
-                             fragment.beta);
-        fragment.ao_overlap.swap(gathered_overlap);
-        fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
-        fragment.hamiltonian_beta_ry.swap(gathered_hamiltonian[1]);
-        fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
-        fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
-        fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
-        fragment.nonadditive_kinetic_energy_ry
-            = embedding.nonadditive_kinetic_energy_ry;
-        fragment.nonadditive_xc_energy_ry = embedding.nonadditive_xc_energy_ry;
-
-        const std::string fragment_path
-            = config_.output_prefix + ".fde_fragment";
-        std::ofstream fragment_output(fragment_path.c_str());
-        if (!fragment_output)
         {
-            throw std::runtime_error(
-                "Cannot create FDE fragment SCF artifact: " + fragment_path);
+            const ScopedFdeTimer timer("write_kpoint_bands");
+            const FdeKPointBandArtifact bands
+                = make_kpoint_band_artifact(electronic_state,
+                                            kpoints,
+                                            density,
+                                            config_.active_state,
+                                            config_.active_fragment,
+                                            full_ao_dimension_,
+                                            global_band_count,
+                                            nspin_);
+            FdeKPointBandArtifactIO::validate(
+                bands,
+                std::max(config_.symmetry_tolerance, 1.0e-12));
+            const std::string band_path = config_.output_prefix + ".fde_kbands";
+            std::ofstream band_output(band_path.c_str());
+            if (!band_output)
+            {
+                throw std::runtime_error(
+                    "Cannot create FDE k-point band artifact: " + band_path);
+            }
+            FdeKPointBandArtifactIO::write(
+                band_output,
+                bands,
+                std::max(config_.symmetry_tolerance, 1.0e-12));
+            close_artifact(band_output, band_path, "k-point band");
         }
-        FragmentScfArtifactIO::write(fragment_output,
-                                     fragment,
-                                     config_.symmetry_tolerance);
-        close_artifact(fragment_output, fragment_path, "fragment SCF");
-    }
+
+        {
+            const ScopedFdeTimer timer("write_fragment_artifact");
+            FragmentScfArtifact fragment;
+            fragment.schema_version = 1;
+            fragment.state_label = config_.active_state;
+            fragment.fragment_label = config_.active_fragment;
+            fragment.geometry_fingerprint = density.geometry_fingerprint;
+            fragment.orbital_fingerprint = density.orbital_fingerprint;
+            fragment.density_path = density_path;
+            fragment.freeze_thaw_cycle = density.freeze_thaw_cycle;
+            fragment.scf_converged = true;
+            fragment.ao_dimension = full_ao_dimension_;
+            fragment.active_orbitals = active_orbitals_;
+            append_occupied_spin(global_wavefunctions[0],
+                                 electronic_state,
+                                 spin_kpoint[0],
+                                 active_alpha_electrons_,
+                                 full_ao_dimension_,
+                                 global_band_count,
+                                 config_.active_fragment,
+                                 fragment.alpha);
+            append_occupied_spin(global_wavefunctions[1],
+                                 electronic_state,
+                                 spin_kpoint[1],
+                                 active_beta_electrons_,
+                                 full_ao_dimension_,
+                                 global_band_count,
+                                 config_.active_fragment,
+                                 fragment.beta);
+            fragment.ao_overlap.swap(gathered_overlap);
+            fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
+            fragment.hamiltonian_beta_ry.swap(gathered_hamiltonian[1]);
+            fragment.subsystem_total_energy_ry = electronic_state.f_en.etot;
+            fragment.ion_ion_energy_ry = electronic_state.f_en.ewald_energy;
+            fragment.hartree_cross_energy_ry = embedding.hartree_cross_energy_ry;
+            fragment.nonadditive_kinetic_energy_ry
+                = embedding.nonadditive_kinetic_energy_ry;
+            fragment.nonadditive_xc_energy_ry = embedding.nonadditive_xc_energy_ry;
+
+            const std::string fragment_path
+                = config_.output_prefix + ".fde_fragment";
+            std::ofstream fragment_output(fragment_path.c_str());
+            if (!fragment_output)
+            {
+                throw std::runtime_error(
+                    "Cannot create FDE fragment SCF artifact: " + fragment_path);
+            }
+            FragmentScfArtifactIO::write(fragment_output,
+                                         fragment,
+                                         config_.symmetry_tolerance);
+            close_artifact(fragment_output, fragment_path, "fragment SCF");
+        }
+    });
 }
 
 void FdeLcaoDriver::write_scf_artifacts(
@@ -1838,7 +1864,6 @@ void FdeLcaoDriver::write_scf_artifacts(
         throw std::runtime_error("FDE k-point SCF artifact status is invalid");
     }
     validate_parallel_layout(*density_basis_, orbitals);
-    const int rank = ao_rank(orbitals);
 #ifdef __MPI
     const int global_band_count = orbitals.get_wfc_global_nbands();
 #else
@@ -1893,65 +1918,62 @@ void FdeLcaoDriver::write_scf_artifacts(
         global_beta = DensityGridPartition::gather_to_root(
             local_beta.data(), *density_basis_);
     }
-    if (rank != 0)
-    {
-        return;
-    }
+    write_root_artifacts(orbitals, [&]() {
+        FrozenDensityArtifact density;
+        const std::string density_path
+            = config_.output_prefix
+              + (status.converged ? ".fde_density" : ".partial.fde_density");
+        {
+            const ScopedFdeTimer timer("write_density_checkpoint");
+            density = active_initial_;
+            density.cell_volume_bohr3 = cell_volume_bohr3_;
+            density.schema_version = 2;
+            density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
+            density.scf_converged = status.converged;
+            density.scf_iterations = status.iterations;
+            density.scf_density_residual = status.density_residual;
+            density.rho_alpha_bohr3.swap(global_alpha);
+            density.rho_beta_bohr3.swap(global_beta);
+            std::ofstream density_output(density_path.c_str(), std::ios::binary);
+            if (!density_output)
+            {
+                throw std::runtime_error(
+                    "Cannot create FDE density artifact: " + density_path);
+            }
+            DensityArtifactIO::write_binary(density_output, density);
+            close_artifact(density_output, density_path, "density");
+        }
+        if (!status.converged)
+        {
+            return;
+        }
 
-    FrozenDensityArtifact density;
-    const std::string density_path
-        = config_.output_prefix
-          + (status.converged ? ".fde_density" : ".partial.fde_density");
-    {
-        const ScopedFdeTimer timer("write_density_checkpoint");
-        density = active_initial_;
-        density.cell_volume_bohr3 = cell_volume_bohr3_;
-        density.schema_version = 2;
-        density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-        density.scf_converged = status.converged;
-        density.scf_iterations = status.iterations;
-        density.scf_density_residual = status.density_residual;
-        density.rho_alpha_bohr3.swap(global_alpha);
-        density.rho_beta_bohr3.swap(global_beta);
-        std::ofstream density_output(density_path.c_str(), std::ios::binary);
-        if (!density_output)
+        const ScopedFdeTimer timer("write_kpoint_bands");
+        const FdeKPointBandArtifact bands
+            = make_kpoint_band_artifact(electronic_state,
+                                        kpoints,
+                                        density,
+                                        config_.active_state,
+                                        config_.active_fragment,
+                                        full_ao_dimension_,
+                                        global_band_count,
+                                        nspin_);
+        FdeKPointBandArtifactIO::validate(
+            bands,
+            std::max(config_.symmetry_tolerance, 1.0e-12));
+        const std::string band_path = config_.output_prefix + ".fde_kbands";
+        std::ofstream band_output(band_path.c_str());
+        if (!band_output)
         {
             throw std::runtime_error(
-                "Cannot create FDE density artifact: " + density_path);
+                "Cannot create FDE k-point band artifact: " + band_path);
         }
-        DensityArtifactIO::write_binary(density_output, density);
-        close_artifact(density_output, density_path, "density");
-    }
-    if (!status.converged)
-    {
-        return;
-    }
-
-    const ScopedFdeTimer timer("write_kpoint_bands");
-    const FdeKPointBandArtifact bands
-        = make_kpoint_band_artifact(electronic_state,
-                                    kpoints,
-                                    density,
-                                    config_.active_state,
-                                    config_.active_fragment,
-                                    full_ao_dimension_,
-                                    global_band_count,
-                                    nspin_);
-    FdeKPointBandArtifactIO::validate(
-        bands,
-        std::max(config_.symmetry_tolerance, 1.0e-12));
-    const std::string band_path = config_.output_prefix + ".fde_kbands";
-    std::ofstream band_output(band_path.c_str());
-    if (!band_output)
-    {
-        throw std::runtime_error(
-            "Cannot create FDE k-point band artifact: " + band_path);
-    }
-    FdeKPointBandArtifactIO::write(
-        band_output,
-        bands,
-        std::max(config_.symmetry_tolerance, 1.0e-12));
-    close_artifact(band_output, band_path, "k-point band");
+        FdeKPointBandArtifactIO::write(
+            band_output,
+            bands,
+            std::max(config_.symmetry_tolerance, 1.0e-12));
+        close_artifact(band_output, band_path, "k-point band");
+    });
 }
 
 } // namespace fde

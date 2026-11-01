@@ -6,6 +6,7 @@
 #include "source_esolver/esolver_ks_lcao.h"
 #include "source_io/module_json/output_info.h"
 #include "source_io/module_parameter/input_parameter.h"
+#include "source_base/tool_quit.h"
 
 #include <algorithm>
 #include <complex>
@@ -187,15 +188,15 @@ void FdeSession::serve(ModuleESolver::ESolver& solver,
 #endif
         if (success == 0)
         {
+            const std::string message
+                = local_error.empty() ? "request failed on another MPI rank"
+                                      : local_error;
             if (rank == 0)
             {
-                const std::string message
-                    = local_error.empty() ? "request failed on another MPI rank"
-                                          : local_error;
                 std::cout << "FDE_SESSION_ERROR " << command.request_id << ' '
                           << sanitize_message(message) << std::endl;
             }
-            return;
+            ModuleBase::WARNING_QUIT("FdeSession::serve", message);
         }
 #ifdef __MPI
         require_mpi(MPI_Barrier(MPI_COMM_WORLD), "completing request");

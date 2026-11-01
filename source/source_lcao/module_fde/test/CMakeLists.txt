@@ -133,6 +133,33 @@ if(ENABLE_LIBXC)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
     TIMEOUT 100
   )
+  add_test(
+    NAME MODULE_FDE_output_failure
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_output_failure.py
+      $<TARGET_FILE:${ABACUS_BIN_NAME}>
+      ${CMAKE_SOURCE_DIR}
+  )
+  set_tests_properties(MODULE_FDE_output_failure PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    TIMEOUT 120
+  )
+  if(ENABLE_MPI)
+    add_test(
+      NAME MODULE_FDE_output_failure_2rank
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_output_failure.py
+        $<TARGET_FILE:${ABACUS_BIN_NAME}>
+        ${CMAKE_SOURCE_DIR}
+        ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+        ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(MODULE_FDE_output_failure_2rank PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+      PROCESSORS 2
+      TIMEOUT 120
+    )
+  endif()
 endif()
 
 if(ENABLE_JSON AND ENABLE_LIBXC)
