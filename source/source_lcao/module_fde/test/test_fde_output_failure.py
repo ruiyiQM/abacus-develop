@@ -13,18 +13,23 @@ def main():
     solver = "scalapack_gvx" if launcher else "lapack"
     with tempfile.TemporaryDirectory(prefix="fde-output-failure-") as directory:
         for gamma, failure in ((1, "density"), (0, "density"),
-                               (1, "band"), (0, "band"), (1, "fragment")):
+                               (1, "band"), (0, "band"), (1, "fragment"),
+                               (1, "restart-open"), (1, "restart-flush")):
+            if failure == "restart-flush" and not Path("/dev/full").exists():
+                continue
             root = Path(directory) / f"gamma{gamma}-{failure}"
             root.mkdir()
+            restart = failure.startswith("restart-")
             # Band/fragment cases need to reach their converged-output writers.
-            tolerance = 1e-8 if failure == "density" else 10.0
+            tolerance = 10.0 if failure in ("band", "fragment") else 1e-8
+            out_chg = 0 if restart else -1
             (root / "INPUT").write_text(
                 "INPUT_PARAMETERS\ncalculation scf\nbasis_type lcao\n"
                 f"gamma_only {gamma}\necutwfc 10\nnx 40\nny 40\nnz 40\n"
                 "nspin 2\nnelec 1\nnupdown 1\nnbands 2\nsymmetry 0\n"
                 f"dft_functional pbe\nks_solver {solver}\nkpar 1\n"
                 f"smearing_method fixed\nscf_nmax 1\nscf_thr {tolerance}\n"
-                "out_chg -1\nfde_task embedded_session\nfde_config FDE_CONFIG\n"
+                f"out_chg {out_chg}\nfde_task embedded_session\nfde_config FDE_CONFIG\n"
                 f"pseudo_dir {resources}\norbital_dir {resources}\n", encoding="utf-8")
             (root / "KPT").write_text("K_POINTS\n0\nGamma\n1 1 1 0 0 0\n", encoding="utf-8")
             (root / "STRU").write_text(
@@ -43,7 +48,15 @@ def main():
                     f"RHO_UNIFORM {alpha / 4096:.17g} {beta / 4096:.17g}\nEND\n",
                     encoding="utf-8")
             prefix = "result"
-            if failure == "density":
+            if restart:
+                output = root / "OUT.ABACUS"
+                output.mkdir()
+                path = output / "ABACUS-CHARGE-DENSITY.restart"
+                if failure == "restart-open":
+                    path.mkdir()
+                else:
+                    path.symlink_to("/dev/full")
+            elif failure == "density":
                 (root / "blocked").write_text("not a directory\n", encoding="utf-8")
                 prefix = "blocked/result"
                 diagnostic = "Cannot create FDE density artifact:"
@@ -64,10 +77,17 @@ def main():
             result = subprocess.run(
                 launcher + [str(executable)], cwd=root, input=f"RUN failure {config}\nSTOP\n",
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
-            assert result.returncode == 1, result.stdout
-            assert "FDE_SESSION_ERROR failure " in result.stdout, result.stdout
-            assert diagnostic in result.stdout, result.stdout
-            assert "FDE_SESSION_DONE failure " not in result.stdout, result.stdout
+            if restart:
+                assert result.returncode == 0, result.stdout
+                assert "FDE_SESSION_DONE failure " in result.stdout, result.stdout
+                assert "FDE_SESSION_ERROR" not in result.stdout, result.stdout
+                warning = (output / "warning.log").read_text(encoding="utf-8")
+                assert "File I/O failure" in warning and str(path.relative_to(root)) in warning, warning
+            else:
+                assert result.returncode == 1, result.stdout
+                assert "FDE_SESSION_ERROR failure " in result.stdout, result.stdout
+                assert diagnostic in result.stdout, result.stdout
+                assert "FDE_SESSION_DONE failure " not in result.stdout, result.stdout
     print("Native FDE output failures return a request error without an MPI hang.")
 
 
