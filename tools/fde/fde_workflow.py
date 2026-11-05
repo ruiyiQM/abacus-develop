@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from array import array
 from concurrent.futures import ThreadPoolExecutor
+import fcntl
 import hashlib
 import json
 import math
@@ -2150,12 +2151,25 @@ def write_postprocess_inputs(spec: Mapping[str, object],
 def run_workflow(spec_path: Path) -> None:
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     validate_spec(spec)
+    root = Path(spec["work_directory"]).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    # Keep this inode: unlinking it lets contenders acquire different locks.
+    with (root / ".fde-workflow.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise WorkflowError(f"an FDE workflow is already running in {root}") from error
+        try:
+            _run_workflow(spec, root)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _run_workflow(spec: Mapping[str, object], root: Path) -> None:
     geometries = spec.get("geometries")
     if not geometries:
         geometries = [{"label": "geometry-000", "template_directory": spec["template_directory"],
                        "initial_densities": spec.get("initial_densities", {})}]
-    root = Path(spec["work_directory"]).resolve()
-    root.mkdir(parents=True, exist_ok=True)
     state_labels = [state["label"] for state in spec["states"]]
     pes_rows: List[Dict[str, object]] = []
     for geometry in geometries:

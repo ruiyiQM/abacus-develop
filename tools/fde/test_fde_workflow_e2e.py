@@ -297,6 +297,48 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_work_directory_lock_rejects_duplicates_and_releases_after_owner_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+            work, spec_path = prepare_case(first)
+            other_work, other_spec = prepare_case(second)
+            work.mkdir()
+            sentinel = work / "g0/reactant/cycle-001/F/inflight"
+            sentinel.parent.mkdir(parents=True)
+            sentinel.write_text("owned by another running workflow")
+            script = ("import fcntl,sys; f=open(sys.argv[1],'a+'); "
+                      "fcntl.flock(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()")
+            holder = subprocess.Popen([sys.executable, "-c", script, str(work / ".fde-workflow.lock")],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(holder.stdout.readline().strip(), "locked")
+                with self.assertRaisesRegex(fde_workflow.WorkflowError, "already running"):
+                    fde_workflow.run_workflow(spec_path)
+                self.assertEqual(sentinel.read_text(), "owned by another running workflow")
+                fde_workflow.run_workflow(other_spec)
+                self.assertTrue((other_work / "fde_pes.json").is_file())
+            finally:
+                holder.kill()
+                holder.communicate(timeout=5)
+            fde_workflow.run_workflow(spec_path)
+            self.assertTrue((work / "fde_pes.json").is_file())
+
+    def test_work_directory_lock_is_released_after_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            with mock.patch.object(fde_workflow.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 1)):
+                with self.assertRaises(fde_workflow.WorkflowError):
+                    fde_workflow.run_workflow(spec_path)
+            fde_workflow.run_workflow(spec_path)
+            self.assertTrue((work / "fde_pes.json").is_file())
+
     def test_update_scheme_case_preserves_gauss_seidel_dependencies(self):
         for scheme in ("gauss_seidel", "GAUSS_SEIDEL", "Auto"):
             with self.subTest(scheme=scheme), tempfile.TemporaryDirectory() as directory:
