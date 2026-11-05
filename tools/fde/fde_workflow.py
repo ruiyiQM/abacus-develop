@@ -1643,8 +1643,10 @@ def run_fragment_scf(
         if int(launch_metrics["returncode"]) != 0:
             raise WorkflowError(f"ABACUS failed in {job_directory}; see {log_path}")
         artifact_started = time.monotonic()
+        can_retry = bool(schedule["strict"]) and retry < maximum_retries
+        allow_partial = bool(controls.get("allow_partial_scf", False)) or can_retry
         density_path, density_data = select_scf_density(
-            job_directory, bool(controls.get("allow_partial_scf", False)))
+            job_directory, allow_partial)
         inner_converged = bool(density_data["scf_converged"])
         fragment_path = job_directory / "result.fde_fragment"
         if inner_converged and not fragment_path.is_file():

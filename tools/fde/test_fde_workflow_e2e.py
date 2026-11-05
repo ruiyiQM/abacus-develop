@@ -633,6 +633,63 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                 self.assertRegex(retry_input, r"(?m)^mixing_type\s+plain$")
                 self.assertRegex(retry_input, r"(?m)^mixing_beta\s+0\.05$")
 
+    def test_strict_schedule_recovers_without_accepting_partial_results(self):
+        for persistent in (False, True):
+            with self.subTest(persistent_session=persistent), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work, spec_path = prepare_case(root, persistent_session=persistent)
+                (root / "template" / "PARTIAL_ON_FIRST_STRICT_ATTEMPT").write_text("1\n")
+                spec = json.loads(spec_path.read_text())
+                spec["controls"].update({
+                    "allow_partial_scf": False,
+                    "retain_completed_cycles": 3,
+                    "mixing_recovery": {
+                        "enabled": True,
+                        "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+                    },
+                })
+                spec_path.write_text(json.dumps(spec))
+                fde_workflow.run_workflow(spec_path)
+
+                for state in ("reactant", "product"):
+                    state_directory = work / "g0" / state
+                    checkpoint = json.loads((state_directory / "checkpoint.json").read_text())
+                    self.assertTrue(checkpoint["converged"])
+                    self.assertTrue(checkpoint["all_inner_scf_converged"])
+                    for fragment in ("F", "CH3Cl"):
+                        attempts = checkpoint["history"][1]["inner_scf"][fragment]["attempts"]
+                        self.assertEqual([a["converged"] for a in attempts], [False, True])
+                        self.assertEqual(attempts[1]["mixing"]["mixing_type"], "plain")
+                        retry = state_directory / "cycle-002" / f"{fragment}-retry-01"
+                        self.assertIn("result.partial.fde_density", (retry / "FDE_CONFIG").read_text())
+                        self.assertEqual(Path(checkpoint["densities"][fragment]).name,
+                                         "result.fde_density")
+                        self.assertTrue((retry / "result.fde_fragment").is_file())
+                self.assertTrue((work / "g0/postprocess/fde_diabatic.fde_diabatic").is_file())
+
+    def test_strict_schedule_rejects_partial_after_recovery_exhaustion(self):
+        for enabled in (False, True):
+            with self.subTest(recovery_enabled=enabled), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work, spec_path = prepare_case(root)
+                (root / "template" / "PARTIAL_ON_FIRST_CYCLE").write_text("1\n")
+                spec = json.loads(spec_path.read_text())
+                spec["controls"].update({
+                    "allow_partial_scf": False,
+                    "mixing_recovery": {
+                        "enabled": enabled,
+                        "fallbacks": [{"mixing_type": "plain", "mixing_beta": 0.05}],
+                    },
+                })
+                spec_path.write_text(json.dumps(spec))
+                with self.assertRaisesRegex(fde_workflow.WorkflowError, "only a partial FDE density"):
+                    fde_workflow.run_workflow(spec_path)
+                retry = work / "g0/reactant/cycle-001/F-retry-01/result.partial.fde_density"
+                self.assertEqual(retry.is_file(), enabled)
+                self.assertFalse(list(work.glob("g0/*/checkpoint.json")))
+                self.assertFalse(list(work.glob("g0/*/cycle-*/*/result.fde_fragment")))
+                self.assertFalse((work / "g0/postprocess").exists())
+
     def test_parallel_jacobi_uses_cycle_snapshot_and_outer_mixing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
