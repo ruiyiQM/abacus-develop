@@ -325,15 +325,15 @@ def validate_spec(spec: Mapping[str, object]) -> None:
             or not all(isinstance(label, str) for label in update_order)
             or set(update_order) != set(labels)):
         raise WorkflowError("update_order must be a permutation of fragment labels")
+    update_scheme = _token(
+        controls.get("update_scheme", "auto"), "update_scheme").lower()
     if (execution_mode == "persistent_session"
-            and str(controls.get("update_scheme", "auto")) == "jacobi"
+            and update_scheme == "jacobi"
             and int(controls.get("jacobi_parallelism", 1)) > 1
             and maximum_sessions < len(labels)):
         raise WorkflowError(
             "parallel Jacobi persistent sessions require one resident worker "
             "per fragment")
-    update_scheme = _token(
-        controls.get("update_scheme", "auto"), "update_scheme").lower()
     if update_scheme not in ("auto", "gauss_seidel", "jacobi"):
         raise WorkflowError("update_scheme must be auto, gauss_seidel, or jacobi")
     parallelism = controls.get("jacobi_parallelism", 1)
@@ -1828,7 +1828,7 @@ def _run_state(spec: Mapping[str, object],
     symmetry_tolerance = float(controls.get("symmetry_tolerance", 1e-10))
     retain_completed_cycles = int(controls.get("retain_completed_cycles", 0))
     required_strict_confirmations = int(controls.get("strict_confirmation_cycles", 2))
-    update_scheme = str(controls.get("update_scheme", "auto"))
+    update_scheme = str(controls.get("update_scheme", "auto")).lower()
     if update_scheme == "auto":
         update_scheme = "gauss_seidel"
     jacobi_parallelism = int(controls.get("jacobi_parallelism", 1))

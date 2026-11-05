@@ -297,6 +297,20 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_update_scheme_case_preserves_gauss_seidel_dependencies(self):
+        for scheme in ("gauss_seidel", "GAUSS_SEIDEL", "Auto"):
+            with self.subTest(scheme=scheme), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work, spec_path = prepare_case(root)
+                spec = json.loads(spec_path.read_text())
+                spec["controls"].update({"update_scheme": scheme, "retain_completed_cycles": 3})
+                spec_path.write_text(json.dumps(spec))
+                fde_workflow.run_workflow(spec_path)
+                config = (work / "g0/reactant/cycle-001/CH3Cl/FDE_CONFIG").read_text()
+                self.assertIn("cycle-001/F/result.fde_density", config)
+                checkpoint = json.loads((work / "g0/reactant/checkpoint.json").read_text())
+                self.assertEqual(checkpoint["update_scheme"], "gauss_seidel")
+
     def test_postprocess_rejects_bad_new_results_and_preserves_published_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -37,6 +37,13 @@ class FdeWorkflowTest(unittest.TestCase):
         self.assertEqual(fde_workflow.spin_population(7, -1, 0), (4, 4))
         self.assertEqual(fde_workflow.spin_population(14, -1, -1), (7, 8))
 
+    def test_uppercase_jacobi_still_requires_one_worker_per_fragment(self):
+        spec = self.spec()
+        spec["controls"] = {"execution_mode": "persistent_session", "update_scheme": "JACOBI",
+                            "jacobi_parallelism": 2, "maximum_persistent_sessions": 1}
+        with self.assertRaisesRegex(fde_workflow.WorkflowError, "one resident worker"):
+            fde_workflow.validate_spec(spec)
+
     def test_validates_thomas_fermi_kedf_names(self):
         for name in ("thomas_fermi", "tf"):
             spec = self.spec()
