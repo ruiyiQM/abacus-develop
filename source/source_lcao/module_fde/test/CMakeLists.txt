@@ -254,17 +254,19 @@ if(ENABLE_MPI)
   )
   install(TARGETS MODULE_FDE_projected_hamiltonian_mpi
     DESTINATION ${CMAKE_BINARY_DIR}/tests)
-  add_test(
-    NAME MODULE_FDE_projected_hamiltonian_4rank
-    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4
-      ${MPIEXEC_PREFLAGS}
-      $<TARGET_FILE:MODULE_FDE_projected_hamiltonian_mpi>
-      ${MPIEXEC_POSTFLAGS}
-  )
-  set_tests_properties(MODULE_FDE_projected_hamiltonian_4rank PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1"
-    PROCESSORS 4
-  )
+  foreach(ranks IN ITEMS 1 2 4)
+    add_test(
+      NAME MODULE_FDE_projected_hamiltonian_${ranks}rank
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${ranks}
+        ${MPIEXEC_PREFLAGS}
+        $<TARGET_FILE:MODULE_FDE_projected_hamiltonian_mpi>
+        ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(MODULE_FDE_projected_hamiltonian_${ranks}rank PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=1"
+      PROCESSORS ${ranks}
+    )
+  endforeach()
 
   add_executable(MODULE_FDE_pw_grid_differential_mpi
     fde_pw_grid_differential_mpi_test.cpp
@@ -327,6 +329,7 @@ AddTest(
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_electronic_coupling.cpp
     ../coupling/fde_linearized_state.cpp
+    ../coupling/fde_multistate_solver.cpp
 )
 
 AddTest(

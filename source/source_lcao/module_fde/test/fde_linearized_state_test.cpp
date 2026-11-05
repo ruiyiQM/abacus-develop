@@ -1,7 +1,9 @@
 #include "../coupling/fde_linearized_state.h"
+#include "../coupling/fde_multistate_solver.h"
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <sstream>
 #include <vector>
 
@@ -71,4 +73,47 @@ TEST(FdeLinearizedState, ReproducesReferenceAndDirectionalFirstOrderEnergy)
         = fde::ElectronicCoupling::transition(first, second, overlap, 1.0e-12);
     EXPECT_NE(energy.evaluate_ry(first, second, forward.density_matrix, 2),
               -10.0);
+}
+
+TEST(FdeLinearizedState, RecoversAnalyticOneBodyRootsUnderOrbitalSignChange)
+{
+    const std::vector<double> overlap = {1.0, 0.0, 0.0, 1.0};
+    const fde::DiabaticDeterminantArtifact first = determinant("first", {1.0, 0.0});
+    const std::vector<fde::LinearizedStateArtifact> states
+        = {state("first", 5.0), state("second", 5.12)};
+    const fde::LinearizedTransitionEnergy energy(states, overlap, 1.0e-12);
+    const fde::CouplingValidationControls validation{1.0e-12, 1.0e-12};
+    const fde::NonorthogonalSolverControls controls{1.0e-10, 1.0e-12, 1.0e-10};
+    // One alpha electron in [[2,.5],[.5,1]], plus a beta spectator of energy 3.
+    const double lower = 4.5 - std::sqrt(0.5);
+    const double upper = 4.5 + std::sqrt(0.5);
+    for (const double sign : {-1.0, 1.0})
+    {
+        fde::DiabaticDeterminantArtifact second = determinant("second", {0.8, 0.6});
+        for (double& coefficient : second.alpha.coefficients)
+        {
+            coefficient *= sign;
+        }
+        const fde::ElectronicCouplingResult coupling = fde::ElectronicCoupling::evaluate_symmetric(
+            first, second, overlap, energy, validation, 1.0e-12);
+        const double s = coupling.normalized_overlap;
+        const double h = coupling.hamiltonian_coupling_ry;
+        const double expected_s = sign * 0.8;
+        const double expected_h = sign * 4.3;
+        EXPECT_NEAR(s, expected_s, 1.0e-12);
+        EXPECT_NEAR(h, expected_h, 1.0e-12);
+        const double signed_coupling = (h - 5.06 * s) / (1.0 - s * s);
+        const double effective_coupling = std::fabs(signed_coupling);
+        EXPECT_NEAR(effective_coupling, 0.7, 1.0e-12);
+        const fde::NonorthogonalStateProblem problem{{"first", "second"},
+                                                   {5.0, h, h, 5.12},
+                                                   {1.0, s, s, 1.0}};
+        const fde::NonorthogonalStateSolution roots
+            = fde::NonorthogonalMultistateSolver::solve(problem, controls);
+        ASSERT_EQ(roots.eigenvalues_ry.size(), 2);
+        EXPECT_NEAR(roots.eigenvalues_ry[0], lower, 1.0e-12);
+        EXPECT_NEAR(roots.eigenvalues_ry[1], upper, 1.0e-12);
+        EXPECT_LE(coupling.maximum_transition_density_trace_error, 1.0e-12);
+        EXPECT_LE(coupling.overlap_reciprocity_error, 1.0e-12);
+    }
 }
