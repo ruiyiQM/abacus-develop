@@ -291,6 +291,42 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_relative_launch_scripts_invalidate_completed_checkpoints(self):
+        for persistent in (False, True):
+            with self.subTest(persistent_session=persistent), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work, spec_path = prepare_case(root, persistent_session=persistent)
+                spec = json.loads(spec_path.read_text())
+                command = [sys.executable, "../../../../../fake_abacus.py"]
+                spec["abacus_command"] = command
+                if persistent:
+                    spec["session_command"] = command
+                spec["postprocess_command"] = [sys.executable, "../../../fake_abacus.py"]
+                spec_path.write_text(json.dumps(spec))
+                fde_workflow.run_workflow(spec_path)
+                script = root / "fake_abacus.py"
+                script.write_text(script.read_text() + "\n# changed executable identity\n")
+                with self.assertRaisesRegex(fde_workflow.WorkflowError, "checkpoint inputs changed"):
+                    fde_workflow.run_workflow(spec_path)
+
+    def test_relative_executables_use_their_actual_launch_directories(self):
+        for persistent in (False, True):
+            with self.subTest(persistent_session=persistent), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work, spec_path = prepare_case(root, persistent_session=persistent)
+                runner = root / "template/runner.py"
+                runner.write_text(FAKE_ABACUS)
+                runner.chmod(0o755)
+                (root / "fake_abacus.py").chmod(0o755)
+                spec = json.loads(spec_path.read_text())
+                spec["abacus_command"] = ["./runner.py"]
+                if persistent:
+                    spec["session_command"] = ["./runner.py"]
+                spec["postprocess_command"] = ["../../../fake_abacus.py"]
+                spec_path.write_text(json.dumps(spec))
+                fde_workflow.run_workflow(spec_path)
+                self.assertTrue((work / "g0/postprocess/fde_diabatic.fde_diabatic").is_file())
+
     def test_checkpoint_fingerprint_tracks_scf_policy_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

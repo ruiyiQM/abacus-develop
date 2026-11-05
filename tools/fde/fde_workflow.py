@@ -1727,24 +1727,6 @@ def checkpoint_input_fingerprint(spec: Mapping[str, object],
     files.update(Path(path).resolve() for path in initial.values())
     files.add(Path(__file__).resolve())
     files.add(Path(__file__).resolve().parent / "workflow" / "scf_policy.py")
-    for key in ("abacus_command", "session_command", "postprocess_command"):
-        command = spec.get(key, spec["abacus_command"])
-        executable = shutil.which(command[0])
-        if executable is None:
-            raise WorkflowError(f"cannot identify checkpoint executable: {command[0]}")
-        files.add(Path(executable).resolve())
-        for token in command[1:]:
-            executable = shutil.which(token)
-            if executable is not None:
-                files.add(Path(executable).resolve())
-            elif Path(token).is_file():
-                files.add(Path(token).resolve())
-
-    inputs = {}
-    for line in (template / "INPUT").read_text(encoding="utf-8").splitlines():
-        fields = line.split("#", 1)[0].split("//", 1)[0].split()
-        if len(fields) >= 2:
-            inputs[fields[0].lower()] = fields[1]
     # Relative resource paths are resolved in the copied fragment job, as ABACUS does.
     def resource_path(value: str, job: Path) -> Path:
         path = Path(value)
@@ -1756,6 +1738,39 @@ def checkpoint_input_fingerprint(spec: Mapping[str, object],
         except ValueError:
             return copied
 
+    command_directories = {
+        "abacus_command": [state_directory / "cycle-001" / str(fragment["label"])
+                           for fragment in spec["fragments"]],
+        "session_command": [state_directory / "session-workers" / f"{fragment['label']}-generation-001"
+                            for fragment in spec["fragments"]],
+        "postprocess_command": [state_directory.parent / "postprocess"],
+    }
+    for key, directories in command_directories.items():
+        command = spec.get(key, spec["abacus_command"])
+        for job in directories:
+            def launched_path(token: str) -> Path:
+                if key != "postprocess_command":
+                    return resource_path(token, job).resolve()
+                return (job / token).resolve()
+
+            search_path = os.pathsep.join(str(launched_path(entry))
+                                          for entry in os.get_exec_path())
+            for index, token in enumerate(command):
+                candidate = launched_path(token)
+                if candidate.is_file():
+                    files.add(candidate)
+                executable = (shutil.which(str(candidate)) if os.path.dirname(token)
+                              else shutil.which(token, path=search_path))
+                if executable is not None:
+                    files.add(Path(executable).resolve())
+                elif index == 0:
+                    raise WorkflowError(f"cannot identify checkpoint executable: {token}")
+
+    inputs = {}
+    for line in (template / "INPUT").read_text(encoding="utf-8").splitlines():
+        fields = line.split("#", 1)[0].split("//", 1)[0].split()
+        if len(fields) >= 2:
+            inputs[fields[0].lower()] = fields[1]
     for fragment in spec["fragments"]:
         job = state_directory / "cycle-001" / str(fragment["label"])
         if "kpoint_file" in inputs:
