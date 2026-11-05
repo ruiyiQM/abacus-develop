@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -33,6 +35,52 @@ for line in sys.stdin:
 
 
 class FdeSessionProcessTest(unittest.TestCase):
+    def test_start_timeout_cleans_owned_processes_and_preserves_diagnostic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pid_file = root / "child.pid"
+            worker = root / "blocked.py"
+            worker.write_text(
+                "import pathlib,subprocess,sys,time\n"
+                "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+                "pathlib.Path(sys.argv[1]).write_text(str(p.pid))\n"
+                "print('startup diagnostic before READY',flush=True)\n"
+                "time.sleep(60)\n")
+            session = FdeSessionProcess([sys.executable, str(worker), str(pid_file)],
+                                        root / "session", os.environ, 0.5, 0.1)
+            try:
+                with self.assertRaisesRegex(FdeSessionError, "startup diagnostic before READY"):
+                    with session:
+                        self.fail("worker never sent READY")
+                self.assertIsNone(session.process)
+                self.assertIsNone(session.log)
+                pid = int(pid_file.read_text())
+                state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                                       text=True, capture_output=True).stdout.strip()
+                self.assertTrue(not state or state.startswith("Z"), state)
+            finally:
+                # Also clean up the intentionally broken pre-fix implementation.
+                if pid_file.exists():
+                    try:
+                        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if session.process is not None and session.process.poll() is None:
+                    session.process.kill()
+                session.close()
+
+    def test_missing_command_start_failure_closes_the_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = FdeSessionProcess(["/fde-nonexistent-command"], Path(directory),
+                                        os.environ, 0.1, 0.1)
+            try:
+                with self.assertRaises(FileNotFoundError):
+                    session.start()
+                self.assertIsNone(session.process)
+                self.assertIsNone(session.log)
+            finally:
+                session.close()
+
     def make_worker(self, root: Path) -> Path:
         worker = root / "fake_worker.py"
         worker.write_text(textwrap.dedent(FAKE_WORKER), encoding="utf-8")

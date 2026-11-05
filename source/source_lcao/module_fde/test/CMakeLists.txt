@@ -427,13 +427,16 @@ AddTest(
     ../runtime/fde_warm_start.cpp
 )
 
-foreach(suite IN ITEMS regression_runner workflow_metrics workflow_helpers euler_helpers)
+foreach(suite IN ITEMS regression_runner workflow_metrics session_client workflow_helpers euler_helpers)
   if(suite STREQUAL "regression_runner")
     set(suite_directory "tools/fde")
     set(suite_pattern "test_run_regression.py")
   elseif(suite STREQUAL "workflow_metrics")
     set(suite_directory "tools/fde")
     set(suite_pattern "test_native_workflow.py")
+  elseif(suite STREQUAL "session_client")
+    set(suite_directory "tools/fde")
+    set(suite_pattern "test_fde_session.py")
   elseif(suite STREQUAL "workflow_helpers")
     set(suite_directory "tools/fde/workflow")
     set(suite_pattern "test_*.py")
@@ -500,6 +503,6 @@ foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2ran
   endif()
 endforeach()
 foreach(test IN ITEMS workflow_serial scf_policy band_folding regression_runner
-    workflow_metrics workflow_helpers euler_helpers)
+    workflow_metrics session_client workflow_helpers euler_helpers)
   set_tests_properties(MODULE_FDE_${test} PROPERTIES LABELS "fde;python")
 endforeach()

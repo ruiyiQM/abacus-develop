@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -83,26 +84,53 @@ class FdeSessionProcess:
         self.log = (self.working_directory / "fde_session.log").open(
             "w", encoding="utf-8")
         started = time.monotonic()
-        self.process = subprocess.Popen(
-            self.command,
-            cwd=self.working_directory,
-            env=self.environment,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-        self.reader = threading.Thread(
-            target=self._read_output,
-            name=f"fde-session-{self.process.pid}",
-            daemon=True,
-        )
-        self.reader.start()
-        self._wait_marker("FDE_SESSION_READY ", self.startup_timeout_seconds)
+        owned_group = os.name == "posix"
+        try:
+            self.process = subprocess.Popen(
+                self.command,
+                cwd=self.working_directory,
+                env=self.environment,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                start_new_session=owned_group,
+            )
+            self.reader = threading.Thread(
+                target=self._read_output,
+                name=f"fde-session-{self.process.pid}",
+                daemon=True,
+            )
+            self.reader.start()
+            self._wait_marker("FDE_SESSION_READY ", self.startup_timeout_seconds)
+        except BaseException as error:
+            self.close()
+            if isinstance(error, FdeSessionError):
+                log_path = self.working_directory / "fde_session.log"
+                try:
+                    diagnostic = log_path.read_text(encoding="utf-8", errors="replace")[-4096:]
+                except OSError:
+                    diagnostic = "session log is unavailable"
+                raise FdeSessionError(f"{error}; see {log_path}\n{diagnostic}") from error
+            raise
         self.startup_seconds = time.monotonic() - started
+
+    def _terminate_owned_process(self, force: bool) -> None:
+        if self.process is None:
+            return
+        try:
+            if os.name == "posix":
+                signum = signal.SIGKILL if force else signal.SIGTERM
+                os.killpg(self.process.pid, signum)
+            elif force:
+                self.process.kill()
+            else:
+                self.process.terminate()
+        except ProcessLookupError:
+            pass
 
     def run(self, request_id: str, config_path: Path) -> dict[str, object]:
         if (not request_id or any(character.isspace() for character in request_id)
@@ -168,23 +196,30 @@ class FdeSessionProcess:
                     "FDE_SESSION_STOPPED", self.stop_timeout_seconds)
             process.wait(timeout=self.stop_timeout_seconds)
         except (BrokenPipeError, FdeSessionError, subprocess.TimeoutExpired):
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=self.stop_timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+            self._terminate_owned_process(False)
+            try:
+                process.wait(timeout=self.stop_timeout_seconds)
+            except subprocess.TimeoutExpired:
+                self._terminate_owned_process(True)
+                process.wait()
         finally:
             if process.stdin is not None:
-                process.stdin.close()
-            if process.stdout is not None:
-                process.stdout.close()
+                try:
+                    process.stdin.close()
+                except BrokenPipeError:
+                    pass
             if self.reader is not None:
                 self.reader.join(timeout=self.stop_timeout_seconds)
+                if self.reader.is_alive():
+                    self._terminate_owned_process(True)
+                    self.reader.join(timeout=self.stop_timeout_seconds)
+            if process.stdout is not None:
+                process.stdout.close()
             if self.log is not None:
                 self.log.close()
             self.process = None
+            self.log = None
+            self.reader = None
 
     def __enter__(self) -> "FdeSessionProcess":
         self.start()
