@@ -423,3 +423,52 @@ AddTest(
   SOURCES fde_warm_start_test.cpp
     ../runtime/fde_warm_start.cpp
 )
+
+foreach(suite IN ITEMS regression_runner workflow_helpers euler_helpers)
+  if(suite STREQUAL "regression_runner")
+    set(suite_directory "tools/fde")
+    set(suite_pattern "test_run_regression.py")
+  elseif(suite STREQUAL "workflow_helpers")
+    set(suite_directory "tools/fde/workflow")
+    set(suite_pattern "test_*.py")
+  else()
+    set(suite_directory "tools/fde/euler")
+    set(suite_pattern "test_*.py")
+  endif()
+  add_test(
+    NAME MODULE_FDE_${suite}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/fde/run_regression.py
+      --source-root ${CMAKE_SOURCE_DIR}
+      --python-suite-directory ${suite_directory}
+      --python-suite-pattern ${suite_pattern}
+  )
+endforeach()
+
+get_property(fde_tests DIRECTORY PROPERTY TESTS)
+foreach(test IN LISTS fde_tests)
+  set_tests_properties(${test} PROPERTIES LABELS "fde;native_unit")
+  get_test_property(${test} TIMEOUT test_timeout)
+  if(test_timeout STREQUAL "NOTFOUND")
+    set_tests_properties(${test} PROPERTIES TIMEOUT 120)
+  endif()
+  set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
+    "OMP_NUM_THREADS=1" "OPENBLAS_NUM_THREADS=1")
+  if(test MATCHES "_([124])rank$")
+    set_property(TEST ${test} APPEND PROPERTY LABELS mpi)
+  else()
+    set_tests_properties(${test} PROPERTIES PROCESSORS 1)
+  endif()
+endforeach()
+foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2rank
+    session_json session_json_2rank)
+  if(TEST MODULE_FDE_${test})
+    set_property(TEST MODULE_FDE_${test} PROPERTY LABELS "fde;native_runtime")
+    if(test MATCHES "_2rank$")
+      set_property(TEST MODULE_FDE_${test} APPEND PROPERTY LABELS mpi)
+    endif()
+  endif()
+endforeach()
+foreach(test IN ITEMS workflow_serial scf_policy band_folding regression_runner
+    workflow_helpers euler_helpers)
+  set_tests_properties(MODULE_FDE_${test} PROPERTIES LABELS "fde;python")
+endforeach()

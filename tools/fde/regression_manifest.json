@@ -9,6 +9,16 @@
       "pattern": "test_*.py"
     },
     {
+      "label": "workflow_helpers",
+      "start_directory": "tools/fde/workflow",
+      "pattern": "test_*.py"
+    },
+    {
+      "label": "euler_helpers",
+      "start_directory": "tools/fde/euler",
+      "pattern": "test_*.py"
+    },
+    {
       "label": "molecular_example",
       "start_directory": "examples/fdedft/01_f_ch3_cl_uks",
       "pattern": "test_*.py"

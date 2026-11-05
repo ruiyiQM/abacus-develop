@@ -3,6 +3,8 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shutil
+import sys
 import tempfile
 import unittest
 
@@ -16,6 +18,74 @@ SPEC.loader.exec_module(regression)
 
 
 class DurableRegressionTest(unittest.TestCase):
+    def test_manifest_includes_nested_helper_suites(self):
+        manifest = json.loads((ROOT / "tools/fde/regression_manifest.json").read_text())
+        starts = {suite["start_directory"] for suite in manifest["python_suites"]}
+        self.assertIn("tools/fde/workflow", starts)
+        self.assertIn("tools/fde/euler", starts)
+
+    def test_python_suites_count_execution_and_reject_incomplete_results(self):
+        cases = {
+            "passing": ("import unittest\nclass Probe(unittest.TestCase):\n"
+                        " def test_probe(self): self.assertEqual(2 + 2, 4)\n", True, 1, 0),
+            "empty": ("", False, 0, 0),
+            "skipped": ("import unittest\n@unittest.skip('missing dependency')\n"
+                        "class Probe(unittest.TestCase):\n def test_probe(self): pass\n",
+                        False, 0, 1),
+            "import_error": ("import fde_nonexistent_dependency\n", False, 1, 0),
+        }
+        for label, (source, passed, executed, skipped) in cases.items():
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "test_probe.py").write_text(source, encoding="utf-8")
+                result = regression.run_python_suites(
+                    root, [{"label": label, "start_directory": "."}])[0]
+                self.assertEqual(result["passed"], passed, result)
+                self.assertEqual(result["executed"], executed, result)
+                self.assertEqual(len(result["skipped"]), skipped, result)
+                if skipped:
+                    self.assertIn("missing dependency", result["skipped"][0]["reason"])
+
+    def test_ctest_rejects_empty_disabled_skipped_or_unavailable_tests(self):
+        if shutil.which("ctest") is None:
+            self.skipTest("ctest executable is unavailable")
+        cases = {
+            "passing": ('add_test(MODULE_FDE_probe "' + sys.executable + '" "-c" "pass")\n', True),
+            "empty": ("", False),
+            "disabled": ('add_test(MODULE_FDE_probe "' + sys.executable + '" "-c" "pass")\n'
+                         'set_tests_properties(MODULE_FDE_probe PROPERTIES DISABLED TRUE)\n', False),
+            "skipped": ('add_test(MODULE_FDE_probe "' + sys.executable + '" "-c" "raise SystemExit(77)")\n'
+                        'set_tests_properties(MODULE_FDE_probe PROPERTIES SKIP_RETURN_CODE 77)\n', False),
+            "missing_executable": ('add_test(MODULE_FDE_probe "/fde-nonexistent-executable")\n', False),
+        }
+        for label, (source, passed) in cases.items():
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "CTestTestfile.cmake").write_text(source, encoding="utf-8")
+                result = regression.run_native_ctest(root)
+                self.assertEqual(result["passed"], passed, result)
+                self.assertEqual(result["selected"], 0 if label == "empty" else 1, result)
+                self.assertEqual(result["executed"], 1 if passed else 0, result)
+                if label in ("disabled", "skipped", "missing_executable"):
+                    self.assertTrue(result["incomplete"], result)
+
+    def test_ctest_reports_conditionally_unregistered_native_tests(self):
+        if shutil.which("ctest") is None:
+            self.skipTest("ctest executable is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "CTestTestfile.cmake").write_text(
+                'add_test(MODULE_FDE_probe "' + sys.executable + '" "-c" "pass")\n')
+            (root / "CMakeCache.txt").write_text(
+                "ENABLE_JSON:BOOL=OFF\nENABLE_LIBXC:BOOL=ON\nENABLE_MPI:BOOL=OFF\n")
+            result = regression.run_native_ctest(root)
+            unavailable = {entry["name"]: entry["reason"]
+                           for entry in result["unavailable_tests"]}
+            self.assertIn("ENABLE_JSON=OFF", unavailable["MODULE_FDE_session_json"])
+            self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_session_json_2rank"])
+            self.assertFalse(result["passed"])
+            self.assertIn("MODULE_FDE_cell_volume", result["missing_tests"])
+
     def test_current_manifest_and_compact_references_pass(self):
         report = regression.validate_manifest(
             ROOT, ROOT / "tools/fde/regression_manifest.json"

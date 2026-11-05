@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unittest
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Mapping, Sequence
 
 
@@ -211,6 +213,7 @@ def validate_manifest(source_root: Path, manifest_path: Path) -> Dict[str, objec
     return {
         "passed": True,
         "required_file_count": len(required_paths),
+        "evidence_scope": "archived_reference_integrity_only",
         "molecular_diabatic": {
             "passed": True,
             "point_count": comparison["point_count"],
@@ -231,25 +234,46 @@ def validate_manifest(source_root: Path, manifest_path: Path) -> Dict[str, objec
     }
 
 
+def execute_python_suite(source_root: Path, directory: str, pattern: str) -> Dict[str, object]:
+    # Keep each discovery in its own process so imports cannot leak between suites.
+    sys.path.insert(0, str(source_root / "tools/fde"))
+    suite = unittest.TestLoader().discover(str(source_root / directory), pattern=pattern)
+    discovered = suite.countTestCases()
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    complete = result.testsRun > 0 and not result.skipped and not result.expectedFailures
+    return {
+        "discovered": discovered,
+        "executed": result.testsRun - len(result.skipped),
+        "skipped": [{"test": test.id(), "reason": reason} for test, reason in result.skipped],
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+        "expected_failures": len(result.expectedFailures),
+        "unexpected_successes": len(result.unexpectedSuccesses),
+        "passed": result.wasSuccessful() and complete,
+    }
+
+
 def run_python_suites(source_root: Path,
                       suites: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
     results = []
     for suite in suites:
         label = str(suite["label"])
-        command = [
-            sys.executable,
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            str(suite["start_directory"]),
-            "-p",
-            str(suite.get("pattern", "test_*.py")),
-        ]
-        completed = subprocess.run(command, cwd=source_root, check=False)
-        results.append({"label": label, "command": command,
-                        "returncode": completed.returncode,
-                        "passed": completed.returncode == 0})
+        with tempfile.TemporaryDirectory(prefix="fde-python-suite-") as directory:
+            output = Path(directory) / "result.json"
+            command = [sys.executable, str(Path(__file__).resolve()),
+                       "--source-root", str(source_root),
+                       "--python-suite-directory", str(suite["start_directory"]),
+                       "--python-suite-pattern", str(suite.get("pattern", "test_*.py")),
+                       "--output", str(output)]
+            completed = subprocess.run(command, cwd=source_root, check=False)
+            try:
+                result = _object(output)
+            except RegressionError as error:
+                result = {"passed": False, "error": str(error)}
+            result.update({"label": label, "command": command,
+                           "returncode": completed.returncode,
+                           "passed": completed.returncode == 0 and result.get("passed") is True})
+            results.append(result)
     return results
 
 
@@ -261,11 +285,70 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
         raise RegressionError(
             f"build directory has no CTestTestfile.cmake: {build_directory}"
         )
-    command = [ctest, "--test-dir", str(build_directory),
-               "--output-on-failure", "-R", "^MODULE_FDE_"]
-    completed = subprocess.run(command, check=False)
+    selection = [ctest, "--test-dir", str(build_directory), "-R", "^MODULE_FDE_"]
+    inventory = subprocess.run(selection + ["--show-only=json-v1"],
+                               check=False, capture_output=True, text=True)
+    if inventory.returncode != 0:
+        raise RegressionError("cannot enumerate native CTests: " + inventory.stderr)
+    try:
+        tests = json.loads(inventory.stdout)["tests"]
+    except (ValueError, KeyError) as error:
+        raise RegressionError("cannot read CTest inventory: " + str(error)) from error
+    names = {test["name"] for test in tests}
+    features = {}
+    cache = build_directory / "CMakeCache.txt"
+    if cache.is_file():
+        for line in cache.read_text(encoding="utf-8").splitlines():
+            for key in ("ENABLE_MPI", "ENABLE_JSON", "ENABLE_LIBXC"):
+                if line.startswith(key + ":BOOL="):
+                    features[key] = line.split("=", 1)[1]
+    conditional = {
+        "MODULE_FDE_cell_volume": ["ENABLE_LIBXC"],
+        "MODULE_FDE_output_failure": ["ENABLE_LIBXC"],
+        "MODULE_FDE_output_failure_2rank": ["ENABLE_LIBXC", "ENABLE_MPI"],
+        "MODULE_FDE_session_json": ["ENABLE_LIBXC", "ENABLE_JSON"],
+        "MODULE_FDE_session_json_2rank": ["ENABLE_LIBXC", "ENABLE_JSON", "ENABLE_MPI"],
+    }
+    unavailable = []
+    missing = []
+    for name, requirements in conditional.items():
+        disabled = [key + "=" + features[key] for key in requirements
+                    if key in features and features[key] not in ("ON", "TRUE", "1")]
+        if disabled:
+            unavailable.append({"name": name, "reason": ", ".join(disabled)})
+        elif all(key in features for key in requirements) and name not in names:
+            missing.append(name)
+
+    with tempfile.TemporaryDirectory(prefix="fde-ctest-") as directory:
+        junit = Path(directory) / "results.xml"
+        command = selection + ["--output-on-failure", "--no-tests=error",
+                               "--output-junit", str(junit)]
+        completed = subprocess.run(command, check=False)
+        records = []
+        error = None
+        try:
+            for test in ET.parse(junit).getroot().iter("testcase"):
+                skipped = test.find("skipped")
+                failed = test.find("failure")
+                passed = (skipped is None and failed is None
+                          and test.find("error") is None
+                          and test.get("status") in (None, "run"))
+                records.append({"name": test.get("name"), "passed": passed,
+                                "incomplete": skipped is not None or test.get("status") in ("notrun", "disabled"),
+                                "detail": ET.tostring(test, encoding="unicode") if not passed else ""})
+        except (OSError, ET.ParseError) as failure:
+            error = str(failure)
+    executed = sum(not record["incomplete"] for record in records)
+    reported = [record["name"] for record in records]
+    complete = (bool(tests) and len(reported) == len(names)
+                and set(reported) == names and not missing and error is None)
     return {"command": command, "returncode": completed.returncode,
-            "passed": completed.returncode == 0}
+            "scope": "registered_fde_tests_only", "selected": len(tests),
+            "coverage_complete": complete and not unavailable,
+            "executed": executed, "incomplete": [r for r in records if r["incomplete"]],
+            "tests": records, "build_features": features, "unavailable_tests": unavailable,
+            "missing_tests": missing, "report_error": error,
+            "passed": complete and completed.returncode == 0 and all(r["passed"] for r in records)}
 
 
 def write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
@@ -295,8 +378,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-python-tests", action="store_true")
     parser.add_argument("--build-directory", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--python-suite-directory", help=argparse.SUPPRESS)
+    parser.add_argument("--python-suite-pattern", default="test_*.py", help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
     source_root = arguments.source_root.resolve(strict=True)
+    if arguments.python_suite_directory is not None:
+        result = execute_python_suite(source_root, arguments.python_suite_directory,
+                                       arguments.python_suite_pattern)
+        if arguments.output is not None:
+            write_json_atomic(arguments.output.resolve(), result)
+        return 0 if result["passed"] else 1
     manifest_path = arguments.manifest
     if not manifest_path.is_absolute():
         manifest_path = source_root / manifest_path
@@ -319,6 +410,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = {
         "schema_version": 1,
         "passed": passed,
+        "evidence_scope": "development_regression; scientific_acceptance_not_evaluated",
+        "python_status": "not_requested" if arguments.skip_python_tests else "executed",
+        "native_status": "not_requested" if native_result is None else "executed",
         "source_root": str(source_root),
         "manifest": str(manifest_path),
         "references": reference_report,
