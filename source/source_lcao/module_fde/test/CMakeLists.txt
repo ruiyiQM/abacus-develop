@@ -427,10 +427,13 @@ AddTest(
     ../runtime/fde_warm_start.cpp
 )
 
-foreach(suite IN ITEMS regression_runner workflow_helpers euler_helpers)
+foreach(suite IN ITEMS regression_runner workflow_metrics workflow_helpers euler_helpers)
   if(suite STREQUAL "regression_runner")
     set(suite_directory "tools/fde")
     set(suite_pattern "test_run_regression.py")
+  elseif(suite STREQUAL "workflow_metrics")
+    set(suite_directory "tools/fde")
+    set(suite_pattern "test_native_workflow.py")
   elseif(suite STREQUAL "workflow_helpers")
     set(suite_directory "tools/fde/workflow")
     set(suite_pattern "test_*.py")
@@ -447,16 +450,41 @@ foreach(suite IN ITEMS regression_runner workflow_helpers euler_helpers)
   )
 endforeach()
 
+if(ENABLE_LIBXC)
+  foreach(case IN ITEMS molecule_uks molecule_rks periodic_gamma_uks)
+    add_test(
+      NAME MODULE_FDE_native_workflow_${case}
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py
+        $<TARGET_FILE:${ABACUS_BIN_NAME}> ${CMAKE_SOURCE_DIR} --case ${case}
+    )
+    set_tests_properties(MODULE_FDE_native_workflow_${case} PROPERTIES TIMEOUT 180)
+    if(ENABLE_MPI)
+      add_test(
+        NAME MODULE_FDE_native_workflow_${case}_mpi_consistency
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py
+          $<TARGET_FILE:${ABACUS_BIN_NAME}> ${CMAKE_SOURCE_DIR} --case ${case}
+          --launcher ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} {ranks}
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:${ABACUS_BIN_NAME}> ${MPIEXEC_POSTFLAGS}
+      )
+      set_tests_properties(MODULE_FDE_native_workflow_${case}_mpi_consistency PROPERTIES
+        TIMEOUT 420 PROCESSORS 4)
+    endif()
+  endforeach()
+endif()
+
 get_property(fde_tests DIRECTORY PROPERTY TESTS)
 foreach(test IN LISTS fde_tests)
   set_tests_properties(${test} PROPERTIES LABELS "fde;native_unit")
+  if(test MATCHES "^MODULE_FDE_native_workflow_")
+    set_tests_properties(${test} PROPERTIES LABELS "fde;native_runtime;native_workflow")
+  endif()
   get_test_property(${test} TIMEOUT test_timeout)
   if(test_timeout STREQUAL "NOTFOUND")
     set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   endif()
   set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
     "OMP_NUM_THREADS=1" "OPENBLAS_NUM_THREADS=1")
-  if(test MATCHES "_([124])rank$")
+  if(test MATCHES "_([124])rank$" OR test MATCHES "_mpi_consistency$")
     set_property(TEST ${test} APPEND PROPERTY LABELS mpi)
   else()
     set_tests_properties(${test} PROPERTIES PROCESSORS 1)
@@ -472,6 +500,6 @@ foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2ran
   endif()
 endforeach()
 foreach(test IN ITEMS workflow_serial scf_policy band_folding regression_runner
-    workflow_helpers euler_helpers)
+    workflow_metrics workflow_helpers euler_helpers)
   set_tests_properties(MODULE_FDE_${test} PROPERTIES LABELS "fde;python")
 endforeach()

@@ -86,6 +86,21 @@ class DurableRegressionTest(unittest.TestCase):
             self.assertFalse(result["passed"])
             self.assertIn("MODULE_FDE_cell_volume", result["missing_tests"])
 
+    def test_ctest_preserves_native_workflow_metrics_and_rejects_missing_reports(self):
+        if shutil.which("ctest") is None:
+            self.skipTest("ctest executable is unavailable")
+        for payload, passed in (("True", True), ("False", False), (None, False)):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                code = ("import json; print(json.dumps(dict(passed=" + payload + ", padding='x'*4096)))") if payload else "print('missing metrics')"
+                (root / "CTestTestfile.cmake").write_text(
+                    'add_test(MODULE_FDE_native_workflow_probe "' + sys.executable + '" "-c" "' + code + '")\n')
+                result = regression.run_native_ctest(root)
+                self.assertEqual(result["passed"], passed, result)
+                if passed:
+                    self.assertTrue(result["tests"][0]["metrics"]["passed"])
+                    self.assertEqual(len(result["tests"][0]["metrics"]["padding"]), 4096)
+
     def test_current_manifest_and_compact_references_pass(self):
         report = regression.validate_manifest(
             ROOT, ROOT / "tools/fde/regression_manifest.json"

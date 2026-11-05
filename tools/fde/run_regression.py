@@ -309,6 +309,10 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
         "MODULE_FDE_session_json": ["ENABLE_LIBXC", "ENABLE_JSON"],
         "MODULE_FDE_session_json_2rank": ["ENABLE_LIBXC", "ENABLE_JSON", "ENABLE_MPI"],
     }
+    for case in ("molecule_uks", "molecule_rks", "periodic_gamma_uks"):
+        name = "MODULE_FDE_native_workflow_" + case
+        conditional[name] = ["ENABLE_LIBXC"]
+        conditional[name + "_mpi_consistency"] = ["ENABLE_LIBXC", "ENABLE_MPI"]
     unavailable = []
     missing = []
     for name, requirements in conditional.items():
@@ -322,6 +326,7 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="fde-ctest-") as directory:
         junit = Path(directory) / "results.xml"
         command = selection + ["--output-on-failure", "--no-tests=error",
+                               "--test-output-size-passed", "65536",
                                "--output-junit", str(junit)]
         completed = subprocess.run(command, check=False)
         records = []
@@ -333,9 +338,16 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
                 passed = (skipped is None and failed is None
                           and test.find("error") is None
                           and test.get("status") in (None, "run"))
-                records.append({"name": test.get("name"), "passed": passed,
-                                "incomplete": skipped is not None or test.get("status") in ("notrun", "disabled"),
-                                "detail": ET.tostring(test, encoding="unicode") if not passed else ""})
+                record = {"name": test.get("name"), "passed": passed,
+                          "incomplete": skipped is not None or test.get("status") in ("notrun", "disabled"),
+                          "detail": ET.tostring(test, encoding="unicode") if not passed else ""}
+                if passed and str(test.get("name")).startswith("MODULE_FDE_native_workflow_"):
+                    try:
+                        record["metrics"] = json.loads(test.findtext("system-out", ""))
+                        record["passed"] = record["metrics"].get("passed") is True
+                    except (ValueError, AttributeError) as failure:
+                        record.update({"passed": False, "detail": str(failure)})
+                records.append(record)
         except (OSError, ET.ParseError) as failure:
             error = str(failure)
     executed = sum(not record["incomplete"] for record in records)
