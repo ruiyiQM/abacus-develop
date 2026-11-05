@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -116,4 +118,18 @@ TEST(FdeComplexDeterminantArtifact, CannotReadRealSchemaAsComplexOrComplexSchema
     std::istringstream real_input("FDE_DIABATIC_DETERMINANT 1\n");
     EXPECT_THROW(fde::ComplexDeterminantArtifactIO::read(real_input, metric, 1.0e-12),
                  std::invalid_argument);
+}
+
+TEST(FdeArtifactFile, ReportsAnExistingAbsolutePathAndRejectsAFalseConfirmation)
+{
+    const std::string path = testing::TempDir() + "fde_determinant_file_notice.data";
+    {
+        std::ofstream output(path.c_str());
+        output << "temporary artifact\n";
+    }
+    std::ostringstream log;
+    EXPECT_NO_THROW(fde::report_artifact_file(path, log, false));
+    EXPECT_NE(log.str().find(path), std::string::npos);
+    EXPECT_EQ(std::remove(path.c_str()), 0);
+    EXPECT_THROW(fde::report_artifact_file(path, log, true), std::runtime_error);
 }

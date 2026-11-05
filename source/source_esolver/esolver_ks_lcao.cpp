@@ -197,7 +197,7 @@ void ESolver_KS_LCAO<TK, TR>::before_all_runners(BaseCell& basecell, const Input
 
     try
     {
-        this->fde_driver_ = fde::FdeLcaoDriver::create(inp, ucell, this->pv);
+        this->fde_driver_ = fde::FdeLcaoDriver::create(inp, ucell, this->pv, GlobalV::ofs_running);
     }
     catch (const std::exception& error)
     {

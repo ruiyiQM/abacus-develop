@@ -47,6 +47,7 @@ void Driver::driver_run()
 {
     ModuleBase::TITLE("Driver", "driver_run");
     const Input_para& input = PARAM.inp;
+    std::ofstream& running_log = GlobalV::ofs_running;
 
     if (input.fde_task == "diabatic_postprocess")
     {
@@ -93,7 +94,7 @@ void Driver::driver_run()
     const bool direct_mdcell = input.esolver_type == "lj" || input.esolver_type == "dp" || input.esolver_type == "nep";
     UnitCell ucell;
     bool ucell_initialized = false;
-    const auto initialize_ucell = [&ucell, &ucell_initialized, &input]() {
+    const auto initialize_ucell = [&ucell, &ucell_initialized, &input, &running_log]() {
         if (ucell_initialized)
         {
             return;
@@ -101,7 +102,7 @@ void Driver::driver_run()
 
         ucell.setup_from_input(input.latname, input.ntype, input.lmaxmax, input.init_vel, input.fixed_axes);
         ucell.setup_cell(PARAM.globalv.global_in_stru,
-                         GlobalV::ofs_running,
+                         running_log,
                          input.symmetry_prec,
                          input.dfthalf_type,
                          input.pseudo_dir,
@@ -160,7 +161,7 @@ void Driver::driver_run()
         else if (cal == "scf" || cal == "relax" || cal == "cell-relax" || cal == "nscf")
         {
             Relax_Driver rl_driver;
-            rl_driver.relax_driver(p_esolver, ucell, PARAM.inp, GlobalV::ofs_running);
+            rl_driver.relax_driver(p_esolver, ucell, PARAM.inp, running_log);
         }
         else if (cal == "get_s")
         {

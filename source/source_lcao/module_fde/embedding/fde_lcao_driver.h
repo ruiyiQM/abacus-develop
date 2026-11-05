@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <complex>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <vector>
@@ -65,7 +66,8 @@ class FdeLcaoDriver
   public:
     static std::unique_ptr<FdeLcaoDriver> create(const Input_para& input,
                                                  const UnitCell& unit_cell,
-                                                 const Parallel_Orbitals& orbitals);
+                                                 const Parallel_Orbitals& orbitals,
+                                                 std::ostream& running_log);
 
     const FdeRuntimeConfig& config() const;
     const std::vector<std::size_t>& active_orbitals() const;
@@ -132,6 +134,16 @@ class FdeLcaoDriver
         const FdeScfStatus& status);
 
   private:
+    template <typename Scalar>
+    void write_scf_artifacts_impl(
+        Charge& charge,
+        psi::Psi<Scalar, base_device::DEVICE_CPU>& wavefunctions,
+        elecstate::ElecState& electronic_state,
+        hamilt::Hamilt<Scalar, base_device::DEVICE_CPU>& full_hamiltonian,
+        const K_Vectors& kpoints,
+        const Parallel_Orbitals& orbitals,
+        const FdeScfStatus& status);
+
     FdeLcaoDriver(const FdeRuntimeConfig& config,
                   const std::vector<std::size_t>& active_orbitals,
                   std::size_t full_ao_dimension,
@@ -145,7 +157,8 @@ class FdeLcaoDriver
                   int active_alpha_electrons,
                   int active_beta_electrons,
                   const FrozenDensityArtifact& active_initial,
-                  const std::vector<FrozenDensityArtifact>& frozen_environment);
+                  const std::vector<FrozenDensityArtifact>& frozen_environment,
+                  std::ostream& running_log);
 
     FdeRuntimeConfig config_;
     std::vector<std::size_t> active_orbitals_;
@@ -168,6 +181,7 @@ class FdeLcaoDriver
     std::vector<double> frozen_hartree_local_;
     ModulePW::PW_Basis* density_basis_;
     PotFde* embedding_potential_;
+    std::ostream& running_log_;
 };
 
 } // namespace fde

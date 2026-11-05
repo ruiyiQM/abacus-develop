@@ -30,6 +30,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <type_traits>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -64,7 +67,7 @@ class ScopedFdeTimer
     ScopedFdeTimer& operator=(const ScopedFdeTimer&);
 };
 
-FdeRuntimeConfig read_config_file(const std::string& path)
+FdeRuntimeConfig read_config_file(const std::string& path, std::ostream& running_log)
 {
     const ScopedFdeTimer timer("read_config");
     std::ifstream input(path.c_str());
@@ -72,11 +75,13 @@ FdeRuntimeConfig read_config_file(const std::string& path)
     {
         throw std::runtime_error("Cannot open FDE_CONFIG file: " + path);
     }
+    report_artifact_file(path, running_log, true);
     return FdeRuntimeConfigIO::read(input);
 }
 
 FrozenDensityArtifact read_density_file_serial(const std::string& path,
-                                               const double electron_tolerance)
+                                               const double electron_tolerance,
+                                               std::ostream& running_log)
 {
     const ScopedFdeTimer timer("read_density_root");
     std::ifstream input(path.c_str(), std::ios::binary);
@@ -84,6 +89,7 @@ FrozenDensityArtifact read_density_file_serial(const std::string& path,
     {
         throw std::runtime_error("Cannot open FDE density artifact: " + path);
     }
+    report_artifact_file(path, running_log, true);
     return DensityArtifactIO::read_runtime(input, electron_tolerance);
 }
 
@@ -243,7 +249,8 @@ void broadcast_density_artifact_metadata(FrozenDensityArtifact& artifact,
 
 FrozenDensityArtifact read_density_file(const std::string& path,
                                         const double electron_tolerance,
-                                        const Parallel_Orbitals& orbitals)
+                                        const Parallel_Orbitals& orbitals,
+                                        std::ostream& running_log)
 {
 #ifdef __MPI
     MPI_Comm communicator = orbitals.comm();
@@ -271,7 +278,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
     {
         try
         {
-            artifact = read_density_file_serial(path, electron_tolerance);
+            artifact = read_density_file_serial(path, electron_tolerance, running_log);
         }
         catch (const std::exception& exception)
         {
@@ -291,7 +298,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
     return artifact;
 #else
     (void)orbitals;
-    return read_density_file_serial(path, electron_tolerance);
+    return read_density_file_serial(path, electron_tolerance, running_log);
 #endif
 }
 
@@ -525,7 +532,8 @@ FdeLcaoDriver::FdeLcaoDriver(
     const int active_alpha_electrons,
     const int active_beta_electrons,
     const FrozenDensityArtifact& active_initial,
-    const std::vector<FrozenDensityArtifact>& frozen_environment)
+    const std::vector<FrozenDensityArtifact>& frozen_environment,
+    std::ostream& running_log)
     : config_(config),
       active_orbitals_(active_orbitals),
       full_ao_dimension_(full_ao_dimension),
@@ -541,21 +549,27 @@ FdeLcaoDriver::FdeLcaoDriver(
       active_initial_(active_initial),
       frozen_environment_(frozen_environment),
       density_basis_(nullptr),
-      embedding_potential_(nullptr)
+      embedding_potential_(nullptr),
+      running_log_(running_log)
 {
 }
 
 std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     const Input_para& input,
     const UnitCell& unit_cell,
-    const Parallel_Orbitals& orbitals)
+    const Parallel_Orbitals& orbitals,
+    std::ostream& running_log)
 {
     if (input.fde_task != "embedded_scf"
         && input.fde_task != "embedded_session")
     {
         return std::unique_ptr<FdeLcaoDriver>();
     }
-    const FdeRuntimeConfig config = read_config_file(input.fde_config);
+    const FdeRuntimeConfig config = read_config_file(input.fde_config, running_log);
+    if (!config.boundary_twist.empty() && input.gamma_only)
+    {
+        throw std::invalid_argument("FDE finite BOUNDARY_TWIST requires complex LCAO with gamma_only 0");
+    }
     const std::string input_fragment_xc
         = FdeXcPolicy::canonical_fragment(input.dft_functional);
     if (input_fragment_xc != config.fragment_xc)
@@ -633,7 +647,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
     const FrozenDensityArtifact active_initial
         = read_density_file(config.active_density_path,
                             config.electron_tolerance,
-                            orbitals);
+                            orbitals,
+                            running_log);
     if (active_initial.fragment_label != config.active_fragment
         || active_initial.state_label != config.active_state
         || active_initial.alpha_electrons != population.alpha
@@ -661,7 +676,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         const FrozenDensityArtifact artifact
             = read_density_file(path.path,
                                 config.electron_tolerance,
-                                orbitals);
+                                orbitals,
+                                running_log);
         const FragmentDefinition& environment_fragment
             = config.fragments[FdeRuntimeConfigIO::fragment_index(config, path.label)];
         const SpinPopulation environment_population
@@ -702,7 +718,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
                           population.alpha,
                           population.beta,
                           active_initial,
-                          frozen_environment));
+                          frozen_environment,
+                          running_log));
 }
 
 const FdeRuntimeConfig& FdeLcaoDriver::config() const
@@ -730,13 +747,14 @@ void FdeLcaoDriver::reload_session_config(
     const UnitCell& unit_cell,
     const Parallel_Orbitals& orbitals)
 {
-    const FdeRuntimeConfig requested = read_config_file(path);
+    const FdeRuntimeConfig requested = read_config_file(path, running_log_);
     FdeSessionContract::validate_compatible(config_, requested);
 
     FrozenDensityArtifact active
         = read_density_file(requested.active_density_path,
                             requested.electron_tolerance,
-                            orbitals);
+                            orbitals,
+                            running_log_);
     if (active.fragment_label != requested.active_fragment
         || active.state_label != requested.active_state
         || active.alpha_electrons != active_alpha_electrons_
@@ -765,7 +783,8 @@ void FdeLcaoDriver::reload_session_config(
         FrozenDensityArtifact artifact
             = read_density_file(artifact_path.path,
                                 requested.electron_tolerance,
-                                orbitals);
+                                orbitals,
+                                running_log_);
         const FragmentDefinition& fragment
             = requested.fragments[FdeRuntimeConfigIO::fragment_index(
                 requested, artifact_path.label)];
@@ -1305,8 +1324,54 @@ void validate_parallel_layout(const ModulePW::PW_Basis& basis,
 #endif
 }
 
-std::vector<double> gather_matrix_to_root(
-    const ModuleBase::MatrixBlock<double>& matrix,
+std::vector<int> single_boundary_spin_layout(const K_Vectors& kpoints,
+                                               const int nspin,
+                                               const std::vector<double>& boundary_twist,
+                                               const double tolerance)
+{
+    std::vector<int> spin_kpoint(2, -1);
+    if (kpoints.get_nks() != nspin
+        || kpoints.isk.size() < static_cast<std::size_t>(nspin)
+        || kpoints.kvec_d.size() < static_cast<std::size_t>(nspin)
+        || kpoints.wk.size() < static_cast<std::size_t>(nspin))
+    {
+        throw std::runtime_error("FDE determinant output requires one boundary point per physical spin");
+    }
+    for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
+    {
+        const int spin = kpoints.isk[kpoint];
+        if (spin < 0 || spin >= nspin || spin_kpoint[spin] >= 0)
+        {
+            throw std::runtime_error("FDE determinant output has an invalid spin layout");
+        }
+        const double coordinates[3] = {kpoints.kvec_d[kpoint].x,
+                                        kpoints.kvec_d[kpoint].y,
+                                        kpoints.kvec_d[kpoint].z};
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const double shifted = coordinates[axis] + 0.5;
+            const double integer_shift = std::floor(shifted);
+            const double canonical = coordinates[axis] - integer_shift;
+            const double expected = boundary_twist.empty() ? 0.0 : boundary_twist[axis];
+            const double difference = canonical - expected;
+            const double error = std::abs(difference);
+            if (!std::isfinite(coordinates[axis]) || error > tolerance)
+            {
+                throw std::runtime_error("FDE occupied orbitals do not match the declared finite boundary twist");
+            }
+        }
+        spin_kpoint[spin] = kpoint;
+    }
+    if (spin_kpoint[0] < 0 || (nspin == 2 && spin_kpoint[1] < 0))
+    {
+        throw std::runtime_error("FDE determinant output has an incomplete spin layout");
+    }
+    return spin_kpoint;
+}
+
+template <typename Scalar>
+std::vector<Scalar> gather_matrix_to_root(
+    const ModuleBase::MatrixBlock<Scalar>& matrix,
     const std::size_t dimension,
     const Parallel_Orbitals& orbitals,
     const int rank)
@@ -1317,8 +1382,8 @@ std::vector<double> gather_matrix_to_root(
     {
         throw std::runtime_error("FDE AO matrix does not match Parallel_Orbitals");
     }
-    std::vector<double> output(
-        rank == 0 ? dimension * dimension : std::size_t{0});
+    const std::size_t output_size = rank == 0 ? dimension * dimension : std::size_t{0};
+    std::vector<Scalar> output(output_size);
 #ifdef __MPI
     if (matrix.desc == nullptr
         || matrix.desc[2] != static_cast<int>(dimension)
@@ -1348,8 +1413,9 @@ std::vector<double> gather_matrix_to_root(
     return output;
 }
 
-std::vector<double> gather_wavefunctions_to_root(
-    psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+template <typename Scalar>
+std::vector<Scalar> gather_wavefunctions_to_root(
+    psi::Psi<Scalar, base_device::DEVICE_CPU>& wavefunctions,
     const int kpoint,
     const std::size_t dimension,
     const int global_band_count,
@@ -1361,9 +1427,9 @@ std::vector<double> gather_wavefunctions_to_root(
         throw std::runtime_error("FDE wavefunction gather requires solved bands");
     }
     wavefunctions.fix_k(kpoint);
-    std::vector<double> output(
-        rank == 0 ? dimension * static_cast<std::size_t>(global_band_count)
-                  : std::size_t{0});
+    const std::size_t output_size
+        = rank == 0 ? dimension * static_cast<std::size_t>(global_band_count) : std::size_t{0};
+    std::vector<Scalar> output(output_size);
 #ifdef __MPI
     if (orbitals.desc_wfc[2] != static_cast<int>(dimension)
         || orbitals.desc_wfc[3] != global_band_count)
@@ -1404,20 +1470,37 @@ std::vector<double> gather_wavefunctions_to_root(
     return output;
 }
 
-void append_occupied_spin(const std::vector<double>& global_wavefunctions,
+template <typename Scalar>
+void append_occupied_spin(const std::vector<Scalar>& global_wavefunctions,
                           const elecstate::ElecState& electronic_state,
                           const int kpoint,
                           const int electron_count,
                           const std::size_t dimension,
                           const int solved_band_count,
                           const std::string& fragment_label,
-                          OccupiedSpinOrbitals& output)
+                          const double occupied_weight,
+                          ScalarOccupiedSpinOrbitals<Scalar>& output)
 {
     if (electron_count < 0 || electron_count > solved_band_count
         || global_wavefunctions.size()
                != dimension * static_cast<std::size_t>(solved_band_count))
     {
         throw std::runtime_error("FDE occupied population does not fit the solved band space");
+    }
+    if (!std::isfinite(occupied_weight) || occupied_weight <= 0.0)
+    {
+        throw std::runtime_error("FDE determinant has an invalid single-point occupation weight");
+    }
+    for (int band = 0; band < solved_band_count; ++band)
+    {
+        const double expected = band < electron_count ? occupied_weight : 0.0;
+        const double actual = electronic_state.wg(kpoint, band);
+        const double difference = actual - expected;
+        const double error = std::abs(difference);
+        if (!std::isfinite(actual) || error > 1.0e-10)
+        {
+            throw std::runtime_error("FDE determinant requires integer occupied spin orbitals; use fixed occupations");
+        }
     }
     output.coefficients.assign(dimension * static_cast<std::size_t>(electron_count), 0.0);
     output.orbital_energies_ry.resize(static_cast<std::size_t>(electron_count));
@@ -1568,11 +1651,12 @@ void close_artifact(std::ofstream& output,
 
 } // namespace
 
-void FdeLcaoDriver::write_scf_artifacts(
+template <typename Scalar>
+void FdeLcaoDriver::write_scf_artifacts_impl(
     Charge& charge,
-    psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
+    psi::Psi<Scalar, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
-    hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
+    hamilt::Hamilt<Scalar, base_device::DEVICE_CPU>& full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
     const FdeScfStatus& status)
@@ -1656,27 +1740,17 @@ void FdeLcaoDriver::write_scf_artifacts(
                                                    *density_basis_);
     }
 
-    int spin_kpoint[2] = {-1, -1};
-    std::vector<double> global_wavefunctions[2];
-    std::vector<double> gathered_overlap;
-    std::vector<double> gathered_hamiltonian[2];
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    const bool export_determinant = !complex_scalar || !config_.boundary_twist.empty();
+    std::vector<int> spin_kpoint;
+    std::vector<Scalar> global_wavefunctions[2];
+    std::vector<Scalar> gathered_overlap;
+    std::vector<Scalar> gathered_hamiltonian[2];
+    if (status.converged && export_determinant)
     {
         const ScopedFdeTimer timer("gather_ao_artifacts");
-        for (int kpoint = 0; kpoint < kpoints.get_nks(); ++kpoint)
-        {
-            const int spin = kpoints.isk[kpoint];
-            if (spin < 0 || spin > 1 || spin_kpoint[spin] != -1)
-            {
-                throw std::runtime_error(
-                    "FDE output requires exactly one Gamma point per spin");
-            }
-            spin_kpoint[spin] = kpoint;
-        }
-        if (spin_kpoint[0] < 0 || (nspin_ == 2 && spin_kpoint[1] < 0)
-            || kpoints.get_nks() != nspin_)
-        {
-            throw std::runtime_error("FDE output has an incomplete Gamma spin layout");
-        }
+        spin_kpoint = single_boundary_spin_layout(
+            kpoints, nspin_, config_.boundary_twist, config_.symmetry_tolerance);
         for (int spin = 0; spin < nspin_; ++spin)
         {
             global_wavefunctions[spin]
@@ -1690,8 +1764,8 @@ void FdeLcaoDriver::write_scf_artifacts(
         for (int spin = 0; spin < nspin_; ++spin)
         {
             full_hamiltonian.updateHk(spin_kpoint[spin]);
-            ModuleBase::MatrixBlock<double> local_hamiltonian;
-            ModuleBase::MatrixBlock<double> local_overlap;
+            ModuleBase::MatrixBlock<Scalar> local_hamiltonian;
+            ModuleBase::MatrixBlock<Scalar> local_overlap;
             full_hamiltonian.matrix(local_hamiltonian, local_overlap);
             if (spin == 0)
             {
@@ -1744,6 +1818,7 @@ void FdeLcaoDriver::write_scf_artifacts(
             }
             DensityArtifactIO::write_binary(density_output, density);
             close_artifact(density_output, density_path, "density");
+            report_artifact_file(density_path, running_log_, false);
         }
 
         // A non-self-consistent Hamiltonian, energy, and occupied subspace are not
@@ -1780,12 +1855,34 @@ void FdeLcaoDriver::write_scf_artifacts(
                 bands,
                 std::max(config_.symmetry_tolerance, 1.0e-12));
             close_artifact(band_output, band_path, "k-point band");
+            report_artifact_file(band_path, running_log_, false);
         }
 
+        if (!export_determinant)
+        {
+            return;
+        }
         {
             const ScopedFdeTimer timer("write_fragment_artifact");
-            FragmentScfArtifact fragment;
-            fragment.schema_version = 1;
+            ScalarFragmentScfArtifact<Scalar> fragment;
+            fragment.schema_version = complex_scalar ? 2 : 1;
+            fragment.boundary_twist = config_.boundary_twist;
+            if (complex_scalar)
+            {
+                std::ostringstream context;
+                context << std::setprecision(17);
+                const std::vector<std::string> identities = {
+                    density.pseudopotential_fingerprint, density.orbital_fingerprint,
+                    density.core_density_fingerprint, density.grid_fingerprint,
+                    density.xc_functional, density.kinetic_functional};
+                for (const auto& identity : identities)
+                {
+                    context << identity.size() << ':' << identity;
+                }
+                context << ':' << density.grid_x << ':' << density.grid_y << ':' << density.grid_z
+                        << ':' << density.cell_volume_bohr3;
+                fragment.resource_fingerprint = context.str();
+            }
             fragment.state_label = config_.active_state;
             fragment.fragment_label = config_.active_fragment;
             fragment.geometry_fingerprint = density.geometry_fingerprint;
@@ -1802,6 +1899,7 @@ void FdeLcaoDriver::write_scf_artifacts(
                                  full_ao_dimension_,
                                  global_band_count,
                                  config_.active_fragment,
+                                 kpoints.wk[spin_kpoint[0]],
                                  fragment.alpha);
             append_occupied_spin(global_wavefunctions[1],
                                  electronic_state,
@@ -1810,6 +1908,7 @@ void FdeLcaoDriver::write_scf_artifacts(
                                  full_ao_dimension_,
                                  global_band_count,
                                  config_.active_fragment,
+                                 kpoints.wk[spin_kpoint[1]],
                                  fragment.beta);
             fragment.ao_overlap.swap(gathered_overlap);
             fragment.hamiltonian_alpha_ry.swap(gathered_hamiltonian[0]);
@@ -1829,151 +1928,39 @@ void FdeLcaoDriver::write_scf_artifacts(
                 throw std::runtime_error(
                     "Cannot create FDE fragment SCF artifact: " + fragment_path);
             }
-            FragmentScfArtifactIO::write(fragment_output,
+            ScalarFragmentScfArtifactIO<Scalar>::write(fragment_output,
                                          fragment,
                                          config_.symmetry_tolerance);
             close_artifact(fragment_output, fragment_path, "fragment SCF");
+            report_artifact_file(fragment_path, running_log_, false);
         }
     });
 }
 
 void FdeLcaoDriver::write_scf_artifacts(
     Charge& charge,
-    psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+    psi::Psi<double, base_device::DEVICE_CPU>& wavefunctions,
     elecstate::ElecState& electronic_state,
-    hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>&
-        full_hamiltonian,
+    hamilt::Hamilt<double, base_device::DEVICE_CPU>& full_hamiltonian,
     const K_Vectors& kpoints,
     const Parallel_Orbitals& orbitals,
     const FdeScfStatus& status)
 {
-    (void)full_hamiltonian;
-    if (embedding_potential_ == nullptr || density_basis_ == nullptr
-        || charge.nspin != nspin_ || charge.rhopw == nullptr
-        || charge.rho == nullptr || charge.rho_save == nullptr
-        || charge.rhopw != density_basis_
-        || wavefunctions.get_nk() != kpoints.get_nks()
-        || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
-        || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
-    {
-        throw std::runtime_error("FDE k-point SCF artifact output contract is incomplete");
-    }
-    if (status.iterations <= 0 || !std::isfinite(status.density_residual)
-        || status.density_residual < 0.0)
-    {
-        throw std::runtime_error("FDE k-point SCF artifact status is invalid");
-    }
-    validate_parallel_layout(*density_basis_, orbitals);
-#ifdef __MPI
-    const int global_band_count = orbitals.get_wfc_global_nbands();
-#else
-    const int global_band_count = wavefunctions.get_nbands();
-#endif
+    write_scf_artifacts_impl(charge, wavefunctions, electronic_state, full_hamiltonian,
+                             kpoints, orbitals, status);
+}
 
-    const std::size_t local_grid_size
-        = static_cast<std::size_t>(density_basis_->nrxx);
-    const double* const primary_checkpoint
-        = status.converged ? charge.rho_save[0] : charge.rho[0];
-    std::vector<double> local_alpha;
-    std::vector<double> local_beta;
-    {
-        const ScopedFdeTimer timer("evaluate_checkpoint");
-        if (nspin_ == 1)
-        {
-            local_alpha.resize(local_grid_size);
-            local_beta.resize(local_grid_size);
-            for (std::size_t point = 0; point < local_grid_size; ++point)
-            {
-                local_alpha[point] = 0.5 * primary_checkpoint[point];
-                local_beta[point] = local_alpha[point];
-            }
-        }
-        else
-        {
-            const double* const beta_checkpoint
-                = status.converged ? charge.rho_save[1] : charge.rho[1];
-            local_alpha.assign(primary_checkpoint,
-                               primary_checkpoint + local_grid_size);
-            local_beta.assign(beta_checkpoint,
-                              beta_checkpoint + local_grid_size);
-        }
-        normalize_nonnegative_spin_density(local_alpha.data(),
-                                           local_beta.data(),
-                                           local_grid_size,
-                                           active_alpha_electrons_,
-                                           active_beta_electrons_,
-                                           cell_volume_bohr3_,
-                                           *density_basis_);
-        SpinDensity active_density;
-        active_density.alpha_bohr3 = local_alpha;
-        active_density.beta_bohr3 = local_beta;
-        (void)embedding_potential_->evaluate(active_density);
-    }
-    std::vector<double> global_alpha;
-    std::vector<double> global_beta;
-    {
-        const ScopedFdeTimer timer("gather_checkpoint_density");
-        global_alpha = DensityGridPartition::gather_to_root(
-            local_alpha.data(), *density_basis_);
-        global_beta = DensityGridPartition::gather_to_root(
-            local_beta.data(), *density_basis_);
-    }
-    write_root_artifacts(orbitals, [&]() {
-        FrozenDensityArtifact density;
-        const std::string density_path
-            = config_.output_prefix
-              + (status.converged ? ".fde_density" : ".partial.fde_density");
-        {
-            const ScopedFdeTimer timer("write_density_checkpoint");
-            density = active_initial_;
-            density.cell_volume_bohr3 = cell_volume_bohr3_;
-            density.schema_version = 2;
-            density.freeze_thaw_cycle = active_initial_.freeze_thaw_cycle + 1;
-            density.scf_converged = status.converged;
-            density.scf_iterations = status.iterations;
-            density.scf_density_residual = status.density_residual;
-            density.rho_alpha_bohr3.swap(global_alpha);
-            density.rho_beta_bohr3.swap(global_beta);
-            std::ofstream density_output(density_path.c_str(), std::ios::binary);
-            if (!density_output)
-            {
-                throw std::runtime_error(
-                    "Cannot create FDE density artifact: " + density_path);
-            }
-            DensityArtifactIO::write_binary(density_output, density);
-            close_artifact(density_output, density_path, "density");
-        }
-        if (!status.converged)
-        {
-            return;
-        }
-
-        const ScopedFdeTimer timer("write_kpoint_bands");
-        const FdeKPointBandArtifact bands
-            = make_kpoint_band_artifact(electronic_state,
-                                        kpoints,
-                                        density,
-                                        config_.active_state,
-                                        config_.active_fragment,
-                                        full_ao_dimension_,
-                                        global_band_count,
-                                        nspin_);
-        FdeKPointBandArtifactIO::validate(
-            bands,
-            std::max(config_.symmetry_tolerance, 1.0e-12));
-        const std::string band_path = config_.output_prefix + ".fde_kbands";
-        std::ofstream band_output(band_path.c_str());
-        if (!band_output)
-        {
-            throw std::runtime_error(
-                "Cannot create FDE k-point band artifact: " + band_path);
-        }
-        FdeKPointBandArtifactIO::write(
-            band_output,
-            bands,
-            std::max(config_.symmetry_tolerance, 1.0e-12));
-        close_artifact(band_output, band_path, "k-point band");
-    });
+void FdeLcaoDriver::write_scf_artifacts(
+    Charge& charge,
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& wavefunctions,
+    elecstate::ElecState& electronic_state,
+    hamilt::Hamilt<std::complex<double>, base_device::DEVICE_CPU>& full_hamiltonian,
+    const K_Vectors& kpoints,
+    const Parallel_Orbitals& orbitals,
+    const FdeScfStatus& status)
+{
+    write_scf_artifacts_impl(charge, wavefunctions, electronic_state, full_hamiltonian,
+                             kpoints, orbitals, status);
 }
 
 } // namespace fde

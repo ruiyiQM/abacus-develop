@@ -26,6 +26,10 @@ void validate_finite_state_boundary(int schema_version,
                                     const std::vector<double>& boundary_twist,
                                     bool complex_scalar);
 
+void report_artifact_file(const std::string& path,
+                          std::ostream& running_log,
+                          bool reading);
+
 template <typename Scalar>
 struct ScalarOccupiedSpinOrbitals
 {

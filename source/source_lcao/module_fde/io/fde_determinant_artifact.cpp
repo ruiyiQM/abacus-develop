@@ -3,9 +3,12 @@
 #include "source_lcao/module_fde/embedding/fde_ao_projection.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
+#include <iostream>
 #include <istream>
 #include <ostream>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -271,6 +274,25 @@ void validate_finite_state_boundary(const int schema_version,
                 throw std::invalid_argument("FDE boundary twist must be finite in [-0.5, 0.5)");
             }
         }
+    }
+}
+
+void report_artifact_file(const std::string& path,
+                          std::ostream& running_log,
+                          const bool reading)
+{
+    char* resolved = ::realpath(path.c_str(), nullptr);
+    std::unique_ptr<char, decltype(&std::free)> owned_path(resolved, &std::free);
+    if (resolved == nullptr)
+    {
+        throw std::runtime_error("Cannot resolve FDE artifact path: " + path);
+    }
+    const std::string operation = reading ? "Read file: " : "Wrote file: ";
+    const std::string notice = operation + resolved;
+    running_log << notice << '\n';
+    if (reading)
+    {
+        std::cout << notice << '\n';
     }
 }
 
