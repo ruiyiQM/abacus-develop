@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace fde
 {
@@ -25,7 +26,8 @@ void require_token(std::istream& input, const char* expected)
     }
 }
 
-void validate_matrix(const std::vector<double>& matrix,
+template <typename Scalar>
+void validate_matrix(const std::vector<Scalar>& matrix,
                      const std::size_t dimension,
                      const double tolerance)
 {
@@ -37,19 +39,23 @@ void validate_matrix(const std::vector<double>& matrix,
     {
         for (std::size_t row = 0; row < dimension; ++row)
         {
-            if (!std::isfinite(matrix[row + column * dimension])
-                || std::fabs(matrix[row + column * dimension]
-                             - matrix[column + row * dimension]) > tolerance)
+            const Scalar value = matrix[row + column * dimension];
+            const double magnitude = std::abs(value);
+            const Scalar transpose = conjugate_scalar(matrix[column + row * dimension]);
+            const Scalar difference = value - transpose;
+            const double error = std::abs(difference);
+            if (!std::isfinite(magnitude) || error > tolerance)
             {
-                throw std::invalid_argument("FDE linearized Hamiltonian must be finite and symmetric");
+                throw std::invalid_argument("FDE linearized Hamiltonian must be finite and Hermitian");
             }
         }
     }
 }
 
+template <typename Scalar>
 void write_matrix(std::ostream& output,
                   const char* label,
-                  const std::vector<double>& matrix)
+                  const std::vector<Scalar>& matrix)
 {
     output << label << ' ' << matrix.size();
     for (std::size_t index = 0; index < matrix.size(); ++index)
@@ -59,7 +65,8 @@ void write_matrix(std::ostream& output,
     output << '\n';
 }
 
-std::vector<double> read_matrix(std::istream& input,
+template <typename Scalar>
+std::vector<Scalar> read_matrix(std::istream& input,
                                 const char* label,
                                 const std::size_t expected_size)
 {
@@ -70,7 +77,7 @@ std::vector<double> read_matrix(std::istream& input,
     {
         throw std::invalid_argument("FDE linearized Hamiltonian has an unexpected size");
     }
-    std::vector<double> result(size, 0.0);
+    std::vector<Scalar> result(size, 0.0);
     for (std::size_t index = 0; index < size; ++index)
     {
         input >> result[index];
@@ -78,8 +85,9 @@ std::vector<double> read_matrix(std::istream& input,
     return result;
 }
 
-double contraction(const std::vector<double>& density,
-                   const std::vector<double>& hamiltonian,
+template <typename Scalar>
+Scalar contraction(const std::vector<Scalar>& density,
+                   const std::vector<Scalar>& hamiltonian,
                    const std::size_t dimension)
 {
     if (density.size() != dimension * dimension
@@ -87,7 +95,7 @@ double contraction(const std::vector<double>& density,
     {
         throw std::invalid_argument("FDE transition-energy contraction dimensions are inconsistent");
     }
-    double result = 0.0;
+    Scalar result = 0.0;
     for (std::size_t column = 0; column < dimension; ++column)
     {
         for (std::size_t row = 0; row < dimension; ++row)
@@ -101,10 +109,19 @@ double contraction(const std::vector<double>& density,
 
 } // namespace
 
-void LinearizedStateArtifactIO::validate(const LinearizedStateArtifact& artifact,
+template <typename Scalar>
+void ScalarLinearizedStateArtifactIO<Scalar>::validate(const ScalarLinearizedStateArtifact<Scalar>& artifact,
                                          const double symmetry_tolerance)
 {
-    if (artifact.schema_version != 1 || artifact.ao_dimension == 0
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    validate_finite_state_boundary(artifact.schema_version, artifact.boundary_twist, complex_scalar);
+    if (complex_scalar
+        && (artifact.orbital_fingerprint.empty()
+            || artifact.orbital_fingerprint.find_first_of(" \t\r\n") != std::string::npos))
+    {
+        throw std::invalid_argument("FDE complex linearized state requires an orbital fingerprint");
+    }
+    if (artifact.ao_dimension == 0
         || artifact.state_label.empty()
         || artifact.state_label.find_first_of(" \t\r\n") != std::string::npos
         || artifact.geometry_fingerprint.empty()
@@ -122,15 +139,26 @@ void LinearizedStateArtifactIO::validate(const LinearizedStateArtifact& artifact
                     symmetry_tolerance);
 }
 
-void LinearizedStateArtifactIO::write(std::ostream& output,
-                                      const LinearizedStateArtifact& artifact,
+template <typename Scalar>
+void ScalarLinearizedStateArtifactIO<Scalar>::write(std::ostream& output,
+                                      const ScalarLinearizedStateArtifact<Scalar>& artifact,
                                       const double symmetry_tolerance)
 {
-    LinearizedStateArtifactIO::validate(artifact, symmetry_tolerance);
+    ScalarLinearizedStateArtifactIO<Scalar>::validate(artifact, symmetry_tolerance);
     output << std::setprecision(17);
-    output << "FDE_LINEARIZED_STATE 1\n";
+    output << "FDE_LINEARIZED_STATE " << artifact.schema_version << '\n';
     output << "STATE " << artifact.state_label << '\n';
     output << "GEOMETRY " << artifact.geometry_fingerprint << '\n';
+    if (!artifact.boundary_twist.empty())
+    {
+        output << "ORBITALS " << artifact.orbital_fingerprint << '\n';
+        output << "BOUNDARY_TWIST";
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            output << ' ' << artifact.boundary_twist[axis];
+        }
+        output << '\n';
+    }
     output << "AO_DIMENSION " << artifact.ao_dimension << '\n';
     output << "REFERENCE_ENERGY_RY " << artifact.reference_energy_ry << '\n';
     write_matrix(output, "HAMILTONIAN_ALPHA_RY", artifact.hamiltonian_alpha_ry);
@@ -142,26 +170,43 @@ void LinearizedStateArtifactIO::write(std::ostream& output,
     }
 }
 
-LinearizedStateArtifact LinearizedStateArtifactIO::read(
+template <typename Scalar>
+ScalarLinearizedStateArtifact<Scalar> ScalarLinearizedStateArtifactIO<Scalar>::read(
     std::istream& input,
     const double symmetry_tolerance)
 {
-    LinearizedStateArtifact result;
+    ScalarLinearizedStateArtifact<Scalar> result;
     require_token(input, "FDE_LINEARIZED_STATE");
-    input >> result.schema_version;
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    const int expected_version = complex_scalar ? 2 : 1;
+    if (!(input >> result.schema_version) || result.schema_version != expected_version)
+    {
+        throw std::invalid_argument("FDE linearized-state scalar type/version mismatch");
+    }
     require_token(input, "STATE");
     input >> result.state_label;
     require_token(input, "GEOMETRY");
     input >> result.geometry_fingerprint;
+    if (complex_scalar)
+    {
+        require_token(input, "ORBITALS");
+        input >> result.orbital_fingerprint;
+        require_token(input, "BOUNDARY_TWIST");
+        result.boundary_twist.resize(3);
+        input >> result.boundary_twist[0] >> result.boundary_twist[1] >> result.boundary_twist[2];
+    }
     require_token(input, "AO_DIMENSION");
-    input >> result.ao_dimension;
+    if (!(input >> result.ao_dimension) || result.ao_dimension == 0)
+    {
+        throw std::invalid_argument("FDE linearized-state AO dimension is malformed");
+    }
     require_token(input, "REFERENCE_ENERGY_RY");
     input >> result.reference_energy_ry;
     const std::size_t matrix_size = result.ao_dimension * result.ao_dimension;
     result.hamiltonian_alpha_ry
-        = read_matrix(input, "HAMILTONIAN_ALPHA_RY", matrix_size);
+        = read_matrix<Scalar>(input, "HAMILTONIAN_ALPHA_RY", matrix_size);
     result.hamiltonian_beta_ry
-        = read_matrix(input, "HAMILTONIAN_BETA_RY", matrix_size);
+        = read_matrix<Scalar>(input, "HAMILTONIAN_BETA_RY", matrix_size);
     require_token(input, "END");
     if (!input)
     {
@@ -172,13 +217,14 @@ LinearizedStateArtifact LinearizedStateArtifactIO::read(
     {
         throw std::invalid_argument("FDE linearized-state artifact has trailing content");
     }
-    LinearizedStateArtifactIO::validate(result, symmetry_tolerance);
+    ScalarLinearizedStateArtifactIO<Scalar>::validate(result, symmetry_tolerance);
     return result;
 }
 
-LinearizedTransitionEnergy::LinearizedTransitionEnergy(
-    const std::vector<LinearizedStateArtifact>& states,
-    const std::vector<double>& ao_overlap,
+template <typename Scalar>
+ScalarLinearizedTransitionEnergy<Scalar>::ScalarLinearizedTransitionEnergy(
+    const std::vector<ScalarLinearizedStateArtifact<Scalar>>& states,
+    const std::vector<Scalar>& ao_overlap,
     const double singular_value_tolerance)
     : states_(states),
       ao_overlap_(ao_overlap),
@@ -197,9 +243,11 @@ LinearizedTransitionEnergy::LinearizedTransitionEnergy(
     }
     for (std::size_t index = 0; index < states_.size(); ++index)
     {
-        LinearizedStateArtifactIO::validate(states_[index], 1.0e-8);
+        ScalarLinearizedStateArtifactIO<Scalar>::validate(states_[index], 1.0e-8);
         if (states_[index].ao_dimension != dimension
             || states_[index].geometry_fingerprint != states_[0].geometry_fingerprint
+            || states_[index].orbital_fingerprint != states_[0].orbital_fingerprint
+            || states_[index].boundary_twist != states_[0].boundary_twist
             || !labels.insert(states_[index].state_label).second)
         {
             throw std::invalid_argument("FDE linearized states are incompatible or duplicated");
@@ -207,19 +255,21 @@ LinearizedTransitionEnergy::LinearizedTransitionEnergy(
     }
 }
 
-std::string LinearizedTransitionEnergy::name() const
+template <typename Scalar>
+std::string ScalarLinearizedTransitionEnergy<Scalar>::name() const
 {
     return "symmetric_linearized";
 }
 
-double LinearizedTransitionEnergy::evaluate_ry(
-    const DiabaticDeterminantArtifact& bra,
-    const DiabaticDeterminantArtifact& ket,
-    const SpinTransitionDensityMatrix& transition_density,
+template <typename Scalar>
+Scalar ScalarLinearizedTransitionEnergy<Scalar>::evaluate_ry(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+    const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+    const ScalarSpinTransitionDensityMatrix<Scalar>& transition_density,
     const std::size_t ao_dimension) const
 {
     (void)ket;
-    const LinearizedStateArtifact* state = nullptr;
+    const ScalarLinearizedStateArtifact<Scalar>* state = nullptr;
     for (std::size_t index = 0; index < states_.size(); ++index)
     {
         if (states_[index].state_label == bra.state_label)
@@ -228,8 +278,11 @@ double LinearizedTransitionEnergy::evaluate_ry(
             break;
         }
     }
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
     if (state == nullptr || state->ao_dimension != ao_dimension
-        || state->geometry_fingerprint != bra.geometry_fingerprint)
+        || state->geometry_fingerprint != bra.geometry_fingerprint
+        || state->boundary_twist != bra.boundary_twist
+        || (complex_scalar && state->orbital_fingerprint != bra.orbital_fingerprint))
     {
         throw std::invalid_argument("FDE transition determinant has no compatible linearized state");
     }
@@ -238,13 +291,13 @@ double LinearizedTransitionEnergy::evaluate_ry(
     {
         throw std::invalid_argument("FDE transition density dimensions are inconsistent");
     }
-    const DeterminantTransition self = ElectronicCoupling::transition(
+    const ScalarDeterminantTransition<Scalar> self = ScalarElectronicCoupling<Scalar>::transition(
         bra,
         bra,
         ao_overlap_,
         singular_value_tolerance_);
-    std::vector<double> delta_alpha(ao_dimension * ao_dimension, 0.0);
-    std::vector<double> delta_beta(ao_dimension * ao_dimension, 0.0);
+    std::vector<Scalar> delta_alpha(ao_dimension * ao_dimension, 0.0);
+    std::vector<Scalar> delta_beta(ao_dimension * ao_dimension, 0.0);
     for (std::size_t index = 0; index < delta_alpha.size(); ++index)
     {
         delta_alpha[index]
@@ -256,5 +309,10 @@ double LinearizedTransitionEnergy::evaluate_ry(
            + contraction(delta_alpha, state->hamiltonian_alpha_ry, ao_dimension)
            + contraction(delta_beta, state->hamiltonian_beta_ry, ao_dimension);
 }
+
+template class ScalarLinearizedStateArtifactIO<double>;
+template class ScalarLinearizedStateArtifactIO<std::complex<double>>;
+template class ScalarLinearizedTransitionEnergy<double>;
+template class ScalarLinearizedTransitionEnergy<std::complex<double>>;
 
 } // namespace fde

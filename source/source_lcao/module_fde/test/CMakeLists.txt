@@ -70,6 +70,7 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_fragment_artifact
   SOURCES fde_fragment_artifact_test.cpp
+    test_fde_fragment_artifact.cpp
     ../io/fde_fragment_artifact.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
@@ -327,6 +328,7 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_linearized_state
   SOURCES fde_linearized_state_test.cpp
+    test_fde_linearized_state.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_electronic_coupling.cpp

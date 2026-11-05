@@ -22,6 +22,10 @@ inline std::complex<double> conjugate_scalar(const std::complex<double>& value)
     return std::conj(value);
 }
 
+void validate_finite_state_boundary(int schema_version,
+                                    const std::vector<double>& boundary_twist,
+                                    bool complex_scalar);
+
 template <typename Scalar>
 struct ScalarOccupiedSpinOrbitals
 {

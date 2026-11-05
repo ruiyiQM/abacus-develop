@@ -68,3 +68,11 @@ TEST(FdeFragmentArtifact, RejectsPartialScfResults)
     EXPECT_THROW(fde::FragmentScfArtifactIO::validate(value, 1.0e-12),
                  std::invalid_argument);
 }
+
+TEST(FdeFragmentArtifact, RejectsOccupiedCoefficientsOutsideOwnedAoSpace)
+{
+    fde::FragmentScfArtifact value = artifact();
+    value.alpha.coefficients[1] = 0.1;
+    EXPECT_THROW(fde::FragmentScfArtifactIO::validate(value, 1.0e-12),
+                 std::invalid_argument);
+}

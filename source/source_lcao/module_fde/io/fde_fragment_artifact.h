@@ -19,7 +19,8 @@ namespace fde
  * at the final active density; the occupied columns retain zero coefficients
  * outside the active fragment AO space.
  */
-struct FragmentScfArtifact
+template <typename Scalar>
+struct ScalarFragmentScfArtifact
 {
     int schema_version;
     std::string state_label;
@@ -31,11 +32,12 @@ struct FragmentScfArtifact
     bool scf_converged;
     std::size_t ao_dimension;
     std::vector<std::size_t> active_orbitals;
-    OccupiedSpinOrbitals alpha;
-    OccupiedSpinOrbitals beta;
-    std::vector<double> ao_overlap;
-    std::vector<double> hamiltonian_alpha_ry;
-    std::vector<double> hamiltonian_beta_ry;
+    ScalarOccupiedSpinOrbitals<Scalar> alpha;
+    ScalarOccupiedSpinOrbitals<Scalar> beta;
+    std::vector<Scalar> ao_overlap;
+    std::vector<Scalar> hamiltonian_alpha_ry;
+    std::vector<Scalar> hamiltonian_beta_ry;
+    std::vector<double> boundary_twist;
     double subsystem_total_energy_ry;
     double ion_ion_energy_ry;
     double hartree_cross_energy_ry;
@@ -43,19 +45,25 @@ struct FragmentScfArtifact
     double nonadditive_xc_energy_ry;
 };
 
-class FragmentScfArtifactIO
+template <typename Scalar>
+class ScalarFragmentScfArtifactIO
 {
   public:
-    static void validate(const FragmentScfArtifact& artifact,
+    static void validate(const ScalarFragmentScfArtifact<Scalar>& artifact,
                          double symmetry_tolerance);
 
     static void write(std::ostream& output,
-                      const FragmentScfArtifact& artifact,
+                      const ScalarFragmentScfArtifact<Scalar>& artifact,
                       double symmetry_tolerance);
 
-    static FragmentScfArtifact read(std::istream& input,
+    static ScalarFragmentScfArtifact<Scalar> read(std::istream& input,
                                     double symmetry_tolerance);
 };
+
+using FragmentScfArtifact = ScalarFragmentScfArtifact<double>;
+using ComplexFragmentScfArtifact = ScalarFragmentScfArtifact<std::complex<double>>;
+using FragmentScfArtifactIO = ScalarFragmentScfArtifactIO<double>;
+using ComplexFragmentScfArtifactIO = ScalarFragmentScfArtifactIO<std::complex<double>>;
 
 } // namespace fde
 

@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace fde
 {
@@ -34,7 +35,8 @@ void validate_token(const std::string& value, const char* description)
     }
 }
 
-void validate_matrix(const std::vector<double>& matrix,
+template <typename Scalar>
+void validate_matrix(const std::vector<Scalar>& matrix,
                      const std::size_t dimension,
                      const double tolerance,
                      const char* description)
@@ -48,24 +50,31 @@ void validate_matrix(const std::vector<double>& matrix,
     {
         for (std::size_t row = 0; row < dimension; ++row)
         {
-            const double value = matrix[row + column * dimension];
-            if (!std::isfinite(value)
-                || std::fabs(value - matrix[column + row * dimension]) > tolerance)
+            const Scalar value = matrix[row + column * dimension];
+            const double magnitude = std::abs(value);
+            const Scalar transpose = conjugate_scalar(matrix[column + row * dimension]);
+            const Scalar difference = value - transpose;
+            const double error = std::abs(difference);
+            if (!std::isfinite(magnitude) || error > tolerance)
             {
                 throw std::invalid_argument(std::string("FDE fragment ") + description
-                                            + " must be finite and symmetric");
+                                            + " must be finite and Hermitian");
             }
         }
     }
 }
 
-void validate_orbitals(const OccupiedSpinOrbitals& orbitals,
+template <typename Scalar>
+void validate_orbitals(const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                        const std::size_t dimension,
-                       const std::string& fragment_label)
+                       const std::string& fragment_label,
+                       const std::vector<std::size_t>& active_orbitals,
+                       const double tolerance)
 {
     const std::size_t count
-        = DeterminantArtifactIO::occupied_count(orbitals, dimension);
-    if (orbitals.orbital_energies_ry.size() != count
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(orbitals, dimension);
+    if (count > active_orbitals.size()
+        || orbitals.orbital_energies_ry.size() != count
         || orbitals.source_fragment_labels.size() != count)
     {
         throw std::invalid_argument("FDE fragment occupied-orbital metadata is inconsistent");
@@ -79,17 +88,24 @@ void validate_orbitals(const OccupiedSpinOrbitals& orbitals,
         }
         for (std::size_t ao = 0; ao < dimension; ++ao)
         {
-            if (!std::isfinite(orbitals.coefficients[ao + orbital * dimension]))
+            const double magnitude = std::abs(orbitals.coefficients[ao + orbital * dimension]);
+            if (!std::isfinite(magnitude))
             {
                 throw std::invalid_argument("FDE fragment occupied coefficient is non-finite");
+            }
+            const bool owned = std::binary_search(active_orbitals.begin(), active_orbitals.end(), ao);
+            if (!owned && magnitude > tolerance)
+            {
+                throw std::invalid_argument("FDE fragment occupied coefficient lies outside its owned AO space");
             }
         }
     }
 }
 
+template <typename Scalar>
 void write_vector(std::ostream& output,
                   const char* label,
-                  const std::vector<double>& values)
+                  const std::vector<Scalar>& values)
 {
     output << label << ' ' << values.size();
     for (std::size_t index = 0; index < values.size(); ++index)
@@ -99,7 +115,8 @@ void write_vector(std::ostream& output,
     output << '\n';
 }
 
-std::vector<double> read_vector(std::istream& input,
+template <typename Scalar>
+std::vector<Scalar> read_vector(std::istream& input,
                                 const char* label,
                                 const std::size_t expected_size)
 {
@@ -111,7 +128,7 @@ std::vector<double> read_vector(std::istream& input,
         throw std::invalid_argument(std::string("FDE fragment ") + label
                                     + " has an unexpected size");
     }
-    std::vector<double> values(size, 0.0);
+    std::vector<Scalar> values(size, 0.0);
     for (std::size_t index = 0; index < size; ++index)
     {
         input >> values[index];
@@ -119,13 +136,14 @@ std::vector<double> read_vector(std::istream& input,
     return values;
 }
 
+template <typename Scalar>
 void write_spin(std::ostream& output,
                 const char* label,
-                const OccupiedSpinOrbitals& orbitals,
+                const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                 const std::size_t dimension)
 {
     const std::size_t count
-        = DeterminantArtifactIO::occupied_count(orbitals, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(orbitals, dimension);
     output << label << ' ' << count << '\n';
     for (std::size_t orbital = 0; orbital < count; ++orbital)
     {
@@ -139,14 +157,18 @@ void write_spin(std::ostream& output,
     }
 }
 
-OccupiedSpinOrbitals read_spin(std::istream& input,
+template <typename Scalar>
+ScalarOccupiedSpinOrbitals<Scalar> read_spin(std::istream& input,
                                const char* label,
                                const std::size_t dimension)
 {
     require_token(input, label);
     std::size_t count = 0;
-    input >> count;
-    OccupiedSpinOrbitals result;
+    if (!(input >> count) || count > dimension)
+    {
+        throw std::invalid_argument("FDE fragment occupied count exceeds AO dimension or is malformed");
+    }
+    ScalarOccupiedSpinOrbitals<Scalar> result;
     result.coefficients.assign(dimension * count, 0.0);
     result.orbital_energies_ry.assign(count, 0.0);
     result.source_fragment_labels.resize(count);
@@ -165,10 +187,13 @@ OccupiedSpinOrbitals read_spin(std::istream& input,
 
 } // namespace
 
-void FragmentScfArtifactIO::validate(const FragmentScfArtifact& artifact,
+template <typename Scalar>
+void ScalarFragmentScfArtifactIO<Scalar>::validate(const ScalarFragmentScfArtifact<Scalar>& artifact,
                                      const double symmetry_tolerance)
 {
-    if (artifact.schema_version != 1 || artifact.ao_dimension == 0
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    validate_finite_state_boundary(artifact.schema_version, artifact.boundary_twist, complex_scalar);
+    if (artifact.ao_dimension == 0
         || artifact.freeze_thaw_cycle < 0 || !artifact.scf_converged
         || !std::isfinite(symmetry_tolerance) || symmetry_tolerance < 0.0)
     {
@@ -188,8 +213,16 @@ void FragmentScfArtifactIO::validate(const FragmentScfArtifact& artifact,
     {
         throw std::invalid_argument("FDE fragment active AO list is invalid");
     }
-    validate_orbitals(artifact.alpha, artifact.ao_dimension, artifact.fragment_label);
-    validate_orbitals(artifact.beta, artifact.ao_dimension, artifact.fragment_label);
+    validate_orbitals(artifact.alpha,
+                       artifact.ao_dimension,
+                       artifact.fragment_label,
+                       artifact.active_orbitals,
+                       symmetry_tolerance);
+    validate_orbitals(artifact.beta,
+                       artifact.ao_dimension,
+                       artifact.fragment_label,
+                       artifact.active_orbitals,
+                       symmetry_tolerance);
     validate_matrix(artifact.ao_overlap,
                     artifact.ao_dimension,
                     symmetry_tolerance,
@@ -216,17 +249,27 @@ void FragmentScfArtifactIO::validate(const FragmentScfArtifact& artifact,
     }
 }
 
-void FragmentScfArtifactIO::write(std::ostream& output,
-                                  const FragmentScfArtifact& artifact,
+template <typename Scalar>
+void ScalarFragmentScfArtifactIO<Scalar>::write(std::ostream& output,
+                                  const ScalarFragmentScfArtifact<Scalar>& artifact,
                                   const double symmetry_tolerance)
 {
-    FragmentScfArtifactIO::validate(artifact, symmetry_tolerance);
+    ScalarFragmentScfArtifactIO<Scalar>::validate(artifact, symmetry_tolerance);
     output << std::setprecision(17);
-    output << "FDE_FRAGMENT_SCF_ARTIFACT 1\n";
+    output << "FDE_FRAGMENT_SCF_ARTIFACT " << artifact.schema_version << '\n';
     output << "STATE " << artifact.state_label << '\n';
     output << "FRAGMENT " << artifact.fragment_label << '\n';
     output << "GEOMETRY " << artifact.geometry_fingerprint << '\n';
     output << "ORBITAL_BASIS " << artifact.orbital_fingerprint << '\n';
+    if (!artifact.boundary_twist.empty())
+    {
+        output << "BOUNDARY_TWIST";
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            output << ' ' << artifact.boundary_twist[axis];
+        }
+        output << '\n';
+    }
     output << "DENSITY_PATH " << artifact.density_path << '\n';
     output << "CYCLE " << artifact.freeze_thaw_cycle << '\n';
     output << "SCF_CONVERGED " << (artifact.scf_converged ? 1 : 0) << '\n';
@@ -255,12 +298,18 @@ void FragmentScfArtifactIO::write(std::ostream& output,
     }
 }
 
-FragmentScfArtifact FragmentScfArtifactIO::read(std::istream& input,
+template <typename Scalar>
+ScalarFragmentScfArtifact<Scalar> ScalarFragmentScfArtifactIO<Scalar>::read(std::istream& input,
                                                 const double symmetry_tolerance)
 {
     require_token(input, "FDE_FRAGMENT_SCF_ARTIFACT");
-    FragmentScfArtifact result;
-    input >> result.schema_version;
+    ScalarFragmentScfArtifact<Scalar> result;
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    const int expected_version = complex_scalar ? 2 : 1;
+    if (!(input >> result.schema_version) || result.schema_version != expected_version)
+    {
+        throw std::invalid_argument("FDE fragment scalar type/version mismatch");
+    }
     require_token(input, "STATE");
     input >> result.state_label;
     require_token(input, "FRAGMENT");
@@ -269,6 +318,12 @@ FragmentScfArtifact FragmentScfArtifactIO::read(std::istream& input,
     input >> result.geometry_fingerprint;
     require_token(input, "ORBITAL_BASIS");
     input >> result.orbital_fingerprint;
+    if (complex_scalar)
+    {
+        require_token(input, "BOUNDARY_TWIST");
+        result.boundary_twist.resize(3);
+        input >> result.boundary_twist[0] >> result.boundary_twist[1] >> result.boundary_twist[2];
+    }
     require_token(input, "DENSITY_PATH");
     input >> result.density_path;
     require_token(input, "CYCLE");
@@ -282,23 +337,29 @@ FragmentScfArtifact FragmentScfArtifactIO::read(std::istream& input,
         throw std::invalid_argument("FDE fragment SCF convergence flag must be zero or one");
     }
     require_token(input, "AO_DIMENSION");
-    input >> result.ao_dimension;
+    if (!(input >> result.ao_dimension) || result.ao_dimension == 0)
+    {
+        throw std::invalid_argument("FDE fragment AO dimension is malformed");
+    }
     require_token(input, "ACTIVE_ORBITALS");
     std::size_t active_count = 0;
-    input >> active_count;
+    if (!(input >> active_count) || active_count > result.ao_dimension)
+    {
+        throw std::invalid_argument("FDE fragment active count exceeds AO dimension or is malformed");
+    }
     result.active_orbitals.resize(active_count);
     for (std::size_t index = 0; index < active_count; ++index)
     {
         input >> result.active_orbitals[index];
     }
-    result.alpha = read_spin(input, "ALPHA", result.ao_dimension);
-    result.beta = read_spin(input, "BETA", result.ao_dimension);
+    result.alpha = read_spin<Scalar>(input, "ALPHA", result.ao_dimension);
+    result.beta = read_spin<Scalar>(input, "BETA", result.ao_dimension);
     const std::size_t matrix_size = result.ao_dimension * result.ao_dimension;
-    result.ao_overlap = read_vector(input, "AO_OVERLAP", matrix_size);
+    result.ao_overlap = read_vector<Scalar>(input, "AO_OVERLAP", matrix_size);
     result.hamiltonian_alpha_ry
-        = read_vector(input, "HAMILTONIAN_ALPHA_RY", matrix_size);
+        = read_vector<Scalar>(input, "HAMILTONIAN_ALPHA_RY", matrix_size);
     result.hamiltonian_beta_ry
-        = read_vector(input, "HAMILTONIAN_BETA_RY", matrix_size);
+        = read_vector<Scalar>(input, "HAMILTONIAN_BETA_RY", matrix_size);
     require_token(input, "SUBSYSTEM_TOTAL_ENERGY_RY");
     input >> result.subsystem_total_energy_ry;
     require_token(input, "ION_ION_ENERGY_RY");
@@ -319,8 +380,11 @@ FragmentScfArtifact FragmentScfArtifactIO::read(std::istream& input,
     {
         throw std::invalid_argument("FDE fragment SCF artifact has trailing content");
     }
-    FragmentScfArtifactIO::validate(result, symmetry_tolerance);
+    ScalarFragmentScfArtifactIO<Scalar>::validate(result, symmetry_tolerance);
     return result;
 }
+
+template class ScalarFragmentScfArtifactIO<double>;
+template class ScalarFragmentScfArtifactIO<std::complex<double>>;
 
 } // namespace fde

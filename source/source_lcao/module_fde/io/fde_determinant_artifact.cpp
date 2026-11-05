@@ -244,6 +244,36 @@ ScalarOccupiedSpinOrbitals<Scalar> read_spin(std::istream& input,
 
 } // namespace
 
+void validate_finite_state_boundary(const int schema_version,
+                                    const std::vector<double>& boundary_twist,
+                                    const bool complex_scalar)
+{
+    const int expected_version = complex_scalar ? 2 : 1;
+    if (schema_version != expected_version)
+    {
+        throw std::invalid_argument("Unsupported FDE finite-state scalar type/version");
+    }
+    if (!complex_scalar && !boundary_twist.empty())
+    {
+        throw std::invalid_argument("FDE real V1 artifact cannot carry a twist");
+    }
+    if (complex_scalar)
+    {
+        if (boundary_twist.size() != 3)
+        {
+            throw std::invalid_argument("FDE complex finite state requires a three-component boundary twist");
+        }
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const double twist = boundary_twist[axis];
+            if (!std::isfinite(twist) || twist < -0.5 || twist >= 0.5)
+            {
+                throw std::invalid_argument("FDE boundary twist must be finite in [-0.5, 0.5)");
+            }
+        }
+    }
+}
+
 template <typename Scalar>
 std::size_t ScalarDeterminantArtifactIO<Scalar>::occupied_count(const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                                                   const std::size_t ao_dimension)
@@ -260,31 +290,8 @@ void ScalarDeterminantArtifactIO<Scalar>::validate(const ScalarDiabaticDetermina
                                      const std::vector<Scalar>& full_overlap,
                                      const double orthonormality_tolerance)
 {
-    const bool is_real = std::is_same<Scalar, double>::value;
-    const int expected_version = is_real ? 1 : 2;
-    if (artifact.schema_version != expected_version)
-    {
-        throw std::invalid_argument("Unsupported FDE determinant artifact version");
-    }
-    if (is_real && !artifact.boundary_twist.empty())
-    {
-        throw std::invalid_argument("FDE real V1 determinant cannot carry a twist");
-    }
-    if (!is_real)
-    {
-        if (artifact.boundary_twist.size() != 3)
-        {
-            throw std::invalid_argument("FDE complex determinant requires a three-component boundary twist");
-        }
-        for (std::size_t axis = 0; axis < 3; ++axis)
-        {
-            const double twist = artifact.boundary_twist[axis];
-            if (!std::isfinite(twist) || twist < -0.5 || twist >= 0.5)
-            {
-                throw std::invalid_argument("FDE boundary twist must be finite in [-0.5, 0.5)");
-            }
-        }
-    }
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    validate_finite_state_boundary(artifact.schema_version, artifact.boundary_twist, complex_scalar);
     validate_label(artifact.state_label, "state label");
     validate_label(artifact.geometry_fingerprint, "geometry fingerprint");
     validate_label(artifact.orbital_fingerprint, "orbital fingerprint");
