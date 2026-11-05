@@ -2006,6 +2006,79 @@ def run_state(spec: Mapping[str, object],
                           session_pool)
 
 
+def read_postprocess_result(path: Path,
+                            state_labels: Sequence[str]) -> Dict[str, object]:
+    try:
+        lines = [line.split() for line in path.read_text(encoding="utf-8").splitlines()
+                 if line.split()]
+        if not lines or lines[0] != ["FDE_DIABATIC_RESULT", "1"] or lines[-1] != ["END"]:
+            raise WorkflowError(f"incomplete FDE postprocess result: {path}")
+        records: Dict[str, List[List[str]]] = {}
+        for fields in lines:
+            records.setdefault(fields[0], []).append(fields[1:])
+
+        def one(key: str) -> List[str]:
+            values = records.get(key, [])
+            if len(values) != 1:
+                raise WorkflowError(f"missing or duplicate {key} in {path}")
+            return values[0]
+
+        if one("FDE_DIABATIC_RESULT") != ["1"] or one("END"):
+            raise WorkflowError(f"invalid FDE postprocess delimiters: {path}")
+        states = one("STATES")
+        count = len(state_labels)
+        if int(states[0]) != count or states[1:] != list(state_labels):
+            raise WorkflowError(f"FDE postprocess states do not match the workflow: {path}")
+
+        def numbers(key: str, expected: int | None) -> List[float]:
+            fields = one(key)
+            size = int(fields[0])
+            values = [float(value) for value in fields[1:]]
+            if size != len(values) or (expected is not None and size != expected):
+                raise WorkflowError(f"invalid {key} size in {path}")
+            if not all(math.isfinite(value) for value in values):
+                raise WorkflowError(f"non-finite {key} in {path}")
+            return values
+
+        numbers("HAMILTONIAN_RY", count * count)
+        numbers("OVERLAP", count * count)
+        roots = numbers("ADIABATIC_ENERGIES_RY", None)
+        if not 1 <= len(roots) <= count:
+            raise WorkflowError(f"invalid retained root count in {path}")
+        numbers("COEFFICIENTS", count * len(roots))
+        residual = one("MAXIMUM_RESIDUAL")
+        if len(residual) != 1 or not math.isfinite(float(residual[0])) or float(residual[0]) < 0.0:
+            raise WorkflowError(f"invalid maximum residual in {path}")
+        expected_pairs = {(first, second) for first in range(count)
+                          for second in range(first + 1, count)}
+        pairs = []
+        for fields in records.get("PAIR", []):
+            if len(fields) not in (5, 9):
+                raise WorkflowError("FDE PAIR record must contain 5 legacy or 9 audited fields")
+            indices = (int(fields[0]), int(fields[1]))
+            if indices not in expected_pairs:
+                raise WorkflowError(f"unexpected or duplicate state pair in {path}")
+            expected_pairs.remove(indices)
+            values = [float(value) for value in fields[2:]]
+            if not all(math.isfinite(value) for value in values):
+                raise WorkflowError(f"non-finite PAIR in {path}")
+            names = ("overlap", "h12_ry", "orthogonalized_coupling_ry",
+                     "overlap_reciprocity_error", "maximum_transition_density_trace_error",
+                     "transition_energy_asymmetry_ry", "estimated_coupling_uncertainty_ry")
+            pair = dict(zip(names, values))
+            pair.update({"first_state_index": indices[0], "second_state_index": indices[1]})
+            pairs.append(pair)
+        if expected_pairs:
+            raise WorkflowError(f"missing state pairs in {path}")
+        provider = one("COUPLING_PROVIDER") if "COUPLING_PROVIDER" in records else ["legacy_unspecified"]
+        if len(provider) != 1:
+            raise WorkflowError(f"invalid coupling provider in {path}")
+        return {"coupling_provider": provider[0], "pairs": pairs,
+                "adiabatic_energies_ry": roots}
+    except (OSError, ValueError, IndexError) as error:
+        raise WorkflowError(f"invalid FDE postprocess result {path}: {error}") from error
+
+
 def write_postprocess_inputs(spec: Mapping[str, object],
                              geometry: Mapping[str, object],
                              results: Sequence[Mapping[str, object]],
@@ -2045,8 +2118,9 @@ def write_postprocess_inputs(spec: Mapping[str, object],
                      f"{_absolute_token(Path(result['linearized_state']), 'linearized-state path')}")
     labels = [state["label"] for state in spec["states"]]
     fragment_labels = [fragment["label"] for fragment in fragments]
+    output_prefix = "fde_diabatic.pending" if spec.get("run_postprocess", True) else "fde_diabatic"
     lines.extend((f"AO_OVERLAP {_absolute_token(overlap_path, 'AO overlap path')}",
-                  "OUTPUT_PREFIX fde_diabatic",
+                  f"OUTPUT_PREFIX {output_prefix}",
                   f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
                   f"EMBEDDING_XC {canonical_embedding_xc_name(controls.get('embedding_xc', 'pbe'))}",
                   f"COUPLING_PROVIDER {canonical_coupling_provider_name(controls.get('coupling_provider', 'symmetric_linearized'))}",
@@ -2082,6 +2156,7 @@ def run_workflow(spec_path: Path) -> None:
                        "initial_densities": spec.get("initial_densities", {})}]
     root = Path(spec["work_directory"]).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    state_labels = [state["label"] for state in spec["states"]]
     pes_rows: List[Dict[str, object]] = []
     for geometry in geometries:
         geometry = dict(geometry)
@@ -2099,7 +2174,13 @@ def run_workflow(spec_path: Path) -> None:
             "fde_task                diabatic_postprocess\n"
             f"fde_config              {_absolute_token(postprocess, 'postprocess config')}\n",
             encoding="utf-8")
+        result_path = postprocess_directory / "fde_diabatic.fde_diabatic"
+        postprocess_result: Dict[str, object] = {}
         if bool(spec.get("run_postprocess", True)):
+            pending = [postprocess_directory / ("fde_diabatic.pending" + suffix)
+                       for suffix in (".fde_diabatic", ".fde_diabatic.tsv")]
+            for path in pending:
+                path.unlink(missing_ok=True)
             postprocess_command = spec.get("postprocess_command", spec["abacus_command"])
             if not isinstance(postprocess_command, list) or not postprocess_command:
                 raise WorkflowError("postprocess_command must be a nonempty string array")
@@ -2112,6 +2193,13 @@ def run_workflow(spec_path: Path) -> None:
                                            stderr=subprocess.STDOUT, check=False)
             if completed.returncode != 0:
                 raise WorkflowError(f"FDE postprocess failed; see {log_path}")
+            if not all(path.is_file() for path in pending):
+                raise WorkflowError(f"FDE postprocess did not produce both result files; see {log_path}")
+            postprocess_result = read_postprocess_result(pending[0], state_labels)
+            pending[0].replace(result_path)
+            pending[1].replace(postprocess_directory / "fde_diabatic.fde_diabatic.tsv")
+        elif result_path.is_file():
+            postprocess_result = read_postprocess_result(result_path, state_labels)
         row: Dict[str, object] = {
             "geometry": geometry["label"],
             "coordinate_angstrom": geometry.get("coordinate_angstrom"),
@@ -2119,36 +2207,14 @@ def run_workflow(spec_path: Path) -> None:
             "postprocess_config": str(postprocess.resolve()),
             "postprocess_directory": str(postprocess_directory.resolve()),
         }
-        result_path = postprocess_directory / "fde_diabatic.fde_diabatic"
-        if result_path.is_file():
-            records = _records(result_path)
-            provider_records = records.get("COUPLING_PROVIDER", [])
-            row["coupling_provider"] = (
-                provider_records[0][0] if provider_records else "legacy_unspecified")
-            pairs = []
-            for fields in records.get("PAIR", []):
-                if len(fields) not in (5, 9):
-                    raise WorkflowError(
-                        "FDE PAIR record must contain 5 legacy or 9 audited fields")
-                pair = {"first_state_index": int(fields[0]),
-                        "second_state_index": int(fields[1]),
-                        "overlap": float(fields[2]),
-                        "h12_ry": float(fields[3]),
-                        "orthogonalized_coupling_ry": float(fields[4])}
-                if len(fields) == 9:
-                    pair.update({
-                        "overlap_reciprocity_error": float(fields[5]),
-                        "maximum_transition_density_trace_error": float(fields[6]),
-                        "transition_energy_asymmetry_ry": float(fields[7]),
-                        "estimated_coupling_uncertainty_ry": float(fields[8]),
-                    })
-                pairs.append(pair)
-            row["pairs"] = pairs
-            adiabatic = records.get("ADIABATIC_ENERGIES_RY", [["0"]])[0]
-            row["adiabatic_energies_ry"] = [float(value) for value in adiabatic[1:]]
+        row.update(postprocess_result)
         pes_rows.append(row)
-    _atomic_json(root / "fde_pes.json", {"schema_version": 1, "points": pes_rows})
-    state_labels = [state["label"] for state in spec["states"]]
+    try:
+        pes_json = json.dumps({"schema_version": 1, "points": pes_rows}, indent=2,
+                              sort_keys=True, allow_nan=False)
+    except (ValueError, TypeError) as error:
+        raise WorkflowError(f"PES contains a non-finite or unsupported JSON value: {error}") from error
+    _atomic_text(root / "fde_pes.json", pes_json + "\n")
     table_lines = ["geometry\tcoordinate_angstrom\t" + "\t".join(
         f"{label}_energy_ry" for label in state_labels)
         + "\toverlap\th12_ry\torthogonalized_coupling_ry"

@@ -67,12 +67,18 @@ if task == "diabatic_postprocess":
     text = config.read_text(encoding="utf-8")
     if text.count("DETERMINANT ") != 2 or text.count("LINEARIZED_STATE ") != 2:
         raise RuntimeError("postprocess config is incomplete")
-    (cwd / "fde_diabatic.fde_diabatic").write_text(
+    prefix = cwd / value(config, "OUTPUT_PREFIX")
+    Path(str(prefix) + ".fde_diabatic").write_text(
         "FDE_DIABATIC_RESULT 1\n"
         "COUPLING_PROVIDER symmetric_linearized\n"
+        "STATES 2 reactant product\n"
+        "HAMILTONIAN_RY 4 -23.4 -22.7 -22.7 -22.4\n"
+        "OVERLAP 4 1 0.8 0.8 1\n"
         "PAIR 0 1 0.8 -22.7 0.25 1e-16 2e-16 0.04 0.016\n"
-        "ADIABATIC_ENERGIES_RY 2 -23.5 -22.3\nEND\n",
+        "ADIABATIC_ENERGIES_RY 2 -23.5 -22.3\n"
+        "COEFFICIENTS 4 1 0 0 1\nMAXIMUM_RESIDUAL 1e-16\nEND\n",
         encoding="utf-8")
+    Path(str(prefix) + ".fde_diabatic.tsv").write_text("kind\tfirst\tsecond\npair\t0\t1\n")
     raise SystemExit(0)
 
 config = (request_config if request_config is not None
@@ -291,6 +297,75 @@ def prepare_case(root: Path, partial_first_cycle: bool = False,
 
 
 class FdeWorkflowEndToEndTest(unittest.TestCase):
+    def test_postprocess_rejects_bad_new_results_and_preserves_published_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            fde_workflow.run_workflow(spec_path)
+            published = work / "g0/postprocess/fde_diabatic.fde_diabatic"
+            valid = published.read_text()
+            cases = {
+                "missing": None,
+                "empty": "",
+                "table_missing": valid,
+                "header": valid.replace("FDE_DIABATIC_RESULT 1", "OTHER_RESULT 1"),
+                "states": valid.replace("STATES 2 reactant product", "STATES 2 reactant other"),
+                "end": valid.removesuffix("END\n"),
+                "pair_missing": "\n".join(line for line in valid.splitlines() if not line.startswith("PAIR ")) + "\n",
+                "pair_duplicate": valid.replace("END\n", "PAIR 0 1 0.8 -22.7 0.25\nEND\n"),
+                "pair_index": valid.replace("PAIR 0 1", "PAIR 0 7"),
+                "nan": valid.replace("0.25 1e-16", "nan 1e-16"),
+                "roots": valid.replace("ADIABATIC_ENERGIES_RY 2 -23.5 -22.3", "ADIABATIC_ENERGIES_RY 2 -23.5"),
+                "matrix": valid.replace("OVERLAP 4", "OVERLAP 3"),
+                "matrix_infinite": valid.replace("HAMILTONIAN_RY 4 -23.4", "HAMILTONIAN_RY 4 inf"),
+                "coefficients": valid.replace("COEFFICIENTS 4", "COEFFICIENTS 3"),
+            }
+            for name, data in cases.items():
+                with self.subTest(case=name):
+                    def postprocess(command, cwd, **_kwargs):
+                        config = Path(next(line.split()[1] for line in (cwd / "INPUT").read_text().splitlines()
+                                           if line.startswith("fde_config")))
+                        prefix = cwd / next(line.split()[1] for line in config.read_text().splitlines()
+                                            if line.startswith("OUTPUT_PREFIX"))
+                        if data is not None:
+                            Path(str(prefix) + ".fde_diabatic").write_text(data)
+                        if name != "table_missing":
+                            Path(str(prefix) + ".fde_diabatic.tsv").write_text("table\n")
+                        return subprocess.CompletedProcess(command, 0)
+                    with mock.patch.object(fde_workflow.subprocess, "run", side_effect=postprocess):
+                        with self.assertRaises(fde_workflow.WorkflowError):
+                            fde_workflow.run_workflow(spec_path)
+                    self.assertEqual(published.read_text(), valid)
+
+    def test_postprocess_accepts_legacy_pairs_and_reduced_overlap_rank(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            fde_workflow.run_workflow(spec_path)
+            valid = (work / "g0/postprocess/fde_diabatic.fde_diabatic").read_text()
+            legacy = valid.replace("COUPLING_PROVIDER symmetric_linearized\n", "").replace(
+                "0.25 1e-16 2e-16 0.04 0.016", "0.25")
+            reduced = valid.replace("ADIABATIC_ENERGIES_RY 2 -23.5 -22.3",
+                                    "ADIABATIC_ENERGIES_RY 1 -23.5").replace(
+                                        "COEFFICIENTS 4 1 0 0 1", "COEFFICIENTS 2 1 0")
+            for text, roots in ((legacy, 2), (reduced, 1)):
+                path = root / "result"
+                path.write_text(text)
+                result = fde_workflow.read_postprocess_result(path, ["reactant", "product"])
+                self.assertEqual(len(result["pairs"]), 1)
+                self.assertEqual(len(result["adiabatic_energies_ry"]), roots)
+
+    def test_nonfinite_coordinate_cannot_publish_pes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work, spec_path = prepare_case(root)
+            spec = json.loads(spec_path.read_text())
+            spec["geometries"][0]["coordinate_angstrom"] = float("nan")
+            spec_path.write_text(json.dumps(spec))
+            with self.assertRaisesRegex(fde_workflow.WorkflowError, "non-finite"):
+                fde_workflow.run_workflow(spec_path)
+            self.assertFalse((work / "fde_pes.json").exists())
+
     def test_relative_launch_scripts_invalidate_completed_checkpoints(self):
         for persistent in (False, True):
             with self.subTest(persistent_session=persistent), tempfile.TemporaryDirectory() as directory:
