@@ -10,17 +10,19 @@
 namespace fde
 {
 
-struct SpinTransitionDensityMatrix
+template <typename Scalar>
+struct ScalarSpinTransitionDensityMatrix
 {
-    std::vector<double> alpha;
-    std::vector<double> beta;
+    std::vector<Scalar> alpha;
+    std::vector<Scalar> beta;
 };
 
-struct DeterminantTransition
+template <typename Scalar>
+struct ScalarDeterminantTransition
 {
-    double raw_overlap;
-    double normalized_overlap;
-    SpinTransitionDensityMatrix density_matrix;
+    Scalar raw_overlap;
+    Scalar normalized_overlap;
+    ScalarSpinTransitionDensityMatrix<Scalar> density_matrix;
 };
 
 class OccupiedOverlapPolicy
@@ -39,16 +41,17 @@ class FullOccupiedOverlapPolicy : public OccupiedOverlapPolicy
                 const std::string& ket_fragment) const override;
 };
 
-class TransitionEnergyProvider
+template <typename Scalar>
+class ScalarTransitionEnergyProvider
 {
   public:
-    virtual ~TransitionEnergyProvider() {}
+    virtual ~ScalarTransitionEnergyProvider() {}
 
     virtual std::string name() const = 0;
 
-    virtual double evaluate_ry(const DiabaticDeterminantArtifact& bra,
-                               const DiabaticDeterminantArtifact& ket,
-                               const SpinTransitionDensityMatrix& transition_density,
+    virtual Scalar evaluate_ry(const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+                               const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+                               const ScalarSpinTransitionDensityMatrix<Scalar>& transition_density,
                                std::size_t ao_dimension) const = 0;
 };
 
@@ -58,58 +61,86 @@ struct CouplingValidationControls
     double transition_density_trace_tolerance;
 };
 
-struct ElectronicCouplingResult
+template <typename Scalar>
+struct ScalarElectronicCouplingResult
 {
-    double normalized_overlap;
-    double forward_transition_energy_ry;
-    double reverse_transition_energy_ry;
-    double hamiltonian_coupling_ry;
+    Scalar normalized_overlap;
+    Scalar forward_transition_energy_ry;
+    Scalar reverse_transition_energy_ry;
+    Scalar hamiltonian_coupling_ry;
     double overlap_reciprocity_error;
     double maximum_transition_density_trace_error;
     double transition_energy_asymmetry_ry;
     double estimated_coupling_uncertainty_ry;
     std::string provider;
-    SpinTransitionDensityMatrix forward_density_matrix;
-    SpinTransitionDensityMatrix reverse_density_matrix;
+    ScalarSpinTransitionDensityMatrix<Scalar> forward_density_matrix;
+    ScalarSpinTransitionDensityMatrix<Scalar> reverse_density_matrix;
 };
 
-class ElectronicCoupling
+template <typename Scalar>
+struct ScalarOrthogonalizedPair
+{
+    std::vector<Scalar> hamiltonian_ry;
+    std::vector<double> eigenvalues_ry;
+    Scalar coupling_ry;
+};
+
+template <typename Scalar>
+class ScalarElectronicCoupling
 {
   public:
-    static DeterminantTransition transition(
-        const DiabaticDeterminantArtifact& bra,
-        const DiabaticDeterminantArtifact& ket,
-        const std::vector<double>& ao_overlap,
+    static ScalarDeterminantTransition<Scalar> transition(
+        const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+        const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+        const std::vector<Scalar>& ao_overlap,
         double singular_value_tolerance);
 
-    static DeterminantTransition transition_with_policy(
-        const DiabaticDeterminantArtifact& bra,
-        const DiabaticDeterminantArtifact& ket,
-        const std::vector<double>& ao_overlap,
+    static ScalarDeterminantTransition<Scalar> transition_with_policy(
+        const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+        const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+        const std::vector<Scalar>& ao_overlap,
         const OccupiedOverlapPolicy& overlap_policy,
         double singular_value_tolerance);
 
-    static ElectronicCouplingResult evaluate_symmetric(
-        const DiabaticDeterminantArtifact& first,
-        const DiabaticDeterminantArtifact& second,
-        const std::vector<double>& ao_overlap,
-        const TransitionEnergyProvider& energy_provider,
+    static ScalarElectronicCouplingResult<Scalar> evaluate_symmetric(
+        const ScalarDiabaticDeterminantArtifact<Scalar>& first,
+        const ScalarDiabaticDeterminantArtifact<Scalar>& second,
+        const std::vector<Scalar>& ao_overlap,
+        const ScalarTransitionEnergyProvider<Scalar>& energy_provider,
         const CouplingValidationControls& validation,
         double singular_value_tolerance);
 
-    static ElectronicCouplingResult evaluate_symmetric_with_policy(
-        const DiabaticDeterminantArtifact& first,
-        const DiabaticDeterminantArtifact& second,
-        const std::vector<double>& ao_overlap,
+    static ScalarElectronicCouplingResult<Scalar> evaluate_symmetric_with_policy(
+        const ScalarDiabaticDeterminantArtifact<Scalar>& first,
+        const ScalarDiabaticDeterminantArtifact<Scalar>& second,
+        const std::vector<Scalar>& ao_overlap,
         const OccupiedOverlapPolicy& overlap_policy,
-        const TransitionEnergyProvider& energy_provider,
+        const ScalarTransitionEnergyProvider<Scalar>& energy_provider,
         const CouplingValidationControls& validation,
         double singular_value_tolerance);
 
-    static double electron_count(const std::vector<double>& transition_density,
-                                 const std::vector<double>& ao_overlap,
+    static Scalar electron_count(const std::vector<Scalar>& transition_density,
+                                 const std::vector<Scalar>& ao_overlap,
                                  std::size_t ao_dimension);
+
+    static ScalarOrthogonalizedPair<Scalar> orthogonalize_pair(
+        double first_energy_ry,
+        double second_energy_ry,
+        Scalar overlap,
+        Scalar hamiltonian_coupling_ry,
+        double overlap_eigenvalue_cutoff);
 };
+
+using SpinTransitionDensityMatrix = ScalarSpinTransitionDensityMatrix<double>;
+using ComplexSpinTransitionDensityMatrix = ScalarSpinTransitionDensityMatrix<std::complex<double>>;
+using DeterminantTransition = ScalarDeterminantTransition<double>;
+using ComplexDeterminantTransition = ScalarDeterminantTransition<std::complex<double>>;
+using TransitionEnergyProvider = ScalarTransitionEnergyProvider<double>;
+using ComplexTransitionEnergyProvider = ScalarTransitionEnergyProvider<std::complex<double>>;
+using ElectronicCouplingResult = ScalarElectronicCouplingResult<double>;
+using ComplexElectronicCouplingResult = ScalarElectronicCouplingResult<std::complex<double>>;
+using ElectronicCoupling = ScalarElectronicCoupling<double>;
+using ComplexElectronicCoupling = ScalarElectronicCoupling<std::complex<double>>;
 
 } // namespace fde
 

@@ -318,6 +318,7 @@ endif()
 AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
+    test_fde_electronic_coupling.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_electronic_coupling.cpp

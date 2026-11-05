@@ -12,28 +12,30 @@ namespace fde
 namespace
 {
 
+template <typename Scalar>
 struct InverseDeterminant
 {
-    std::vector<double> inverse;
-    double determinant;
+    std::vector<Scalar> inverse;
+    Scalar determinant;
 };
 
-std::vector<double> occupied_overlap(const OccupiedSpinOrbitals& bra,
-                                     const OccupiedSpinOrbitals& ket,
-                                     const std::vector<double>& ao_overlap,
+template <typename Scalar>
+std::vector<Scalar> occupied_overlap(const ScalarOccupiedSpinOrbitals<Scalar>& bra,
+                                     const ScalarOccupiedSpinOrbitals<Scalar>& ket,
+                                     const std::vector<Scalar>& ao_overlap,
                                      const std::size_t ao_dimension,
                                      const OccupiedOverlapPolicy& overlap_policy)
 {
     const std::size_t bra_count
-        = DeterminantArtifactIO::occupied_count(bra, ao_dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(bra, ao_dimension);
     const std::size_t ket_count
-        = DeterminantArtifactIO::occupied_count(ket, ao_dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(ket, ao_dimension);
     if (bra_count != ket_count)
     {
         throw std::invalid_argument(
             "FDE electronic coupling requires equal spin populations in both states");
     }
-    std::vector<double> result(bra_count * bra_count, 0.0);
+    std::vector<Scalar> result(bra_count * bra_count, 0.0);
     for (std::size_t ket_orbital = 0; ket_orbital < bra_count; ++ket_orbital)
     {
         for (std::size_t bra_orbital = 0; bra_orbital < bra_count; ++bra_orbital)
@@ -43,17 +45,17 @@ std::vector<double> occupied_overlap(const OccupiedSpinOrbitals& bra,
             {
                 continue;
             }
-            double value = 0.0;
+            Scalar value = 0.0;
             for (std::size_t column = 0; column < ao_dimension; ++column)
             {
-                double overlap_times_ket = 0.0;
+                Scalar overlap_times_ket = 0.0;
                 for (std::size_t row = 0; row < ao_dimension; ++row)
                 {
                     overlap_times_ket
                         += ao_overlap[column + row * ao_dimension]
                            * ket.coefficients[row + ket_orbital * ao_dimension];
                 }
-                value += bra.coefficients[column + bra_orbital * ao_dimension]
+                value += conjugate_scalar(bra.coefficients[column + bra_orbital * ao_dimension])
                          * overlap_times_ket;
             }
             result[bra_orbital + ket_orbital * bra_count] = value;
@@ -62,16 +64,17 @@ std::vector<double> occupied_overlap(const OccupiedSpinOrbitals& bra,
     return result;
 }
 
-InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
+template <typename Scalar>
+InverseDeterminant<Scalar> invert_and_determinant(const std::vector<Scalar>& matrix,
                                           const std::size_t dimension,
                                           const double tolerance)
 {
     if (dimension == 0)
     {
-        return {std::vector<double>(), 1.0};
+        return {std::vector<Scalar>(), 1.0};
     }
-    std::vector<double> work(dimension * dimension, 0.0);
-    std::vector<double> inverse(dimension * dimension, 0.0);
+    std::vector<Scalar> work(dimension * dimension, 0.0);
+    std::vector<Scalar> inverse(dimension * dimension, 0.0);
     for (std::size_t row = 0; row < dimension; ++row)
     {
         inverse[row * dimension + row] = 1.0;
@@ -81,14 +84,14 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
         }
     }
 
-    double determinant = 1.0;
+    Scalar determinant = 1.0;
     for (std::size_t pivot_column = 0; pivot_column < dimension; ++pivot_column)
     {
         std::size_t pivot_row = pivot_column;
-        double pivot_magnitude = std::fabs(work[pivot_row * dimension + pivot_column]);
+        double pivot_magnitude = std::abs(work[pivot_row * dimension + pivot_column]);
         for (std::size_t row = pivot_column + 1; row < dimension; ++row)
         {
-            const double candidate = std::fabs(work[row * dimension + pivot_column]);
+            const double candidate = std::abs(work[row * dimension + pivot_column]);
             if (candidate > pivot_magnitude)
             {
                 pivot_magnitude = candidate;
@@ -110,7 +113,7 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
             }
             determinant = -determinant;
         }
-        const double pivot = work[pivot_column * dimension + pivot_column];
+        const Scalar pivot = work[pivot_column * dimension + pivot_column];
         determinant *= pivot;
         for (std::size_t column = 0; column < dimension; ++column)
         {
@@ -123,7 +126,7 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
             {
                 continue;
             }
-            const double factor = work[row * dimension + pivot_column];
+            const Scalar factor = work[row * dimension + pivot_column];
             for (std::size_t column = 0; column < dimension; ++column)
             {
                 work[row * dimension + column]
@@ -134,7 +137,7 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
         }
     }
 
-    std::vector<double> inverse_column_major(dimension * dimension, 0.0);
+    std::vector<Scalar> inverse_column_major(dimension * dimension, 0.0);
     for (std::size_t row = 0; row < dimension; ++row)
     {
         for (std::size_t column = 0; column < dimension; ++column)
@@ -146,20 +149,21 @@ InverseDeterminant invert_and_determinant(const std::vector<double>& matrix,
     return {inverse_column_major, determinant};
 }
 
-std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
-                                       const OccupiedSpinOrbitals& ket,
-                                       const std::vector<double>& inverse_overlap,
+template <typename Scalar>
+std::vector<Scalar> transition_density(const ScalarOccupiedSpinOrbitals<Scalar>& bra,
+                                       const ScalarOccupiedSpinOrbitals<Scalar>& ket,
+                                       const std::vector<Scalar>& inverse_overlap,
                                        const std::size_t ao_dimension,
                                        const OccupiedOverlapPolicy& overlap_policy)
 {
     const std::size_t count
-        = DeterminantArtifactIO::occupied_count(bra, ao_dimension);
-    std::vector<double> density(ao_dimension * ao_dimension, 0.0);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(bra, ao_dimension);
+    std::vector<Scalar> density(ao_dimension * ao_dimension, 0.0);
     for (std::size_t column = 0; column < ao_dimension; ++column)
     {
         for (std::size_t row = 0; row < ao_dimension; ++row)
         {
-            double value = 0.0;
+            Scalar value = 0.0;
             for (std::size_t ket_orbital = 0; ket_orbital < count; ++ket_orbital)
             {
                 for (std::size_t bra_orbital = 0; bra_orbital < count; ++bra_orbital)
@@ -173,7 +177,7 @@ std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
                     value += ket.coefficients[row + ket_orbital * ao_dimension]
                              * inverse_overlap[ket_orbital
                                                + bra_orbital * count]
-                             * bra.coefficients[column + bra_orbital * ao_dimension];
+                             * conjugate_scalar(bra.coefficients[column + bra_orbital * ao_dimension]);
                 }
             }
             density[row + column * ao_dimension] = value;
@@ -182,48 +186,43 @@ std::vector<double> transition_density(const OccupiedSpinOrbitals& bra,
     return density;
 }
 
-double raw_self_overlap(const DiabaticDeterminantArtifact& artifact,
-                        const std::vector<double>& ao_overlap,
+template <typename Scalar>
+double raw_self_overlap(const ScalarDiabaticDeterminantArtifact<Scalar>& artifact,
+                        const std::vector<Scalar>& ao_overlap,
                         const OccupiedOverlapPolicy& overlap_policy,
                         const double tolerance)
 {
     const std::size_t dimension = artifact.ao_dimension;
     const std::size_t alpha_count
-        = DeterminantArtifactIO::occupied_count(artifact.alpha, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(artifact.alpha, dimension);
     const std::size_t beta_count
-        = DeterminantArtifactIO::occupied_count(artifact.beta, dimension);
-    const double alpha = invert_and_determinant(
-                             occupied_overlap(artifact.alpha,
-                                              artifact.alpha,
-                                              ao_overlap,
-                                              dimension,
-                                              overlap_policy),
-                             alpha_count,
-                             tolerance)
-                             .determinant;
-    const double beta = invert_and_determinant(
-                            occupied_overlap(artifact.beta,
-                                             artifact.beta,
-                                             ao_overlap,
-                                             dimension,
-                                             overlap_policy),
-                            beta_count,
-                            tolerance)
-                            .determinant;
-    const double result = alpha * beta;
-    if (!std::isfinite(result) || result <= tolerance)
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(artifact.beta, dimension);
+    const auto alpha_overlap = occupied_overlap(
+        artifact.alpha, artifact.alpha, ao_overlap, dimension, overlap_policy);
+    const auto beta_overlap = occupied_overlap(
+        artifact.beta, artifact.beta, ao_overlap, dimension, overlap_policy);
+    const auto alpha = invert_and_determinant(alpha_overlap, alpha_count, tolerance);
+    const auto beta = invert_and_determinant(beta_overlap, beta_count, tolerance);
+    const Scalar result = alpha.determinant * beta.determinant;
+    const double norm = std::real(result);
+    const double imaginary_norm = std::imag(result);
+    const double imaginary_error = std::abs(imaginary_norm);
+    if (!std::isfinite(norm) || !std::isfinite(imaginary_error)
+        || imaginary_error > tolerance || norm <= tolerance)
     {
-        throw std::runtime_error("FDE diabatic determinant has a singular or negative norm");
+        throw std::runtime_error("FDE diabatic determinant has a singular, complex or negative norm");
     }
-    return result;
+    return norm;
 }
 
-void validate_pair_metadata(const DiabaticDeterminantArtifact& bra,
-                            const DiabaticDeterminantArtifact& ket)
+template <typename Scalar>
+void validate_pair_metadata(const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+                            const ScalarDiabaticDeterminantArtifact<Scalar>& ket)
 {
     if (bra.ao_dimension != ket.ao_dimension
         || bra.geometry_fingerprint != ket.geometry_fingerprint
-        || bra.orbital_fingerprint != ket.orbital_fingerprint)
+        || bra.orbital_fingerprint != ket.orbital_fingerprint
+        || bra.boundary_twist != ket.boundary_twist)
     {
         throw std::invalid_argument(
             "FDE electronic coupling determinant metadata is incompatible");
@@ -240,24 +239,26 @@ bool FullOccupiedOverlapPolicy::retain(const std::string& bra_fragment,
     return true;
 }
 
-DeterminantTransition ElectronicCoupling::transition(
-    const DiabaticDeterminantArtifact& bra,
-    const DiabaticDeterminantArtifact& ket,
-    const std::vector<double>& ao_overlap,
+template <typename Scalar>
+ScalarDeterminantTransition<Scalar> ScalarElectronicCoupling<Scalar>::transition(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+    const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+    const std::vector<Scalar>& ao_overlap,
     const double singular_value_tolerance)
 {
     const FullOccupiedOverlapPolicy full_overlap;
-    return ElectronicCoupling::transition_with_policy(bra,
+    return ScalarElectronicCoupling<Scalar>::transition_with_policy(bra,
                                                       ket,
                                                       ao_overlap,
                                                       full_overlap,
                                                       singular_value_tolerance);
 }
 
-DeterminantTransition ElectronicCoupling::transition_with_policy(
-    const DiabaticDeterminantArtifact& bra,
-    const DiabaticDeterminantArtifact& ket,
-    const std::vector<double>& ao_overlap,
+template <typename Scalar>
+ScalarDeterminantTransition<Scalar> ScalarElectronicCoupling<Scalar>::transition_with_policy(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& bra,
+    const ScalarDiabaticDeterminantArtifact<Scalar>& ket,
+    const std::vector<Scalar>& ao_overlap,
     const OccupiedOverlapPolicy& overlap_policy,
     const double singular_value_tolerance)
 {
@@ -266,32 +267,22 @@ DeterminantTransition ElectronicCoupling::transition_with_policy(
         throw std::invalid_argument("FDE electronic-coupling singular tolerance is invalid");
     }
     validate_pair_metadata(bra, ket);
-    DeterminantArtifactIO::validate(bra, ao_overlap, 1.0e-8);
-    DeterminantArtifactIO::validate(ket, ao_overlap, 1.0e-8);
+    ScalarDeterminantArtifactIO<Scalar>::validate(bra, ao_overlap, 1.0e-8);
+    ScalarDeterminantArtifactIO<Scalar>::validate(ket, ao_overlap, 1.0e-8);
 
     const std::size_t dimension = bra.ao_dimension;
     const std::size_t alpha_count
-        = DeterminantArtifactIO::occupied_count(bra.alpha, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(bra.alpha, dimension);
     const std::size_t beta_count
-        = DeterminantArtifactIO::occupied_count(bra.beta, dimension);
-    const InverseDeterminant alpha = invert_and_determinant(
-        occupied_overlap(bra.alpha,
-                         ket.alpha,
-                         ao_overlap,
-                         dimension,
-                         overlap_policy),
-        alpha_count,
-        singular_value_tolerance);
-    const InverseDeterminant beta = invert_and_determinant(
-        occupied_overlap(bra.beta,
-                         ket.beta,
-                         ao_overlap,
-                         dimension,
-                         overlap_policy),
-        beta_count,
-        singular_value_tolerance);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(bra.beta, dimension);
+    const auto alpha_overlap = occupied_overlap(
+        bra.alpha, ket.alpha, ao_overlap, dimension, overlap_policy);
+    const auto beta_overlap = occupied_overlap(
+        bra.beta, ket.beta, ao_overlap, dimension, overlap_policy);
+    const auto alpha = invert_and_determinant(alpha_overlap, alpha_count, singular_value_tolerance);
+    const auto beta = invert_and_determinant(beta_overlap, beta_count, singular_value_tolerance);
 
-    DeterminantTransition result;
+    ScalarDeterminantTransition<Scalar> result;
     result.raw_overlap = alpha.determinant * beta.determinant;
     const double bra_norm = raw_self_overlap(bra,
                                              ao_overlap,
@@ -301,9 +292,11 @@ DeterminantTransition ElectronicCoupling::transition_with_policy(
                                              ao_overlap,
                                              overlap_policy,
                                              singular_value_tolerance);
-    result.normalized_overlap = result.raw_overlap / std::sqrt(bra_norm * ket_norm);
-    if (!std::isfinite(result.normalized_overlap)
-        || std::fabs(result.normalized_overlap) > 1.0 + 1.0e-8)
+    const double norm_product = bra_norm * ket_norm;
+    const double normalization = std::sqrt(norm_product);
+    result.normalized_overlap = result.raw_overlap / normalization;
+    const double overlap_magnitude = std::abs(result.normalized_overlap);
+    if (!std::isfinite(overlap_magnitude) || overlap_magnitude > 1.0 + 1.0e-8)
     {
         throw std::runtime_error("FDE normalized determinant overlap is invalid");
     }
@@ -314,16 +307,17 @@ DeterminantTransition ElectronicCoupling::transition_with_policy(
     return result;
 }
 
-ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric(
-    const DiabaticDeterminantArtifact& first,
-    const DiabaticDeterminantArtifact& second,
-    const std::vector<double>& ao_overlap,
-    const TransitionEnergyProvider& energy_provider,
+template <typename Scalar>
+ScalarElectronicCouplingResult<Scalar> ScalarElectronicCoupling<Scalar>::evaluate_symmetric(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& first,
+    const ScalarDiabaticDeterminantArtifact<Scalar>& second,
+    const std::vector<Scalar>& ao_overlap,
+    const ScalarTransitionEnergyProvider<Scalar>& energy_provider,
     const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
     const FullOccupiedOverlapPolicy full_overlap;
-    return ElectronicCoupling::evaluate_symmetric_with_policy(first,
+    return ScalarElectronicCoupling<Scalar>::evaluate_symmetric_with_policy(first,
                                                               second,
                                                               ao_overlap,
                                                               full_overlap,
@@ -332,12 +326,13 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric(
                                                               singular_value_tolerance);
 }
 
-ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
-    const DiabaticDeterminantArtifact& first,
-    const DiabaticDeterminantArtifact& second,
-    const std::vector<double>& ao_overlap,
+template <typename Scalar>
+ScalarElectronicCouplingResult<Scalar> ScalarElectronicCoupling<Scalar>::evaluate_symmetric_with_policy(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& first,
+    const ScalarDiabaticDeterminantArtifact<Scalar>& second,
+    const std::vector<Scalar>& ao_overlap,
     const OccupiedOverlapPolicy& overlap_policy,
-    const TransitionEnergyProvider& energy_provider,
+    const ScalarTransitionEnergyProvider<Scalar>& energy_provider,
     const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
@@ -356,61 +351,59 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
         throw std::invalid_argument(
             "FDE transition-energy provider name must be a nonempty token");
     }
-    const DeterminantTransition forward
-        = ElectronicCoupling::transition_with_policy(first,
+    const ScalarDeterminantTransition<Scalar> forward
+        = ScalarElectronicCoupling<Scalar>::transition_with_policy(first,
                                                      second,
                                                      ao_overlap,
                                                      overlap_policy,
                                                      singular_value_tolerance);
-    const DeterminantTransition reverse
-        = ElectronicCoupling::transition_with_policy(second,
+    const ScalarDeterminantTransition<Scalar> reverse
+        = ScalarElectronicCoupling<Scalar>::transition_with_policy(second,
                                                      first,
                                                      ao_overlap,
                                                      overlap_policy,
                                                      singular_value_tolerance);
-    const double overlap_reciprocity_error
-        = std::fabs(forward.normalized_overlap - reverse.normalized_overlap);
+    const Scalar reverse_overlap = conjugate_scalar(reverse.normalized_overlap);
+    const Scalar overlap_difference = forward.normalized_overlap - reverse_overlap;
+    const double overlap_reciprocity_error = std::abs(overlap_difference);
     if (overlap_reciprocity_error > validation.overlap_reciprocity_tolerance)
     {
         throw std::runtime_error("FDE forward and reverse determinant overlaps disagree");
     }
 
     const std::size_t alpha_count
-        = DeterminantArtifactIO::occupied_count(first.alpha,
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(first.alpha,
                                                 first.ao_dimension);
     const std::size_t beta_count
-        = DeterminantArtifactIO::occupied_count(first.beta,
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(first.beta,
                                                 first.ao_dimension);
     double maximum_trace_error = 0.0;
-    const SpinTransitionDensityMatrix* densities[2]
+    const ScalarSpinTransitionDensityMatrix<Scalar>* densities[2]
         = {&forward.density_matrix, &reverse.density_matrix};
     for (std::size_t direction = 0; direction < 2; ++direction)
     {
-        maximum_trace_error = std::max(
-            maximum_trace_error,
-            std::fabs(ElectronicCoupling::electron_count(
-                          densities[direction]->alpha,
-                          ao_overlap,
-                          first.ao_dimension)
-                      - static_cast<double>(alpha_count)));
-        maximum_trace_error = std::max(
-            maximum_trace_error,
-            std::fabs(ElectronicCoupling::electron_count(
-                          densities[direction]->beta,
-                          ao_overlap,
-                          first.ao_dimension)
-                      - static_cast<double>(beta_count)));
+        const Scalar alpha_trace = ScalarElectronicCoupling<Scalar>::electron_count(
+            densities[direction]->alpha, ao_overlap, first.ao_dimension);
+        const Scalar beta_trace = ScalarElectronicCoupling<Scalar>::electron_count(
+            densities[direction]->beta, ao_overlap, first.ao_dimension);
+        const Scalar alpha_difference = alpha_trace - static_cast<double>(alpha_count);
+        const Scalar beta_difference = beta_trace - static_cast<double>(beta_count);
+        const double alpha_error = std::abs(alpha_difference);
+        const double beta_error = std::abs(beta_difference);
+        maximum_trace_error = std::max(maximum_trace_error, alpha_error);
+        maximum_trace_error = std::max(maximum_trace_error, beta_error);
     }
+
     if (maximum_trace_error > validation.transition_density_trace_tolerance)
     {
         throw std::runtime_error(
             "FDE transition-density electron trace exceeds its tolerance");
     }
 
-    ElectronicCouplingResult result;
+    ScalarElectronicCouplingResult<Scalar> result;
     result.provider = provider_name;
     result.normalized_overlap
-        = 0.5 * (forward.normalized_overlap + reverse.normalized_overlap);
+        = 0.5 * (forward.normalized_overlap + reverse_overlap);
     result.overlap_reciprocity_error = overlap_reciprocity_error;
     result.maximum_transition_density_trace_error = maximum_trace_error;
     result.forward_transition_energy_ry
@@ -423,28 +416,30 @@ ElectronicCouplingResult ElectronicCoupling::evaluate_symmetric_with_policy(
                                       first,
                                       reverse.density_matrix,
                                       first.ao_dimension);
-    if (!std::isfinite(result.forward_transition_energy_ry)
-        || !std::isfinite(result.reverse_transition_energy_ry))
+    const double forward_magnitude = std::abs(result.forward_transition_energy_ry);
+    const double reverse_magnitude = std::abs(result.reverse_transition_energy_ry);
+    if (!std::isfinite(forward_magnitude) || !std::isfinite(reverse_magnitude))
     {
         throw std::runtime_error("FDE transition-energy provider returned a non-finite value");
     }
+    const Scalar conjugate_reverse_energy = conjugate_scalar(result.reverse_transition_energy_ry);
     result.hamiltonian_coupling_ry
         = 0.5 * result.normalized_overlap
           * (result.forward_transition_energy_ry
-             + result.reverse_transition_energy_ry);
-    result.transition_energy_asymmetry_ry
-        = std::fabs(result.forward_transition_energy_ry
-                    - result.reverse_transition_energy_ry);
+             + conjugate_reverse_energy);
+    const Scalar energy_difference = result.forward_transition_energy_ry - conjugate_reverse_energy;
+    result.transition_energy_asymmetry_ry = std::abs(energy_difference);
     result.estimated_coupling_uncertainty_ry
-        = 0.5 * std::fabs(result.normalized_overlap)
+        = 0.5 * std::abs(result.normalized_overlap)
           * result.transition_energy_asymmetry_ry;
     result.forward_density_matrix = forward.density_matrix;
     result.reverse_density_matrix = reverse.density_matrix;
     return result;
 }
 
-double ElectronicCoupling::electron_count(const std::vector<double>& transition_density,
-                                          const std::vector<double>& ao_overlap,
+template <typename Scalar>
+Scalar ScalarElectronicCoupling<Scalar>::electron_count(const std::vector<Scalar>& transition_density,
+                                          const std::vector<Scalar>& ao_overlap,
                                           const std::size_t ao_dimension)
 {
     if (transition_density.size() != ao_dimension * ao_dimension
@@ -452,7 +447,7 @@ double ElectronicCoupling::electron_count(const std::vector<double>& transition_
     {
         throw std::invalid_argument("FDE transition-density trace dimensions are inconsistent");
     }
-    double result = 0.0;
+    Scalar result = 0.0;
     for (std::size_t column = 0; column < ao_dimension; ++column)
     {
         for (std::size_t row = 0; row < ao_dimension; ++row)
@@ -463,5 +458,82 @@ double ElectronicCoupling::electron_count(const std::vector<double>& transition_
     }
     return result;
 }
+
+template <typename Scalar>
+ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize_pair(
+    const double first_energy_ry,
+    const double second_energy_ry,
+    const Scalar overlap,
+    const Scalar hamiltonian_coupling_ry,
+    const double overlap_eigenvalue_cutoff)
+{
+    const double overlap_magnitude = std::abs(overlap);
+    const double hamiltonian_magnitude = std::abs(hamiltonian_coupling_ry);
+    if (!std::isfinite(first_energy_ry) || !std::isfinite(second_energy_ry)
+        || !std::isfinite(overlap_magnitude) || !std::isfinite(hamiltonian_magnitude)
+        || !std::isfinite(overlap_eigenvalue_cutoff)
+        || overlap_eigenvalue_cutoff <= 0.0 || overlap_eigenvalue_cutoff >= 1.0)
+    {
+        throw std::invalid_argument("FDE two-state orthogonalization inputs are invalid");
+    }
+    const double smallest_eigenvalue = 1.0 - overlap_magnitude;
+    if (smallest_eigenvalue <= overlap_eigenvalue_cutoff)
+    {
+        throw std::runtime_error("FDE two-state overlap is singular at the eigenvalue cutoff");
+    }
+    const double largest_eigenvalue = 1.0 + overlap_magnitude;
+    const double positive_root = std::sqrt(largest_eigenvalue);
+    const double negative_root = std::sqrt(smallest_eigenvalue);
+    const double root_product = positive_root * negative_root;
+    const double root_sum = positive_root + negative_root;
+    const double diagonal = root_sum / (2.0 * root_product);
+    // This form avoids subtracting nearly equal roots at the Gamma/zero-overlap limit.
+    const double off_diagonal_scale = -1.0 / (root_product * root_sum);
+    const Scalar conjugate_overlap = conjugate_scalar(overlap);
+    const Scalar conjugate_hamiltonian = conjugate_scalar(hamiltonian_coupling_ry);
+    const std::vector<Scalar> inverse_root = {diagonal,
+                                              off_diagonal_scale * conjugate_overlap,
+                                              off_diagonal_scale * overlap,
+                                              diagonal};
+    const std::vector<Scalar> hamiltonian = {first_energy_ry,
+                                             conjugate_hamiltonian,
+                                             hamiltonian_coupling_ry,
+                                             second_energy_ry};
+    ScalarOrthogonalizedPair<Scalar> result;
+    result.hamiltonian_ry.assign(4, 0.0);
+    for (std::size_t column = 0; column < 2; ++column)
+    {
+        for (std::size_t row = 0; row < 2; ++row)
+        {
+            for (std::size_t left = 0; left < 2; ++left)
+            {
+                for (std::size_t right = 0; right < 2; ++right)
+                {
+                    result.hamiltonian_ry[row + column * 2]
+                        += inverse_root[row + left * 2]
+                           * hamiltonian[left + right * 2]
+                           * inverse_root[right + column * 2];
+                }
+            }
+            const double magnitude = std::abs(result.hamiltonian_ry[row + column * 2]);
+            if (!std::isfinite(magnitude))
+            {
+                throw std::runtime_error("FDE orthogonalized Hamiltonian is non-finite");
+            }
+        }
+    }
+    result.coupling_ry = result.hamiltonian_ry[2];
+    const double first_diagonal = std::real(result.hamiltonian_ry[0]);
+    const double second_diagonal = std::real(result.hamiltonian_ry[3]);
+    const double midpoint = 0.5 * (first_diagonal + second_diagonal);
+    const double half_difference = 0.5 * (first_diagonal - second_diagonal);
+    const double coupling_magnitude = std::abs(result.coupling_ry);
+    const double gap = std::hypot(half_difference, coupling_magnitude);
+    result.eigenvalues_ry = {midpoint - gap, midpoint + gap};
+    return result;
+}
+
+template class ScalarElectronicCoupling<double>;
+template class ScalarElectronicCoupling<std::complex<double>>;
 
 } // namespace fde
