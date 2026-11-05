@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace fde
 {
@@ -27,11 +28,13 @@ void validate_label(const std::string& value, const char* description)
     }
 }
 
-void validate_overlap(const std::vector<double>& overlap,
+template <typename Scalar>
+void validate_overlap(const std::vector<Scalar>& overlap,
                       const std::size_t dimension,
                       const double tolerance)
 {
-    if (dimension == 0 || overlap.size() != dimension * dimension
+    if (dimension == 0 || dimension > overlap.size()
+        || overlap.size() != dimension * dimension
         || !std::isfinite(tolerance) || tolerance < 0.0)
     {
         throw std::invalid_argument("FDE determinant AO overlap contract is invalid");
@@ -40,45 +43,50 @@ void validate_overlap(const std::vector<double>& overlap,
     {
         for (std::size_t row = 0; row < dimension; ++row)
         {
-            const double value = overlap[row + column * dimension];
-            if (!std::isfinite(value)
-                || std::fabs(value - overlap[column + row * dimension]) > tolerance)
+            const Scalar value = overlap[row + column * dimension];
+            const double magnitude = std::abs(value);
+            const Scalar transpose = conjugate_scalar(overlap[column + row * dimension]);
+            const Scalar difference = value - transpose;
+            const double error = std::abs(difference);
+            if (!std::isfinite(magnitude) || error > tolerance)
             {
-                throw std::invalid_argument("FDE determinant AO overlap must be finite and symmetric");
+                throw std::invalid_argument("FDE determinant AO overlap must be finite and Hermitian");
             }
         }
     }
 }
 
-double metric_overlap(const OccupiedSpinOrbitals& orbitals,
+template <typename Scalar>
+Scalar metric_overlap(const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                       const std::size_t dimension,
-                      const std::vector<double>& overlap,
+                      const std::vector<Scalar>& overlap,
                       const std::size_t first,
                       const std::size_t second)
 {
-    double result = 0.0;
+    Scalar result = 0.0;
     for (std::size_t column = 0; column < dimension; ++column)
     {
-        double overlap_times_second = 0.0;
+        Scalar overlap_times_second = 0.0;
         for (std::size_t row = 0; row < dimension; ++row)
         {
             overlap_times_second
                 += overlap[column + row * dimension]
                    * orbitals.coefficients[row + second * dimension];
         }
-        result += orbitals.coefficients[column + first * dimension]
+        result += conjugate_scalar(orbitals.coefficients[column + first * dimension])
                   * overlap_times_second;
     }
     return result;
 }
 
-void validate_spin_orbitals(const OccupiedSpinOrbitals& orbitals,
+template <typename Scalar>
+void validate_spin_orbitals(const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                             const std::size_t dimension,
-                            const std::vector<double>& overlap,
+                            const std::vector<Scalar>& overlap,
                             const double tolerance)
 {
     const std::size_t count
-        = DeterminantArtifactIO::occupied_count(orbitals, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(orbitals, dimension);
     if (count > dimension || orbitals.orbital_energies_ry.size() != count
         || orbitals.source_fragment_labels.size() != count)
     {
@@ -93,7 +101,9 @@ void validate_spin_orbitals(const OccupiedSpinOrbitals& orbitals,
         validate_label(orbitals.source_fragment_labels[orbital], "source fragment label");
         for (std::size_t ao = 0; ao < dimension; ++ao)
         {
-            if (!std::isfinite(orbitals.coefficients[ao + orbital * dimension]))
+            const Scalar coefficient = orbitals.coefficients[ao + orbital * dimension];
+            const double magnitude = std::abs(coefficient);
+            if (!std::isfinite(magnitude))
             {
                 throw std::invalid_argument("FDE determinant coefficient is non-finite");
             }
@@ -110,13 +120,14 @@ void validate_spin_orbitals(const OccupiedSpinOrbitals& orbitals,
                 continue;
             }
             const double expected = first == second ? 1.0 : 0.0;
-            if (std::fabs(metric_overlap(orbitals,
-                                        dimension,
-                                        overlap,
-                                        first,
-                                        second)
-                          - expected)
-                > tolerance)
+            const Scalar overlap_value = metric_overlap(orbitals,
+                                                         dimension,
+                                                         overlap,
+                                                         first,
+                                                         second);
+            const Scalar difference = overlap_value - expected;
+            const double error = std::abs(difference);
+            if (error > tolerance)
             {
                 throw std::invalid_argument(
                     "FDE determinant orbitals are not orthonormal within a fragment");
@@ -183,12 +194,13 @@ void require_token(std::istream& input, const char* expected)
     }
 }
 
+template <typename Scalar>
 void write_spin(std::ostream& output,
                 const char* label,
-                const OccupiedSpinOrbitals& orbitals,
+                const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                 const std::size_t dimension)
 {
-    const std::size_t count = DeterminantArtifactIO::occupied_count(orbitals, dimension);
+    const std::size_t count = ScalarDeterminantArtifactIO<Scalar>::occupied_count(orbitals, dimension);
     output << label << ' ' << count << '\n';
     for (std::size_t orbital = 0; orbital < count; ++orbital)
     {
@@ -202,14 +214,18 @@ void write_spin(std::ostream& output,
     }
 }
 
-OccupiedSpinOrbitals read_spin(std::istream& input,
+template <typename Scalar>
+ScalarOccupiedSpinOrbitals<Scalar> read_spin(std::istream& input,
                                const char* label,
                                const std::size_t dimension)
 {
     require_token(input, label);
     std::size_t count = 0;
-    input >> count;
-    OccupiedSpinOrbitals orbitals;
+    if (!(input >> count) || count > dimension)
+    {
+        throw std::invalid_argument("FDE determinant occupied count is malformed or exceeds AO dimension");
+    }
+    ScalarOccupiedSpinOrbitals<Scalar> orbitals;
     orbitals.coefficients.resize(dimension * count);
     orbitals.orbital_energies_ry.resize(count);
     orbitals.source_fragment_labels.resize(count);
@@ -228,7 +244,8 @@ OccupiedSpinOrbitals read_spin(std::istream& input,
 
 } // namespace
 
-std::size_t DeterminantArtifactIO::occupied_count(const OccupiedSpinOrbitals& orbitals,
+template <typename Scalar>
+std::size_t ScalarDeterminantArtifactIO<Scalar>::occupied_count(const ScalarOccupiedSpinOrbitals<Scalar>& orbitals,
                                                   const std::size_t ao_dimension)
 {
     if (ao_dimension == 0 || orbitals.coefficients.size() % ao_dimension != 0)
@@ -238,13 +255,35 @@ std::size_t DeterminantArtifactIO::occupied_count(const OccupiedSpinOrbitals& or
     return orbitals.coefficients.size() / ao_dimension;
 }
 
-void DeterminantArtifactIO::validate(const DiabaticDeterminantArtifact& artifact,
-                                     const std::vector<double>& full_overlap,
+template <typename Scalar>
+void ScalarDeterminantArtifactIO<Scalar>::validate(const ScalarDiabaticDeterminantArtifact<Scalar>& artifact,
+                                     const std::vector<Scalar>& full_overlap,
                                      const double orthonormality_tolerance)
 {
-    if (artifact.schema_version != artifact_schema_version)
+    const bool is_real = std::is_same<Scalar, double>::value;
+    const int expected_version = is_real ? 1 : 2;
+    if (artifact.schema_version != expected_version)
     {
         throw std::invalid_argument("Unsupported FDE determinant artifact version");
+    }
+    if (is_real && !artifact.boundary_twist.empty())
+    {
+        throw std::invalid_argument("FDE real V1 determinant cannot carry a twist");
+    }
+    if (!is_real)
+    {
+        if (artifact.boundary_twist.size() != 3)
+        {
+            throw std::invalid_argument("FDE complex determinant requires a three-component boundary twist");
+        }
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const double twist = artifact.boundary_twist[axis];
+            if (!std::isfinite(twist) || twist < -0.5 || twist >= 0.5)
+            {
+                throw std::invalid_argument("FDE boundary twist must be finite in [-0.5, 0.5)");
+            }
+        }
     }
     validate_label(artifact.state_label, "state label");
     validate_label(artifact.geometry_fingerprint, "geometry fingerprint");
@@ -314,17 +353,27 @@ DiabaticDeterminantArtifact DeterminantArtifactIO::build(
     return artifact;
 }
 
-void DeterminantArtifactIO::write(std::ostream& output,
-                                  const DiabaticDeterminantArtifact& artifact,
-                                  const std::vector<double>& full_overlap,
+template <typename Scalar>
+void ScalarDeterminantArtifactIO<Scalar>::write(std::ostream& output,
+                                  const ScalarDiabaticDeterminantArtifact<Scalar>& artifact,
+                                  const std::vector<Scalar>& full_overlap,
                                   const double orthonormality_tolerance)
 {
-    DeterminantArtifactIO::validate(artifact, full_overlap, orthonormality_tolerance);
+    ScalarDeterminantArtifactIO<Scalar>::validate(artifact, full_overlap, orthonormality_tolerance);
     output << std::setprecision(17);
     output << "FDE_DIABATIC_DETERMINANT " << artifact.schema_version << '\n';
     output << "STATE " << artifact.state_label << '\n';
     output << "GEOMETRY " << artifact.geometry_fingerprint << '\n';
     output << "ORBITALS " << artifact.orbital_fingerprint << '\n';
+    if (!artifact.boundary_twist.empty())
+    {
+        output << "BOUNDARY_TWIST";
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            output << ' ' << artifact.boundary_twist[axis];
+        }
+        output << '\n';
+    }
     output << "AO_DIMENSION " << artifact.ao_dimension << '\n';
     write_spin(output, "ALPHA", artifact.alpha, artifact.ao_dimension);
     write_spin(output, "BETA", artifact.beta, artifact.ao_dimension);
@@ -335,24 +384,42 @@ void DeterminantArtifactIO::write(std::ostream& output,
     }
 }
 
-DiabaticDeterminantArtifact DeterminantArtifactIO::read(
+template <typename Scalar>
+ScalarDiabaticDeterminantArtifact<Scalar> ScalarDeterminantArtifactIO<Scalar>::read(
     std::istream& input,
-    const std::vector<double>& full_overlap,
+    const std::vector<Scalar>& full_overlap,
     const double orthonormality_tolerance)
 {
-    DiabaticDeterminantArtifact artifact;
+    ScalarDiabaticDeterminantArtifact<Scalar> artifact;
     require_token(input, "FDE_DIABATIC_DETERMINANT");
-    input >> artifact.schema_version;
+    const bool is_real = std::is_same<Scalar, double>::value;
+    const int expected_version = is_real ? 1 : 2;
+    if (!(input >> artifact.schema_version) || artifact.schema_version != expected_version)
+    {
+        throw std::invalid_argument("FDE determinant scalar type/version mismatch");
+    }
     require_token(input, "STATE");
     input >> artifact.state_label;
     require_token(input, "GEOMETRY");
     input >> artifact.geometry_fingerprint;
     require_token(input, "ORBITALS");
     input >> artifact.orbital_fingerprint;
+    if (!is_real)
+    {
+        require_token(input, "BOUNDARY_TWIST");
+        artifact.boundary_twist.resize(3);
+        input >> artifact.boundary_twist[0]
+              >> artifact.boundary_twist[1]
+              >> artifact.boundary_twist[2];
+    }
     require_token(input, "AO_DIMENSION");
-    input >> artifact.ao_dimension;
-    artifact.alpha = read_spin(input, "ALPHA", artifact.ao_dimension);
-    artifact.beta = read_spin(input, "BETA", artifact.ao_dimension);
+    if (!(input >> artifact.ao_dimension))
+    {
+        throw std::invalid_argument("FDE determinant AO dimension is malformed");
+    }
+    validate_overlap(full_overlap, artifact.ao_dimension, orthonormality_tolerance);
+    artifact.alpha = read_spin<Scalar>(input, "ALPHA", artifact.ao_dimension);
+    artifact.beta = read_spin<Scalar>(input, "BETA", artifact.ao_dimension);
     require_token(input, "END");
     if (!input)
     {
@@ -363,8 +430,11 @@ DiabaticDeterminantArtifact DeterminantArtifactIO::read(
     {
         throw std::invalid_argument("FDE determinant artifact has trailing content");
     }
-    DeterminantArtifactIO::validate(artifact, full_overlap, orthonormality_tolerance);
+    ScalarDeterminantArtifactIO<Scalar>::validate(artifact, full_overlap, orthonormality_tolerance);
     return artifact;
 }
+
+template class ScalarDeterminantArtifactIO<double>;
+template class ScalarDeterminantArtifactIO<std::complex<double>>;
 
 } // namespace fde

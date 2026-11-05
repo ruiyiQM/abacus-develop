@@ -78,6 +78,7 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_determinant_artifact
   SOURCES fde_determinant_artifact_test.cpp
+    test_fde_determinant_artifact.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
 )
