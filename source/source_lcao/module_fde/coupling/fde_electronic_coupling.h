@@ -82,7 +82,10 @@ struct ScalarOrthogonalizedPair
 {
     std::vector<Scalar> hamiltonian_ry;
     std::vector<double> eigenvalues_ry;
+    std::vector<Scalar> coefficients;
     Scalar coupling_ry;
+    double maximum_residual;
+    double maximum_metric_error;
 };
 
 template <typename Scalar>

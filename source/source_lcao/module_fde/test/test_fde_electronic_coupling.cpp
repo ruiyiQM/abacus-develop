@@ -111,6 +111,25 @@ TEST(FdeComplexElectronicCoupling, MatchesIndependentComplexOneBodySpectrumAndLo
     expect_complex_near(pair.coupling_ry, expected_v);
     EXPECT_NEAR(pair.eigenvalues_ry[0], 3.75, 1.0e-12);
     EXPECT_NEAR(pair.eigenvalues_ry[1], 5.25, 1.0e-12);
+    EXPECT_LE(pair.maximum_residual, 1.0e-12);
+    EXPECT_LE(pair.maximum_metric_error, 1.0e-12);
+    ASSERT_EQ(pair.coefficients.size(), 4);
+    const Complex reversed_h = std::conj(expected_h);
+    for (std::size_t root = 0; root < 2; ++root)
+    {
+        const Complex c0 = pair.coefficients[root * 2];
+        const Complex c1 = pair.coefficients[1 + root * 2];
+        const Complex sc0 = c0 + 0.8 * c1;
+        const Complex sc1 = 0.8 * c0 + c1;
+        const Complex hc0 = 5.0 * c0 + expected_h * c1;
+        const Complex hc1 = reversed_h * c0 + 4.4 * c1;
+        const Complex right0 = pair.eigenvalues_ry[root] * sc0;
+        const Complex right1 = pair.eigenvalues_ry[root] * sc1;
+        const Complex norm = std::conj(c0) * sc0 + std::conj(c1) * sc1;
+        expect_complex_near(hc0, right0);
+        expect_complex_near(hc1, right1);
+        expect_complex_near(norm, 1.0);
+    }
     const Complex conjugate_h = std::conj(pair.hamiltonian_ry[1]);
     expect_complex_near(pair.hamiltonian_ry[2], conjugate_h);
 }
@@ -319,4 +338,16 @@ TEST(FdeComplexElectronicCoupling, RejectsSingularOverlapAndBoundaryOrPopulation
                  std::invalid_argument);
     EXPECT_THROW(fde::ComplexElectronicCoupling::orthogonalize_pair(1.0, 1.0, 1.0, 0.5, 1.0e-10),
                  std::runtime_error);
+}
+
+TEST(FdeComplexElectronicCoupling, HandlesDiagonalAndExactlyDegenerateRootVectors)
+{
+    for (const double second_energy : {1.0, 2.0, 0.0})
+    {
+        const auto pair = fde::ComplexElectronicCoupling::orthogonalize_pair(
+            1.0, second_energy, 0.0, 0.0, 1.0e-10);
+        EXPECT_LE(pair.maximum_residual, 1.0e-12);
+        EXPECT_LE(pair.maximum_metric_error, 1.0e-12);
+        ASSERT_EQ(pair.coefficients.size(), 4);
+    }
 }

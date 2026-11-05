@@ -526,11 +526,102 @@ ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize
     result.coupling_ry = result.hamiltonian_ry[2];
     const double first_diagonal = std::real(result.hamiltonian_ry[0]);
     const double second_diagonal = std::real(result.hamiltonian_ry[3]);
-    const double midpoint = 0.5 * (first_diagonal + second_diagonal);
-    const double half_difference = 0.5 * (first_diagonal - second_diagonal);
+    const double midpoint = 0.5 * first_diagonal + 0.5 * second_diagonal;
+    const double half_difference = 0.5 * first_diagonal - 0.5 * second_diagonal;
     const double coupling_magnitude = std::abs(result.coupling_ry);
     const double gap = std::hypot(half_difference, coupling_magnitude);
     result.eigenvalues_ry = {midpoint - gap, midpoint + gap};
+    if (!std::isfinite(result.eigenvalues_ry[0]) || !std::isfinite(result.eigenvalues_ry[1]))
+    {
+        throw std::runtime_error("FDE two-state eigenvalues are non-finite");
+    }
+    result.coefficients.assign(4, 0.0);
+    for (std::size_t root = 0; root < 2; ++root)
+    {
+        const double root_shift = root == 0 ? -gap : gap;
+        const double first_difference = root_shift - half_difference;
+        const double second_difference = root_shift + half_difference;
+        const double first_magnitude = std::abs(first_difference);
+        const double second_magnitude = std::abs(second_difference);
+        Scalar first_component = 0.0;
+        Scalar second_component = 0.0;
+        if (first_magnitude >= second_magnitude)
+        {
+            first_component = result.coupling_ry;
+            second_component = first_difference;
+        }
+        else
+        {
+            first_component = second_difference;
+            second_component = conjugate_scalar(result.coupling_ry);
+        }
+        const double first_component_magnitude = std::abs(first_component);
+        const double second_component_magnitude = std::abs(second_component);
+        const double norm = std::hypot(first_component_magnitude, second_component_magnitude);
+        if (!std::isfinite(norm))
+        {
+            throw std::runtime_error("FDE two-state eigenvector norm is non-finite");
+        }
+        if (norm == 0.0)
+        {
+            // An exactly degenerate diagonal Hamiltonian admits either orthonormal basis.
+            first_component = root == 0 ? 1.0 : 0.0;
+            second_component = root == 1 ? 1.0 : 0.0;
+        }
+        else
+        {
+            first_component /= norm;
+            second_component /= norm;
+        }
+        for (std::size_t row = 0; row < 2; ++row)
+        {
+            result.coefficients[row + root * 2] = inverse_root[row] * first_component
+                + inverse_root[row + 2] * second_component;
+        }
+    }
+    const std::vector<Scalar> state_overlap = {1.0, conjugate_overlap, overlap, 1.0};
+    result.maximum_residual = 0.0;
+    result.maximum_metric_error = 0.0;
+    for (std::size_t root = 0; root < 2; ++root)
+    {
+        for (std::size_t row = 0; row < 2; ++row)
+        {
+            Scalar hc = 0.0;
+            Scalar sc = 0.0;
+            for (std::size_t column = 0; column < 2; ++column)
+            {
+                hc += hamiltonian[row + column * 2] * result.coefficients[column + root * 2];
+                sc += state_overlap[row + column * 2] * result.coefficients[column + root * 2];
+            }
+            const Scalar residual = hc - result.eigenvalues_ry[root] * sc;
+            const double error = std::abs(residual);
+            if (!std::isfinite(error))
+            {
+                throw std::runtime_error("FDE generalized two-state residual is non-finite");
+            }
+            result.maximum_residual = std::max(result.maximum_residual, error);
+        }
+        for (std::size_t other = 0; other < 2; ++other)
+        {
+            Scalar gram = 0.0;
+            for (std::size_t row = 0; row < 2; ++row)
+            {
+                for (std::size_t column = 0; column < 2; ++column)
+                {
+                    gram += conjugate_scalar(result.coefficients[row + root * 2])
+                            * state_overlap[row + column * 2] * result.coefficients[column + other * 2];
+                }
+            }
+            const double expected = root == other ? 1.0 : 0.0;
+            const Scalar difference = gram - expected;
+            const double error = std::abs(difference);
+            if (!std::isfinite(error))
+            {
+                throw std::runtime_error("FDE two-state metric normalization is non-finite");
+            }
+            result.maximum_metric_error = std::max(result.maximum_metric_error, error);
+        }
+    }
     return result;
 }
 
