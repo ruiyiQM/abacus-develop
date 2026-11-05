@@ -26,6 +26,7 @@ fde::ComplexDiabaticDeterminantArtifact determinant(
     result.orbital_fingerprint = "fixed_basis";
     result.ao_dimension = 2;
     result.boundary_twist = {0.17, 0.11, 0.0};
+    result.resource_fingerprint = "fixed_pp_ao_grid_functionals";
     result.alpha.coefficients = alpha;
     result.alpha.orbital_energies_ry = {-1.0};
     result.alpha.source_fragment_labels = {"D"};
@@ -309,6 +310,10 @@ TEST(FdeComplexElectronicCoupling, RejectsSingularOverlapAndBoundaryOrPopulation
     EXPECT_THROW(fde::ComplexElectronicCoupling::transition(first, second, overlap, 1.0e-12),
                  std::invalid_argument);
     second.boundary_twist = first.boundary_twist;
+    second.resource_fingerprint = "different_pseudopotential";
+    EXPECT_THROW(fde::ComplexElectronicCoupling::transition(first, second, overlap, 1.0e-12),
+                 std::invalid_argument);
+    second.resource_fingerprint = first.resource_fingerprint;
     second.beta = fde::ComplexOccupiedSpinOrbitals();
     EXPECT_THROW(fde::ComplexElectronicCoupling::transition(first, second, overlap, 1.0e-12),
                  std::invalid_argument);

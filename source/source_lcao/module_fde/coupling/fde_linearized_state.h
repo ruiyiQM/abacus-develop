@@ -23,6 +23,7 @@ struct ScalarLinearizedStateArtifact
     std::vector<Scalar> hamiltonian_beta_ry;
     std::string orbital_fingerprint;
     std::vector<double> boundary_twist;
+    std::string resource_fingerprint;
 };
 
 template <typename Scalar>

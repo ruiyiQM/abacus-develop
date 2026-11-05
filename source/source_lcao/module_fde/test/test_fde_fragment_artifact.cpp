@@ -19,6 +19,7 @@ fde::ComplexFragmentScfArtifact fragment()
     value.geometry_fingerprint = "fixed_cell";
     value.orbital_fingerprint = "fixed_basis";
     value.boundary_twist = {0.17, 0.11, 0.0};
+    value.resource_fingerprint = "fixed_pp_ao_grid_functionals";
     value.density_path = "density.fde";
     value.freeze_thaw_cycle = 2;
     value.scf_converged = true;
@@ -52,6 +53,7 @@ TEST(FdeComplexFragmentArtifact, RoundTripsComplexOccupiedMetricHamiltonianAndBo
     EXPECT_EQ(restored.ao_overlap, value.ao_overlap);
     EXPECT_EQ(restored.hamiltonian_alpha_ry, value.hamiltonian_alpha_ry);
     EXPECT_EQ(restored.boundary_twist, value.boundary_twist);
+    EXPECT_EQ(restored.resource_fingerprint, value.resource_fingerprint);
     EXPECT_EQ(restored.active_orbitals, value.active_orbitals);
 }
 

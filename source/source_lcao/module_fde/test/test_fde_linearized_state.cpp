@@ -19,6 +19,7 @@ fde::ComplexDiabaticDeterminantArtifact determinant(const std::string& label,
     value.geometry_fingerprint = "fixed_cell";
     value.orbital_fingerprint = "fixed_basis";
     value.boundary_twist = {0.17, 0.11, 0.0};
+    value.resource_fingerprint = "fixed_pp_ao_grid_functionals";
     value.ao_dimension = 2;
     value.alpha.coefficients = alpha;
     value.alpha.orbital_energies_ry = {-1.0};
@@ -37,6 +38,7 @@ fde::ComplexLinearizedStateArtifact state(const std::string& label, const double
     value.geometry_fingerprint = "fixed_cell";
     value.orbital_fingerprint = "fixed_basis";
     value.boundary_twist = {0.17, 0.11, 0.0};
+    value.resource_fingerprint = "fixed_pp_ao_grid_functionals";
     value.ao_dimension = 2;
     value.reference_energy_ry = energy;
     value.hamiltonian_alpha_ry = {2.0, Complex(0.5, -0.25), Complex(0.5, 0.25), 1.0};
@@ -56,6 +58,7 @@ TEST(FdeComplexLinearizedState, RoundTripsReferenceHamiltonianAndBoundaryIdentit
     EXPECT_EQ(restored.hamiltonian_alpha_ry, value.hamiltonian_alpha_ry);
     EXPECT_EQ(restored.boundary_twist, value.boundary_twist);
     EXPECT_EQ(restored.orbital_fingerprint, value.orbital_fingerprint);
+    EXPECT_EQ(restored.resource_fingerprint, value.resource_fingerprint);
     EXPECT_EQ(restored.reference_energy_ry, value.reference_energy_ry);
     std::istringstream wrong_scalar(output.str());
     EXPECT_THROW(fde::LinearizedStateArtifactIO::read(wrong_scalar, 1.0e-12), std::invalid_argument);
@@ -92,6 +95,10 @@ TEST(FdeComplexLinearizedState, RejectsMixedBoundaryBasisAndNonHermitianArtifact
                  std::invalid_argument);
     states[1] = state("A", 4.4);
     states[1].orbital_fingerprint = "different_basis";
+    EXPECT_THROW(fde::ComplexLinearizedTransitionEnergy provider(states, overlap, 1.0e-12),
+                 std::invalid_argument);
+    states[1] = state("A", 4.4);
+    states[1].resource_fingerprint = "different_pp_grid";
     EXPECT_THROW(fde::ComplexLinearizedTransitionEnergy provider(states, overlap, 1.0e-12),
                  std::invalid_argument);
     states[1] = state("A", 4.4);

@@ -199,6 +199,10 @@ void ScalarFragmentScfArtifactIO<Scalar>::validate(const ScalarFragmentScfArtifa
     {
         throw std::invalid_argument("FDE fragment artifact header or controls are invalid");
     }
+    if (complex_scalar)
+    {
+        validate_token(artifact.resource_fingerprint, "resource fingerprint");
+    }
     validate_token(artifact.state_label, "state label");
     validate_token(artifact.fragment_label, "fragment label");
     validate_token(artifact.geometry_fingerprint, "geometry fingerprint");
@@ -269,6 +273,7 @@ void ScalarFragmentScfArtifactIO<Scalar>::write(std::ostream& output,
             output << ' ' << artifact.boundary_twist[axis];
         }
         output << '\n';
+        output << "RESOURCES " << artifact.resource_fingerprint << '\n';
     }
     output << "DENSITY_PATH " << artifact.density_path << '\n';
     output << "CYCLE " << artifact.freeze_thaw_cycle << '\n';
@@ -323,6 +328,8 @@ ScalarFragmentScfArtifact<Scalar> ScalarFragmentScfArtifactIO<Scalar>::read(std:
         require_token(input, "BOUNDARY_TWIST");
         result.boundary_twist.resize(3);
         input >> result.boundary_twist[0] >> result.boundary_twist[1] >> result.boundary_twist[2];
+        require_token(input, "RESOURCES");
+        input >> result.resource_fingerprint;
     }
     require_token(input, "DENSITY_PATH");
     input >> result.density_path;

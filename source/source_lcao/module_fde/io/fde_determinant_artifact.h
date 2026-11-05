@@ -49,6 +49,7 @@ struct ScalarDiabaticDeterminantArtifact
     ScalarOccupiedSpinOrbitals<Scalar> beta;
     // V2 complex artifacts use one canonical reciprocal-cell twist for the whole finite state.
     std::vector<double> boundary_twist;
+    std::string resource_fingerprint;
 };
 
 using DiabaticDeterminantArtifact = ScalarDiabaticDeterminantArtifact<double>;

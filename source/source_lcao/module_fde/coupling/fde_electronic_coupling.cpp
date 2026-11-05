@@ -222,7 +222,8 @@ void validate_pair_metadata(const ScalarDiabaticDeterminantArtifact<Scalar>& bra
     if (bra.ao_dimension != ket.ao_dimension
         || bra.geometry_fingerprint != ket.geometry_fingerprint
         || bra.orbital_fingerprint != ket.orbital_fingerprint
-        || bra.boundary_twist != ket.boundary_twist)
+        || bra.boundary_twist != ket.boundary_twist
+        || bra.resource_fingerprint != ket.resource_fingerprint)
     {
         throw std::invalid_argument(
             "FDE electronic coupling determinant metadata is incompatible");

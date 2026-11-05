@@ -38,6 +38,7 @@ struct ScalarFragmentScfArtifact
     std::vector<Scalar> hamiltonian_alpha_ry;
     std::vector<Scalar> hamiltonian_beta_ry;
     std::vector<double> boundary_twist;
+    std::string resource_fingerprint;
     double subsystem_total_energy_ry;
     double ion_ion_energy_ry;
     double hartree_cross_energy_ry;

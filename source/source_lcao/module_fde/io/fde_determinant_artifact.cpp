@@ -292,6 +292,10 @@ void ScalarDeterminantArtifactIO<Scalar>::validate(const ScalarDiabaticDetermina
 {
     const bool complex_scalar = !std::is_same<Scalar, double>::value;
     validate_finite_state_boundary(artifact.schema_version, artifact.boundary_twist, complex_scalar);
+    if (complex_scalar)
+    {
+        validate_label(artifact.resource_fingerprint, "resource fingerprint");
+    }
     validate_label(artifact.state_label, "state label");
     validate_label(artifact.geometry_fingerprint, "geometry fingerprint");
     validate_label(artifact.orbital_fingerprint, "orbital fingerprint");
@@ -380,6 +384,7 @@ void ScalarDeterminantArtifactIO<Scalar>::write(std::ostream& output,
             output << ' ' << artifact.boundary_twist[axis];
         }
         output << '\n';
+        output << "RESOURCES " << artifact.resource_fingerprint << '\n';
     }
     output << "AO_DIMENSION " << artifact.ao_dimension << '\n';
     write_spin(output, "ALPHA", artifact.alpha, artifact.ao_dimension);
@@ -418,6 +423,8 @@ ScalarDiabaticDeterminantArtifact<Scalar> ScalarDeterminantArtifactIO<Scalar>::r
         input >> artifact.boundary_twist[0]
               >> artifact.boundary_twist[1]
               >> artifact.boundary_twist[2];
+        require_token(input, "RESOURCES");
+        input >> artifact.resource_fingerprint;
     }
     require_token(input, "AO_DIMENSION");
     if (!(input >> artifact.ao_dimension))

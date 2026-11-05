@@ -26,6 +26,7 @@ fde::ComplexDiabaticDeterminantArtifact complex_determinant()
     value.orbital_fingerprint = "basis";
     value.ao_dimension = 2;
     value.boundary_twist = {0.17, 0.11, 0.0};
+    value.resource_fingerprint = "fixed_pp_ao_grid_functionals";
     const double coefficient = 1.0 / std::sqrt(1.6);
     value.alpha.coefficients = {coefficient, Complex(0.0, coefficient)};
     value.alpha.orbital_energies_ry = {-1.0};
@@ -45,6 +46,7 @@ TEST(FdeComplexDeterminantArtifact, UsesConjugateMetricAndPreservesBoundaryAndPh
     const auto restored = fde::ComplexDeterminantArtifactIO::read(input, metric, 1.0e-12);
     EXPECT_EQ(restored.alpha.coefficients, determinant.alpha.coefficients);
     EXPECT_EQ(restored.boundary_twist, determinant.boundary_twist);
+    EXPECT_EQ(restored.resource_fingerprint, determinant.resource_fingerprint);
     EXPECT_EQ(restored.beta.coefficients.size(), 0);
     EXPECT_EQ(output.str().find("FDE_DIABATIC_DETERMINANT 2\n"), 0);
 }

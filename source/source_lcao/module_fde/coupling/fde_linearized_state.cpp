@@ -121,6 +121,12 @@ void ScalarLinearizedStateArtifactIO<Scalar>::validate(const ScalarLinearizedSta
     {
         throw std::invalid_argument("FDE complex linearized state requires an orbital fingerprint");
     }
+    if (complex_scalar
+        && (artifact.resource_fingerprint.empty()
+            || artifact.resource_fingerprint.find_first_of(" \t\r\n") != std::string::npos))
+    {
+        throw std::invalid_argument("FDE complex linearized state requires a resource fingerprint");
+    }
     if (artifact.ao_dimension == 0
         || artifact.state_label.empty()
         || artifact.state_label.find_first_of(" \t\r\n") != std::string::npos
@@ -158,6 +164,7 @@ void ScalarLinearizedStateArtifactIO<Scalar>::write(std::ostream& output,
             output << ' ' << artifact.boundary_twist[axis];
         }
         output << '\n';
+        output << "RESOURCES " << artifact.resource_fingerprint << '\n';
     }
     output << "AO_DIMENSION " << artifact.ao_dimension << '\n';
     output << "REFERENCE_ENERGY_RY " << artifact.reference_energy_ry << '\n';
@@ -194,6 +201,8 @@ ScalarLinearizedStateArtifact<Scalar> ScalarLinearizedStateArtifactIO<Scalar>::r
         require_token(input, "BOUNDARY_TWIST");
         result.boundary_twist.resize(3);
         input >> result.boundary_twist[0] >> result.boundary_twist[1] >> result.boundary_twist[2];
+        require_token(input, "RESOURCES");
+        input >> result.resource_fingerprint;
     }
     require_token(input, "AO_DIMENSION");
     if (!(input >> result.ao_dimension) || result.ao_dimension == 0)
@@ -248,6 +257,7 @@ ScalarLinearizedTransitionEnergy<Scalar>::ScalarLinearizedTransitionEnergy(
             || states_[index].geometry_fingerprint != states_[0].geometry_fingerprint
             || states_[index].orbital_fingerprint != states_[0].orbital_fingerprint
             || states_[index].boundary_twist != states_[0].boundary_twist
+            || states_[index].resource_fingerprint != states_[0].resource_fingerprint
             || !labels.insert(states_[index].state_label).second)
         {
             throw std::invalid_argument("FDE linearized states are incompatible or duplicated");
@@ -282,6 +292,7 @@ Scalar ScalarLinearizedTransitionEnergy<Scalar>::evaluate_ry(
     if (state == nullptr || state->ao_dimension != ao_dimension
         || state->geometry_fingerprint != bra.geometry_fingerprint
         || state->boundary_twist != bra.boundary_twist
+        || state->resource_fingerprint != bra.resource_fingerprint
         || (complex_scalar && state->orbital_fingerprint != bra.orbital_fingerprint))
     {
         throw std::invalid_argument("FDE transition determinant has no compatible linearized state");
