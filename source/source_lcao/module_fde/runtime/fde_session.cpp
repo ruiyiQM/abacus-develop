@@ -5,6 +5,7 @@
 #include "source_esolver/esolver.h"
 #include "source_esolver/esolver_ks_lcao.h"
 #include "source_io/module_json/output_info.h"
+#include "source_io/module_json/abacusjson.h"
 #include "source_io/module_parameter/input_parameter.h"
 #include "source_base/tool_quit.h"
 
@@ -169,6 +170,12 @@ void FdeSession::serve(ModuleESolver::ESolver& solver,
                 throw std::runtime_error(
                     "FDE session supports only LCAO KS solvers");
             }
+#ifdef __JSON
+            if (rank == 0)
+            {
+                Json::AbacusJson::write_to_json("abacus.json");
+            }
+#endif
         }
         catch (const std::exception& error)
         {

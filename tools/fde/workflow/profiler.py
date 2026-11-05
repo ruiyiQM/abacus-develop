@@ -54,6 +54,10 @@ def aggregate_profiles(records: Sequence[Mapping[str, object]]) -> Dict[str, obj
     abacus = totals["electronic_steps"] + totals["abacus_overhead"]
     return {
         "phase_totals_seconds": totals,
+        "electronic_step_metrics_available": bool(records) and all(
+            bool(record.get("electronic_step_metrics_available",
+                            record.get("abacus_json_available", False)
+                            and not record.get("abacus_json_error"))) for record in records),
         "total_profiled_seconds": profiled,
         "electronic_step_fraction_of_abacus": (
             totals["electronic_steps"] / abacus if abacus > 0.0 else 0.0),

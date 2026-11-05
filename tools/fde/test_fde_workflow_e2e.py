@@ -40,6 +40,7 @@ print("OMP_NUM_THREADS=" + os.environ.get("OMP_NUM_THREADS", ""))
 if task == "embedded_session":
     print("FDE_SESSION_READY 1", flush=True)
     request_index = 0
+    output_records = []
     for command in sys.stdin:
         fields = command.split()
         if fields == ["STOP"]:
@@ -56,6 +57,9 @@ if task == "embedded_session":
         if completed.returncode != 0:
             print("FDE_SESSION_ERROR " + fields[1] + " child failed", flush=True)
             raise SystemExit(2)
+        document = json.loads((Path(fields[2]).parent / "OUT.fake/abacus.json").read_text())
+        output_records.extend(document["output"])
+        (cwd / "abacus.json").write_text(json.dumps({"output": output_records}))
         mode = ("density_seed" if request_index == 0
                 else "resident_ao_density_matrix_and_orbitals")
         print("FDE_SESSION_DONE " + fields[1] + " " + mode + " "
@@ -638,6 +642,15 @@ class FdeWorkflowEndToEndTest(unittest.TestCase):
                     performance["warm_start_mode"],
                     "resident_ao_density_matrix_and_orbitals")
                 self.assertEqual(performance["abacus_ionic_step"], 1)
+                checkpoint = json.loads((state_directory / "checkpoint.json").read_text())
+                for cycle in checkpoint["history"]:
+                    for metrics in cycle["inner_scf"].values():
+                        self.assertEqual(metrics["electronic_steps"], 2)
+                        self.assertAlmostEqual(metrics["electronic_step_time_seconds"], 0.05)
+                        self.assertTrue(metrics["electronic_step_metrics_available"])
+                summary = json.loads((state_directory / "performance.json").read_text())
+                self.assertAlmostEqual(summary["total_electronic_step_time_seconds"], 0.2)
+                self.assertTrue(summary["electronic_step_metrics_available"])
 
     def test_gpu_controls_reach_every_fragment_input(self):
         with tempfile.TemporaryDirectory() as directory:

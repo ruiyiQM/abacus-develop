@@ -4,6 +4,14 @@ from workflow.profiler import aggregate_profiles, subsystem_phase_profile
 
 
 class ProfilerTest(unittest.TestCase):
+    def test_marks_incomplete_electronic_timing_as_unavailable(self):
+        records = [{"abacus_json_available": True}, {"abacus_json_available": False}]
+        self.assertFalse(aggregate_profiles(records)["electronic_step_metrics_available"])
+        records[1]["abacus_json_available"] = True
+        self.assertTrue(aggregate_profiles(records)["electronic_step_metrics_available"])
+        records[1]["abacus_json_error"] = "missing record"
+        self.assertFalse(aggregate_profiles(records)["electronic_step_metrics_available"])
+
     def test_separates_electronic_and_abacus_overhead(self):
         profile = subsystem_phase_profile({
             "workflow_preparation_seconds": 2.0,

@@ -1269,17 +1269,26 @@ def _atomic_text(path: Path, value: str) -> None:
     temporary.replace(path)
 
 
-def read_abacus_scf_metrics(job_directory: Path) -> Dict[str, object]:
+def read_abacus_scf_metrics(job_directory: Path,
+                            output_index: int | None) -> Dict[str, object]:
     """Read machine-readable electronic-step metrics without parsing text logs."""
-    candidates = sorted(job_directory.glob("OUT.*/abacus.json"))
+    root_json = job_directory / "abacus.json"
+    candidates = ([root_json] if root_json.is_file()
+                  else sorted(job_directory.glob("OUT.*/abacus.json")))
     if not candidates:
         return {"abacus_json_available": False}
     path = candidates[-1]
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise ValueError("JSON document is not an object")
         outputs = document.get("output", [])
         if not isinstance(outputs, list):
             raise ValueError("output is not an array")
+        if output_index is not None:
+            if not 0 <= output_index < len(outputs):
+                raise ValueError("requested SCF output record is missing")
+            outputs = [outputs[output_index]]
         steps: List[Mapping[str, object]] = []
         for output in outputs:
             if not isinstance(output, dict):
@@ -1298,6 +1307,8 @@ def read_abacus_scf_metrics(job_directory: Path) -> Dict[str, object]:
             return values
 
         times = finite_values("time")
+        if not steps or len(times) != len(steps) or any(value < 0.0 for value in times):
+            raise ValueError("incomplete or invalid electronic-step times")
         residuals = finite_values("drho")
         energies = finite_values("energy")
         result: Dict[str, object] = {
@@ -1513,6 +1524,8 @@ class WorkflowSessionPool:
             session_directory = existing["directory"]
         assert isinstance(worker, FdeSessionProcess)
         metrics = worker.run(request_id, config_path.resolve())
+        metrics.update(read_abacus_scf_metrics(session_directory,
+                                               int(metrics["abacus_ionic_step"])))
         metrics["session_worker_directory"] = str(session_directory)
         return metrics
 
@@ -1614,7 +1627,7 @@ def run_fragment_scf(
                 "returncode": completed.returncode,
                 "wall_time_seconds": time.monotonic() - launch_started,
             }
-            launch_metrics.update(read_abacus_scf_metrics(job_directory))
+            launch_metrics.update(read_abacus_scf_metrics(job_directory, None))
         else:
             signature = json.dumps(input_parameters,
                                    sort_keys=True,
@@ -1658,6 +1671,8 @@ def run_fragment_scf(
                 f"partial ABACUS job produced a final FDE fragment in {job_directory}")
         if bool(controls.get("remove_abacus_restart_files", False)):
             remove_abacus_restart_files(job_directory)
+        if "electronic_steps" not in launch_metrics:
+            launch_metrics["electronic_steps"] = density_data["scf_iterations"]
         launch_metrics["artifact_validation_seconds"] = (
             time.monotonic() - artifact_started)
         launch_metrics["phase_times_seconds"] = subsystem_phase_profile(
@@ -1691,6 +1706,7 @@ def run_fragment_scf(
         "electronic_step_time_seconds": math.fsum(
             float(item.get("electronic_step_time_seconds", 0.0))
             for item in attempts),
+        "electronic_step_metrics_available": bool(attempt_profile["electronic_step_metrics_available"]),
         "maximum_iterations": int(schedule["maximum_iterations"]),
         "density_tolerance": float(schedule["density_tolerance"]),
         "mixing": mixing,

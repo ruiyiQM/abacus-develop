@@ -174,6 +174,22 @@ if(ENABLE_JSON AND ENABLE_LIBXC)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
     TIMEOUT 60
   )
+  if(ENABLE_MPI)
+    add_test(
+      NAME MODULE_FDE_session_json_2rank
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_session_json.py
+        $<TARGET_FILE:${ABACUS_BIN_NAME}>
+        ${CMAKE_SOURCE_DIR}
+        ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+        ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(MODULE_FDE_session_json_2rank PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+      PROCESSORS 2
+      TIMEOUT 90
+    )
+  endif()
 endif()
 
 add_test(

@@ -502,12 +502,29 @@ class FdeWorkflowTest(unittest.TestCase):
                     {"energy": -11.0, "drho": 0.01, "time": 2.0},
                 ]}]
             }), encoding="utf-8")
-            metrics = fde_workflow.read_abacus_scf_metrics(job)
+            metrics = fde_workflow.read_abacus_scf_metrics(job, None)
             self.assertTrue(metrics["abacus_json_available"])
             self.assertEqual(metrics["electronic_steps"], 2)
             self.assertAlmostEqual(metrics["electronic_step_time_seconds"], 3.5)
             self.assertAlmostEqual(metrics["initial_drho"], 0.2)
             self.assertAlmostEqual(metrics["final_drho"], 0.01)
+
+    def test_reads_one_request_from_cumulative_worker_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "abacus.json").write_text(json.dumps({"output": [
+                {"scf": [{"time": 1.5, "drho": .1, "energy": -1}]},
+                {"scf": [{"time": 2, "drho": .2, "energy": -2},
+                         {"time": 3, "drho": .01, "energy": -3}]},
+            ]}))
+            first = fde_workflow.read_abacus_scf_metrics(root, 0)
+            second = fde_workflow.read_abacus_scf_metrics(root, 1)
+            self.assertEqual(first["electronic_steps"], 1)
+            self.assertEqual(second["electronic_steps"], 2)
+            self.assertEqual(first["electronic_step_time_seconds"], 1.5)
+            self.assertEqual(second["electronic_step_time_seconds"], 5)
+            missing = fde_workflow.read_abacus_scf_metrics(root, 2)
+            self.assertIn("abacus_json_error", missing)
 
 
 if __name__ == "__main__":
