@@ -58,6 +58,18 @@ TEST(FdeSessionContract, AllowsMutableDensityPathsAndOutput)
         fde::FdeSessionContract::validate_compatible(initialized, requested));
 }
 
+TEST(FdeSessionContract, CannotReuseAllocatedOrbitalsAtAnotherBoundaryTwist)
+{
+    auto initialized = config();
+    initialized.boundary_twist = {0.17, 0.11, 0.0};
+    auto requested = initialized;
+    EXPECT_NO_THROW(fde::FdeSessionContract::validate_compatible(initialized, requested));
+    requested.boundary_twist[0] = -0.17;
+    EXPECT_THROW(fde::FdeSessionContract::validate_compatible(initialized, requested), std::invalid_argument);
+    requested.boundary_twist.clear();
+    EXPECT_THROW(fde::FdeSessionContract::validate_compatible(initialized, requested), std::invalid_argument);
+}
+
 TEST(FdeSessionContract, RejectsChangedActiveFragment)
 {
     const fde::FdeRuntimeConfig initialized = config();

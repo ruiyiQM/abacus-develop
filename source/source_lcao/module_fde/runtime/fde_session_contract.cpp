@@ -168,6 +168,8 @@ void FdeSessionContract::validate_compatible(
             "diagonal_energies");
     require(initialized.ao_overlap_path == requested.ao_overlap_path,
             "ao_overlap_path");
+    const bool same_boundary = initialized.boundary_twist == requested.boundary_twist;
+    require(same_boundary, "boundary_twist");
     require(initialized.fragment_xc == requested.fragment_xc,
             "fragment_xc");
     require(initialized.embedding_xc == requested.embedding_xc,

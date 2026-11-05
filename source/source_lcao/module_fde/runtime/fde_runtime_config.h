@@ -55,6 +55,8 @@ struct FdeRuntimeConfig
     std::vector<RuntimeDiagonalEnergy> diagonal_energies;
     std::string ao_overlap_path;
     std::string output_prefix;
+    // One finite-supercell twist in reciprocal-cell fractions; theta = 2*pi*k.
+    std::vector<double> boundary_twist;
 
     std::string fragment_xc;
     std::string embedding_xc;

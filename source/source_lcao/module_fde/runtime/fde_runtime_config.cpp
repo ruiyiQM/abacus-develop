@@ -152,6 +152,21 @@ void FdeRuntimeConfigIO::validate(const FdeRuntimeConfig& config)
     {
         throw std::invalid_argument("FDE_CONFIG schema version must be 1");
     }
+    if (!config.boundary_twist.empty())
+    {
+        if (config.boundary_twist.size() != 3)
+        {
+            throw std::invalid_argument("FDE_CONFIG BOUNDARY_TWIST requires three reciprocal-cell fractions");
+        }
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const double twist = config.boundary_twist[axis];
+            if (!std::isfinite(twist) || twist < -0.5 || twist >= 0.5)
+            {
+                throw std::invalid_argument("FDE_CONFIG BOUNDARY_TWIST must be finite in [-0.5, 0.5)");
+            }
+        }
+    }
     if (config.calculate_force)
     {
         throw std::invalid_argument(
@@ -415,6 +430,18 @@ FdeRuntimeConfig FdeRuntimeConfigIO::read(std::istream& input)
         {
             config.ao_overlap_path = read_value<std::string>(line, line_number, "AO-overlap path");
         }
+        else if (key == "BOUNDARY_TWIST")
+        {
+            if (!config.boundary_twist.empty())
+            {
+                throw parse_error(line_number, "duplicate BOUNDARY_TWIST");
+            }
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const double twist = read_value<double>(line, line_number, "boundary twist fraction");
+                config.boundary_twist.push_back(twist);
+            }
+        }
         else if (key == "OUTPUT_PREFIX")
         {
             config.output_prefix = read_value<std::string>(line, line_number, "output prefix");
@@ -618,6 +645,15 @@ void FdeRuntimeConfigIO::write(std::ostream& output, const FdeRuntimeConfig& con
         output << "AO_OVERLAP " << config.ao_overlap_path << '\n';
     }
     output << "OUTPUT_PREFIX " << config.output_prefix << '\n';
+    if (!config.boundary_twist.empty())
+    {
+        output << "BOUNDARY_TWIST";
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            output << ' ' << config.boundary_twist[axis];
+        }
+        output << '\n';
+    }
     output << "FRAGMENT_XC " << FdeXcPolicy::canonical_fragment(config.fragment_xc)
            << '\n';
     output << "EMBEDDING_XC " << FdeXcPolicy::canonical_embedding(config.embedding_xc)

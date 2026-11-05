@@ -82,6 +82,36 @@ TEST(FdeRuntimeConfig, ParsesFluorideSubstitutionTwoStateModel)
     EXPECT_EQ(fde::FdeRuntimeConfigIO::state_index(config, "product"), 1);
 }
 
+TEST(FdeRuntimeConfig, RoundTripsFiniteSupercellBoundaryWithoutChangingLegacyDefaults)
+{
+    std::istringstream input(fluoride_substitution_config());
+    auto config = fde::FdeRuntimeConfigIO::read(input);
+    EXPECT_TRUE(config.boundary_twist.empty());
+    config.boundary_twist = {0.17, 0.11, 0.0};
+    std::ostringstream output;
+    fde::FdeRuntimeConfigIO::write(output, config);
+    std::istringstream restored_input(output.str());
+    const auto restored = fde::FdeRuntimeConfigIO::read(restored_input);
+    EXPECT_EQ(restored.boundary_twist, config.boundary_twist);
+}
+
+TEST(FdeRuntimeConfig, RejectsMalformedDuplicateAndNoncanonicalBoundaryRecords)
+{
+    const std::string original(fluoride_substitution_config());
+    const auto end = original.find("END_FDE_CONFIG");
+    ASSERT_NE(end, std::string::npos);
+    for (const auto& record : {"BOUNDARY_TWIST 0.17 0\n",
+                               "BOUNDARY_TWIST 0.17 0.11 0 extra\n",
+                               "BOUNDARY_TWIST 0.5 0 0\n",
+                               "BOUNDARY_TWIST 0.17 0 0\nBOUNDARY_TWIST 0.17 0 0\n"})
+    {
+        std::string text = original;
+        text.insert(end, record);
+        std::istringstream input(text);
+        EXPECT_THROW(fde::FdeRuntimeConfigIO::read(input), std::exception);
+    }
+}
+
 TEST(FdeRuntimeConfig, RejectsUnsupportedNativeForceRequest)
 {
     std::string text(fluoride_substitution_config());
