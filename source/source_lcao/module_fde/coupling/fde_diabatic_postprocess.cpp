@@ -186,9 +186,10 @@ void write_result(const std::string& prefix,
     }
     output << "\nMAXIMUM_RESIDUAL " << result.adiabatic_solution.maximum_residual
            << "\nEND\n";
+    output.close();
     if (!output)
     {
-        throw std::runtime_error("Failed to write FDE diabatic result");
+        throw std::runtime_error("Failed to write FDE diabatic result: " + text_path);
     }
 
     const std::string table_path = prefix + ".fde_diabatic.tsv";
@@ -221,6 +222,11 @@ void write_result(const std::string& prefix,
         table << "adiabatic_root\t" << root << "\t-\t-\t"
               << result.adiabatic_solution.eigenvalues_ry[root]
               << "\t-\t-\t-\t-\t-\t-\n";
+    }
+    table.close();
+    if (!table)
+    {
+        throw std::runtime_error("Failed to write FDE diabatic table: " + table_path);
     }
 }
 

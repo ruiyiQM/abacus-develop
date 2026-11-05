@@ -3,8 +3,17 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <csignal>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 namespace
 {
@@ -100,3 +109,102 @@ TEST(FdeDiabaticPostprocess, ProducesCouplingAndNonorthogonalRoots)
     EXPECT_LT(result.adiabatic_solution.eigenvalues_ry[0],
               result.adiabatic_solution.eigenvalues_ry[1]);
 }
+
+#if defined(__unix__) || defined(__APPLE__)
+class FdeDiabaticPostprocessIO : public testing::Test
+{
+  protected:
+    std::string prefix;
+    std::string config_path;
+    std::vector<std::string> paths;
+
+    void SetUp() override
+    {
+        const int pid = getpid();
+        const std::string pid_text = std::to_string(pid);
+        const testing::TestInfo* info = testing::UnitTest::GetInstance()->current_test_info();
+        prefix = testing::TempDir() + "fde-postprocess-" + info->name() + "-" + pid_text;
+        config_path = prefix + ".config";
+        fde::FdeRuntimeConfig runtime = config();
+        runtime.output_prefix = prefix;
+        runtime.ao_overlap_path = prefix + ".overlap";
+        paths = {config_path, runtime.ao_overlap_path,
+                 prefix + ".fde_diabatic", prefix + ".fde_diabatic.tsv"};
+        const std::vector<double> overlap = {1.0, 0.0, 0.0, 1.0};
+        const std::vector<fde::DiabaticDeterminantArtifact> determinants = {
+            determinant("reactant", {1.0, 0.0}), determinant("product", {0.8, 0.6})};
+        const std::vector<fde::LinearizedStateArtifact> states = {
+            linearized("reactant", -10.0, 0.7), linearized("product", -9.0, 0.3)};
+        for (std::size_t index = 0; index < states.size(); ++index)
+        {
+            const std::string determinant_path = prefix + "." + states[index].state_label + ".det";
+            const std::string linear_path = prefix + "." + states[index].state_label + ".linear";
+            paths.push_back(determinant_path);
+            paths.push_back(linear_path);
+            runtime.determinant_artifacts.push_back({states[index].state_label, determinant_path});
+            runtime.linearized_state_artifacts.push_back({states[index].state_label, linear_path});
+            std::ofstream determinant_output(determinant_path.c_str());
+            fde::DeterminantArtifactIO::write(determinant_output, determinants[index], overlap, 1.0e-8);
+            std::ofstream linear_output(linear_path.c_str());
+            fde::LinearizedStateArtifactIO::write(linear_output, states[index], 1.0e-10);
+        }
+        std::ofstream overlap_output(runtime.ao_overlap_path.c_str());
+        overlap_output << "FDE_AO_MATRIX 1\nDIMENSION 2\nVALUES 4 1 0 0 1\nEND\n";
+        std::ofstream config_output(config_path.c_str());
+        fde::FdeRuntimeConfigIO::write(config_output, runtime);
+    }
+
+    void TearDown() override
+    {
+        for (const std::string& path : paths)
+        {
+            std::remove(path.c_str());
+        }
+    }
+};
+
+TEST_F(FdeDiabaticPostprocessIO, WritesCompleteResultAndTable)
+{
+    EXPECT_NO_THROW(fde::DiabaticPostprocessor::run(config_path));
+    const std::string text_path = prefix + ".fde_diabatic";
+    const std::string table_path = prefix + ".fde_diabatic.tsv";
+    std::ifstream text(text_path.c_str());
+    std::ifstream table(table_path.c_str());
+    const int first_text_character = text.peek();
+    const int first_table_character = table.peek();
+    const int end_of_file = std::ifstream::traits_type::eof();
+    EXPECT_NE(first_text_character, end_of_file);
+    EXPECT_NE(first_table_character, end_of_file);
+}
+
+TEST_F(FdeDiabaticPostprocessIO, RejectsTextCloseFailure)
+{
+    EXPECT_EXIT({
+        std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit limit;
+        limit.rlim_cur = 0;
+        limit.rlim_max = 0;
+        if (setrlimit(RLIMIT_FSIZE, &limit) != 0) _exit(2);
+        try { fde::DiabaticPostprocessor::run(config_path); }
+        catch (const std::runtime_error&) { _exit(0); }
+        _exit(1);
+    }, testing::ExitedWithCode(0), "");
+}
+
+TEST_F(FdeDiabaticPostprocessIO, RejectsTableCloseFailure)
+{
+    const std::string text_path = prefix + ".fde_diabatic";
+    const int link_status = symlink("/dev/null", text_path.c_str());
+    ASSERT_EQ(link_status, 0);
+    EXPECT_EXIT({
+        std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit limit;
+        limit.rlim_cur = 0;
+        limit.rlim_max = 0;
+        if (setrlimit(RLIMIT_FSIZE, &limit) != 0) _exit(2);
+        try { fde::DiabaticPostprocessor::run(config_path); }
+        catch (const std::runtime_error&) { _exit(0); }
+        _exit(1);
+    }, testing::ExitedWithCode(0), "");
+}
+#endif
