@@ -220,6 +220,15 @@ TEST_F(FdeDiabaticPostprocessIO, WritesCompleteResultAndTable)
 
 TEST_F(FdeDiabaticPostprocessIO, RejectsTextCloseFailure)
 {
+    // RLIMIT_FSIZE is not enforced by every scratch filesystem; prefer a failing device.
+    if (access("/dev/full", F_OK) == 0)
+    {
+        const std::string text_path = prefix + ".fde_diabatic";
+        const int link_status = symlink("/dev/full", text_path.c_str());
+        ASSERT_EQ(link_status, 0);
+        EXPECT_THROW(fde::DiabaticPostprocessor::run(config_path), std::runtime_error);
+        return;
+    }
     EXPECT_EXIT({
         std::signal(SIGXFSZ, SIG_IGN);
         struct rlimit limit;
@@ -237,6 +246,14 @@ TEST_F(FdeDiabaticPostprocessIO, RejectsTableCloseFailure)
     const std::string text_path = prefix + ".fde_diabatic";
     const int link_status = symlink("/dev/null", text_path.c_str());
     ASSERT_EQ(link_status, 0);
+    if (access("/dev/full", F_OK) == 0)
+    {
+        const std::string table_path = prefix + ".fde_diabatic.tsv";
+        const int full_link_status = symlink("/dev/full", table_path.c_str());
+        ASSERT_EQ(full_link_status, 0);
+        EXPECT_THROW(fde::DiabaticPostprocessor::run(config_path), std::runtime_error);
+        return;
+    }
     EXPECT_EXIT({
         std::signal(SIGXFSZ, SIG_IGN);
         struct rlimit limit;
