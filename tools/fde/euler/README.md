@@ -8,6 +8,14 @@ FDE runs through 2026-08-11. The committed `[F-CH3-Cl]-` calculation in
 
 ## Recommended path
 
+The repository-root `euler/` build and CUDA submission scripts are site-local
+files and are no longer distributed by Git. Commands below that use those
+scripts describe the historical local setup and require your own copy. A
+fresh clone should use the repository's [build instructions](../../../docs/quick_start/easy_install.md)
+and pass an explicit runtime-environment script to the retained workflow and
+scaling runners. The numerical references and Python helper tests in this
+directory remain tracked.
+
 1. Build the GCC/OpenMPI/ELPA executable with the scripts under `euler/`.
 2. Fetch pinned PP/orbital resources once on the login node.
 3. Prepare and validate one low-cost 40 Ry UKS point.

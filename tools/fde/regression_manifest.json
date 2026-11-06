@@ -55,7 +55,6 @@
     "tools/fde/compare_scientific_runs.py",
     "tools/fde/compare_band_folding.py",
     "tools/fde/euler/submit_fde_mpi_scaling.sh",
-    "euler/test_fde_cuda.sbatch",
     "examples/fdedft/01_f_ch3_cl_uks/scientific_error_budget.json",
     "examples/fdedft/01_f_ch3_cl_uks/reference/fde_pes.tsv.ref",
     "examples/fdedft/01_f_ch3_cl_uks/reference/convergence.json.ref",
