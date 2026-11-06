@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iomanip>
 #include <istream>
+#include <limits>
 #include <ostream>
 #include <set>
 #include <stdexcept>
@@ -15,6 +16,14 @@ namespace fde
 
 namespace
 {
+
+void validate_ao_dimension(const std::size_t dimension)
+{
+    if (dimension == 0 || dimension > std::numeric_limits<std::size_t>::max() / dimension)
+    {
+        throw std::invalid_argument("FDE linearized-state AO dimension is invalid or overflows its matrix size");
+    }
+}
 
 void require_token(std::istream& input, const char* expected)
 {
@@ -113,6 +122,7 @@ template <typename Scalar>
 void ScalarLinearizedStateArtifactIO<Scalar>::validate(const ScalarLinearizedStateArtifact<Scalar>& artifact,
                                          const double symmetry_tolerance)
 {
+    validate_ao_dimension(artifact.ao_dimension);
     const bool complex_scalar = !std::is_same<Scalar, double>::value;
     validate_finite_state_boundary(artifact.schema_version, artifact.boundary_twist, complex_scalar);
     if (complex_scalar
@@ -209,6 +219,7 @@ ScalarLinearizedStateArtifact<Scalar> ScalarLinearizedStateArtifactIO<Scalar>::r
     {
         throw std::invalid_argument("FDE linearized-state AO dimension is malformed");
     }
+    validate_ao_dimension(result.ao_dimension);
     require_token(input, "REFERENCE_ENERGY_RY");
     input >> result.reference_energy_ry;
     const std::size_t matrix_size = result.ao_dimension * result.ao_dimension;
@@ -246,6 +257,7 @@ ScalarLinearizedTransitionEnergy<Scalar>::ScalarLinearizedTransitionEnergy(
     }
     std::set<std::string> labels;
     const std::size_t dimension = states_[0].ao_dimension;
+    validate_ao_dimension(dimension);
     if (ao_overlap_.size() != dimension * dimension)
     {
         throw std::invalid_argument("FDE linearized transition AO overlap has invalid dimensions");

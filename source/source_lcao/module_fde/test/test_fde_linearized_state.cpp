@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -273,5 +274,44 @@ TEST(FdeComplexLinearizedState, RejectsMixedBoundaryBasisAndNonHermitianArtifact
     states[1] = state("A", 4.4);
     states[1].hamiltonian_alpha_ry[1] = states[1].hamiltonian_alpha_ry[2];
     EXPECT_THROW(fde::ComplexLinearizedStateArtifactIO::validate(states[1], 1.0e-12),
+                 std::invalid_argument);
+}
+
+TEST(FdeLinearizedStateArtifactIO, RejectsOverflowingAoDimensionsBeforeMatrixArithmetic)
+{
+    const int half_width = (std::numeric_limits<std::size_t>::digits + 1) / 2;
+    const std::size_t dimension = std::size_t(1) << half_width;
+    for (int version = 1; version <= 2; ++version)
+    {
+        std::ostringstream text;
+        text << "FDE_LINEARIZED_STATE " << version << "\nSTATE D\nGEOMETRY fixed_cell\n";
+        if (version == 2)
+        {
+            text << "ORBITALS fixed_basis\nBOUNDARY_TWIST 0.17 0.11 0\nRESOURCES fixed_resources\n";
+        }
+        text << "AO_DIMENSION " << dimension << "\nREFERENCE_ENERGY_RY 1\n"
+             << "HAMILTONIAN_ALPHA_RY 0\nHAMILTONIAN_BETA_RY 0\nEND\n";
+        std::istringstream input(text.str());
+        if (version == 1)
+        {
+            EXPECT_THROW(fde::LinearizedStateArtifactIO::read(input, 1.0e-12), std::invalid_argument);
+        }
+        else
+        {
+            EXPECT_THROW(fde::ComplexLinearizedStateArtifactIO::read(input, 1.0e-12), std::invalid_argument);
+        }
+    }
+    auto invalid = state("D", 1.0);
+    invalid.ao_dimension = dimension;
+    invalid.hamiltonian_alpha_ry.clear();
+    invalid.hamiltonian_beta_ry.clear();
+    EXPECT_THROW(fde::ComplexLinearizedStateArtifactIO::validate(invalid, 1.0e-12), std::invalid_argument);
+    std::ostringstream output;
+    EXPECT_THROW(fde::ComplexLinearizedStateArtifactIO::write(output, invalid, 1.0e-12), std::invalid_argument);
+    auto second_invalid = invalid;
+    second_invalid.state_label = "A";
+    const std::vector<fde::ComplexLinearizedStateArtifact> states = {invalid, second_invalid};
+    const std::vector<Complex> empty_overlap;
+    EXPECT_THROW(fde::ComplexLinearizedTransitionEnergy provider(states, empty_overlap, 1.0e-12),
                  std::invalid_argument);
 }
