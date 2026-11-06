@@ -6,6 +6,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fde_session import FdeSessionError, FdeSessionProcess
@@ -35,6 +36,27 @@ for line in sys.stdin:
 
 
 class FdeSessionProcessTest(unittest.TestCase):
+    def test_group_signal_permission_race_reaps_an_exiting_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = FdeSessionProcess(["unused"], Path(directory), os.environ, 0.1, 0.1)
+            session.process = mock.Mock(pid=12345)
+            session.process.wait.return_value = 2
+            with mock.patch("fde_session.os.killpg", side_effect=PermissionError(1, "exiting group")):
+                session._terminate_owned_process(False)
+            session.process.wait.assert_called_once_with(timeout=0.1)
+
+    def test_group_signal_permission_failure_is_not_hidden_for_a_live_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = FdeSessionProcess(["unused"], Path(directory), os.environ, 0.1, 0.1)
+            session.process = mock.Mock(pid=12345)
+            session.process.wait.side_effect = subprocess.TimeoutExpired(["unused"], 0.1)
+            error = PermissionError(1, "live group")
+            with mock.patch("fde_session.os.killpg", side_effect=error):
+                with self.assertRaises(PermissionError) as raised:
+                    session._terminate_owned_process(True)
+            self.assertIs(raised.exception, error)
+            session.process.wait.assert_called_once_with(timeout=0.1)
+
     def test_start_timeout_cleans_owned_processes_and_preserves_diagnostic(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

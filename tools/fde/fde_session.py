@@ -131,6 +131,12 @@ class FdeSessionProcess:
                 self.process.terminate()
         except ProcessLookupError:
             pass
+        except PermissionError as error:
+            # Stdout EOF can precede process exit; reap before accepting a late signal error.
+            try:
+                self.process.wait(timeout=self.stop_timeout_seconds)
+            except subprocess.TimeoutExpired:
+                raise error
 
     def run(self, request_id: str, config_path: Path) -> dict[str, object]:
         if (not request_id or any(character.isspace() for character in request_id)
