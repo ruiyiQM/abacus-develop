@@ -98,6 +98,10 @@ def main():
     launcher = sys.argv[2:]
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
+        if launcher:
+            # Legacy INPUT rejection is serial; MPI controls exercise valid V2 postprocess requests.
+            check_complex_postprocess(executable, launcher, root)
+            return
         (root / "FDE_CONFIG").write_text(
             "FDE_CONFIG 1\nATOM_COUNT 2\n"
             "FRAGMENT A 1 1 0\nFRAGMENT B 1 1 1\n"
