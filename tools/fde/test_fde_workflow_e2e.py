@@ -158,7 +158,7 @@ fragment_artifact.write_text(
     f"STATE {state}\nFRAGMENT {fragment}\nGEOMETRY g0\nCYCLE {cycle}\n"
     "ORBITAL_BASIS fake\nDENSITY_PATH result.fde_density\nSCF_CONVERGED 1\n"
     "AO_DIMENSION 4\n"
-    f"ACTIVE_ORBITALS 1 {active}\nSUBSYSTEM_TOTAL_ENERGY_RY {subsystem}\n"
+    f"ACTIVE_ORBITALS 2 {active} {active + 2}\nSUBSYSTEM_TOTAL_ENERGY_RY {subsystem}\n"
     "ION_ION_ENERGY_RY 2\nHARTREE_CROSS_ENERGY_RY 0.5\n"
     "NONADDITIVE_KINETIC_ENERGY_RY 0.3\nNONADDITIVE_XC_ENERGY_RY -0.2\n"
     f"ALPHA 1\nORBITAL {fragment} -1 {alpha_orbital}\n"

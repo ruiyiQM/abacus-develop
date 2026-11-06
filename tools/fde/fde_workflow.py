@@ -1111,6 +1111,18 @@ def read_fragment(path: Path) -> Dict[str, object]:
         active = result["active_orbitals"]
         if not active or active != sorted(set(active)) or active[0] < 0 or active[-1] >= dimension:
             raise WorkflowError(f"invalid active AO ownership list in {path}")
+        owned = set(active)
+        for spin in ("alpha", "beta"):
+            if (len(result[spin]) > len(active)
+                    or any(abs(value) > 1e-8 for orbital in result[spin]
+                           for index, value in enumerate(orbital["coefficients"]) if index not in owned)):
+                raise WorkflowError(f"occupied coefficients exceed the fragment-owned AO space in {path}")
+        for name in matrices:
+            matrix = result[name.lower()]
+            if any(abs(matrix[row + column * dimension]
+                       - matrix[column + row * dimension].conjugate()) > 1e-8
+                   for row in range(dimension) for column in range(row, dimension)):
+                raise WorkflowError(f"non-Hermitian fragment {name} in {path}")
         if complex_values:
             twist = result.get("boundary_twist", [])
             if len(twist) != 3 or any(not -0.5 <= value < 0.5 for value in twist) or not result.get("resources"):

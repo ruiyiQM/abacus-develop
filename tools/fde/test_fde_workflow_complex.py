@@ -114,6 +114,27 @@ class ComplexWorkflowTest(unittest.TestCase):
             with self.assertRaises(workflow.WorkflowError):
                 workflow.read_fragment(path)
 
+    def test_fragment_parser_rejects_off_owned_coefficients_and_nonhermitian_matrices(self):
+        path = Path(self.results[0]["fragments"]["F"])
+        original = path.read_text()
+        for before, after in (("ORBITAL F -0.2 (1,0) (0,0)", "ORBITAL F -0.2 (1,0) (0,0.1)"),
+                              ("(0,-0.2)", "(0,0.2)"),
+                              ("(0.3,-0.4)", "(0.3,0.4)")):
+            with self.subTest(before=before):
+                path.write_text(original.replace(before, after))
+                with self.assertRaises(workflow.WorkflowError):
+                    workflow.read_fragment(path)
+        # V1 shares the ownership guard; its old fixture declared only one of two owned AOs.
+        fields = [[token[1:-1].split(",")[0] if token.startswith("(") else token for token in line.split()]
+                  for line in original.splitlines() if not line.startswith(("BOUNDARY_TWIST", "RESOURCES"))]
+        fields[0][1] = "1"
+        real_text = "\n".join(" ".join(line) for line in fields) + "\n"
+        path.write_text(real_text)
+        workflow.read_fragment(path)
+        path.write_text(real_text.replace("ORBITAL F -0.2 1 0", "ORBITAL F -0.2 1 0.1"))
+        with self.assertRaisesRegex(workflow.WorkflowError, "fragment-owned"):
+            workflow.read_fragment(path)
+
     def test_complex_result_is_json_safe_and_bound_to_workflow_resources(self):
         path = self.root / "result"
         path.write_text(RESULT)
