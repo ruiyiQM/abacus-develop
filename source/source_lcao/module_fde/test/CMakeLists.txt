@@ -97,6 +97,7 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_diabatic_postprocess
   SOURCES fde_diabatic_postprocess_test.cpp
+    test_fde_diabatic_postprocess.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_diabatic_assembler.cpp

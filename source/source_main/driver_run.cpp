@@ -60,10 +60,10 @@ void Driver::driver_run()
         {
             try
             {
-                const fde::DiabaticPostprocessResult result
-                    = fde::DiabaticPostprocessor::run(input.fde_config);
+                const std::size_t retained_roots
+                    = fde::DiabaticPostprocessor::run_and_count_roots(input.fde_config, running_log);
                 std::cout << " FDE diabatic postprocess completed with "
-                          << result.adiabatic_solution.eigenvalues_ry.size()
+                          << retained_roots
                           << " retained adiabatic roots." << std::endl;
             }
             catch (const std::exception& error)

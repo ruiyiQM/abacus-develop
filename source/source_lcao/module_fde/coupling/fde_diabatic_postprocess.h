@@ -6,25 +6,36 @@
 #include "source_lcao/module_fde/runtime/fde_runtime_config.h"
 
 #include <cstddef>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
 namespace fde
 {
 
-struct OrthogonalizedPairCoupling
+template <typename Scalar>
+struct ScalarOrthogonalizedPairCoupling
 {
     std::size_t first_state;
     std::size_t second_state;
-    double coupling_ry;
+    Scalar coupling_ry;
 };
 
-struct DiabaticPostprocessResult
+template <typename Scalar>
+struct ScalarDiabaticPostprocessResult
 {
-    FdeDiabaticAssemblyResult assembly;
-    NonorthogonalStateSolution adiabatic_solution;
-    std::vector<OrthogonalizedPairCoupling> orthogonalized_pair_couplings;
+    ScalarFdeDiabaticAssemblyResult<Scalar> assembly;
+    ScalarNonorthogonalStateSolution<Scalar> adiabatic_solution;
+    std::vector<ScalarOrthogonalizedPairCoupling<Scalar>> orthogonalized_pair_couplings;
+    std::vector<double> boundary_twist;
+    std::string geometry_fingerprint;
+    std::string orbital_fingerprint;
+    std::string resource_fingerprint;
 };
+
+using OrthogonalizedPairCoupling = ScalarOrthogonalizedPairCoupling<double>;
+using DiabaticPostprocessResult = ScalarDiabaticPostprocessResult<double>;
+using ComplexDiabaticPostprocessResult = ScalarDiabaticPostprocessResult<std::complex<double>>;
 
 class DiabaticPostprocessor
 {
@@ -35,8 +46,18 @@ class DiabaticPostprocessor
         const std::vector<LinearizedStateArtifact>& linearized_states,
         const std::vector<double>& ao_overlap);
 
+    static ComplexDiabaticPostprocessResult evaluate(
+        const FdeRuntimeConfig& config,
+        const std::vector<ComplexDiabaticDeterminantArtifact>& determinants,
+        const std::vector<ComplexLinearizedStateArtifact>& linearized_states,
+        const std::vector<std::complex<double>>& ao_overlap);
+
     /** Read the sidecar and artifacts, evaluate, and write prefix outputs. */
     static DiabaticPostprocessResult run(const std::string& config_path);
+
+    /** Dispatch the declared real/finite-complex protocol for the native CLI. */
+    static std::size_t run_and_count_roots(const std::string& config_path,
+                                          std::ostream& running_log);
 };
 
 } // namespace fde
