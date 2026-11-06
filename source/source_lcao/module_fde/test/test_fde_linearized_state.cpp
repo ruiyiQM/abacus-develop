@@ -129,6 +129,34 @@ TEST(FdeComplexLinearizedState, DistinguishesDeterminantSelfFromSummedFragmentDe
     }
 }
 
+TEST(FdeComplexLinearizedState, NormalizesBothNonorthogonalSpinDeterminants)
+{
+    auto first = determinant("D", {1.0, 0.0});
+    first.alpha.coefficients = {1.0, 0.0, 0.0, 1.0};
+    first.alpha.orbital_energies_ry = {-1.0, -0.5};
+    first.alpha.source_fragment_labels = {"D", "A"};
+    first.beta = first.alpha;
+    auto second = first;
+    second.state_label = "A";
+    second.alpha.coefficients[0] = Complex(0.0, 1.0);
+    second.beta.coefficients[0] = Complex(0.0, 1.0);
+    const std::vector<Complex> overlap = {1.0, Complex(0.0, -0.5), Complex(0.0, 0.5), 1.0};
+    const auto self = fde::ComplexElectronicCoupling::transition(first, first, overlap, 1.0e-12);
+    const auto forward = fde::ComplexElectronicCoupling::transition(first, second, overlap, 1.0e-12);
+    // Each spin has det(C^dagger S C)=3/4; the two ket phases multiply to -1.
+    EXPECT_NEAR(self.raw_overlap.real(), 9.0 / 16.0, 1.0e-12);
+    EXPECT_NEAR(self.normalized_overlap.real(), 1.0, 1.0e-12);
+    EXPECT_NEAR(forward.raw_overlap.real(), -9.0 / 16.0, 1.0e-12);
+    EXPECT_NEAR(forward.normalized_overlap.real(), -1.0, 1.0e-12);
+    EXPECT_NEAR(forward.normalized_overlap.imag(), 0.0, 1.0e-12);
+    for (const auto* density : {&forward.density_matrix.alpha, &forward.density_matrix.beta})
+    {
+        const auto count = fde::ComplexElectronicCoupling::electron_count(*density, overlap, 2);
+        EXPECT_NEAR(count.real(), 2.0, 1.0e-12);
+        EXPECT_NEAR(count.imag(), 0.0, 1.0e-12);
+    }
+}
+
 TEST(FdeComplexLinearizedState, MatchesNonorthogonalOneBodyMatrixElementsAndEnergyZeroShifts)
 {
     auto first = determinant("D", {1.0, 0.0});
