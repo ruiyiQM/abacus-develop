@@ -54,7 +54,7 @@ TEST(ReadInpSccs, SupportedScopeAndNumericalValidation)
     EXPECT_TRUE(ModuleIO::check_sccs_inp(input, error));
     input.cal_force = false;
     input.calculation = "relax";
-    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    EXPECT_TRUE(ModuleIO::check_sccs_inp(input, error));
     input.calculation = "scf";
     input.assume_isolated = "none";
     input.sccs_rho_min = input.sccs_rho_max;
@@ -110,6 +110,96 @@ TEST(ReadInpSccs, FullCavityWidthsAndModeValidation)
     EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
 }
 
+TEST(ReadInpSccs, SolventAwareFillingUsesEnvironRanges)
+{
+    Input_para input;
+    input.imp_sol = 2;
+    std::string error;
+    EXPECT_DOUBLE_EQ(input.sccs_solvent_radius, 0.0);
+    EXPECT_DOUBLE_EQ(input.sccs_radial_scale, 2.0);
+    EXPECT_DOUBLE_EQ(input.sccs_radial_spread, 0.5);
+    EXPECT_DOUBLE_EQ(input.sccs_filling_thr, 0.825);
+    EXPECT_DOUBLE_EQ(input.sccs_filling_spread, 0.02);
+    input.sccs_solvent_radius = 3.0;
+    EXPECT_TRUE(ModuleIO::check_sccs_inp(input, error)) << error;
+    const Input_para valid = input;
+    input.sccs_solvent_radius = -1.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    EXPECT_NE(error.find("sccs_solvent_radius"), std::string::npos);
+    input = valid;
+    input.sccs_radial_scale = 0.9;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input = valid;
+    input.sccs_radial_spread = 0.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input = valid;
+    input.sccs_filling_thr = 0.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    // The probe solute fraction never exceeds one.
+    input.sccs_filling_thr = 1.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input = valid;
+    input.sccs_filling_spread = 0.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+}
+
+TEST(ReadInpSccs, DelayedStartRequiresRoomBeforeScfConvergenceAndIterationLimit)
+{
+    Input_para input;
+    input.imp_sol = 2;
+    input.scf_thr = 1e-9;
+    input.scf_nmax = 10;
+    std::string error;
+    ASSERT_TRUE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_drho = 1e-3;
+    input.sccs_start_nmax = 3;
+    EXPECT_TRUE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_drho = input.scf_thr;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_drho = -1.0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_drho = 1e-3;
+    input.sccs_start_nmax = 10;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_drho = 0.0;
+    EXPECT_TRUE(ModuleIO::check_sccs_inp(input, error));
+    input.sccs_start_nmax = 0;
+    EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+}
+
+TEST(ReadInpSccs, FixedCellRelaxSupportsAllBoundariesAndKeepsStressOutOfScope)
+{
+    Input_para input;
+    input.imp_sol = 2;
+    input.calculation = "relax";
+    input.cal_force = true;
+    input.sccs_solvent_mode = "full";
+    input.sccs_corespread = {0.0, 0.5};
+    input.sccs_start_drho = 1e-3;
+    input.sccs_start_nmax = 3;
+    std::string error;
+    const std::string boundaries[] = {"none", "pcc_0d", "pcc_2d"};
+    const std::string bases[] = {"pw", "lcao"};
+    for (const std::string& basis : bases)
+    {
+        input.basis_type = basis;
+        for (const std::string& boundary : boundaries)
+        {
+            input.assume_isolated = boundary;
+            ASSERT_TRUE(ModuleIO::check_sccs_inp(input, error)) << error;
+            input.cal_stress = true;
+            EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+            input.cal_stress = false;
+        }
+    }
+    const std::string unsupported[] = {"cell-relax", "md", "nscf"};
+    for (const std::string& calculation : unsupported)
+    {
+        input.calculation = calculation;
+        EXPECT_FALSE(ModuleIO::check_sccs_inp(input, error));
+    }
+}
+
 TEST(ReadInpSccs, CoreSpreadWordsMustBeFiniteNumbers)
 {
     std::vector<double> spreads = {0.5};
@@ -145,7 +235,9 @@ TEST(ReadInpSccs, RejectsNonfiniteReals)
     double* const reals[] = {&input.sccs_epsilon,     &input.sccs_rho_min,    &input.sccs_rho_max,
                              &input.sccs_gamma,       &input.sccs_pressure,   &input.sccs_tol_rms,
                              &input.sccs_tol_max,     &input.sccs_surface_eta, &input.sccs_lowpass_p1,
-                             &input.sccs_lowpass_p2};
+                             &input.sccs_lowpass_p2,  &input.sccs_start_drho, &input.sccs_solvent_radius,
+                             &input.sccs_radial_scale, &input.sccs_radial_spread, &input.sccs_filling_thr,
+                             &input.sccs_filling_spread};
     const double infinity = std::numeric_limits<double>::infinity();
     const double nonfinite[] = {std::nan(""), infinity, -infinity};
     for (double* value : reals)

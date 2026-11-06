@@ -1,5 +1,7 @@
 #include "potential_new.h"
 #include "pot_pcc.h"
+#include "pot_sccs.h"
+#include "sol_grid_field.h"
 
 #include "pot_ml_exx.h"
 #include "source_base/global_function.h"
@@ -71,12 +73,15 @@ void Potential::pot_register(const std::vector<std::string>& components_list)
 void Potential::pot_register(const std::vector<std::string>& components_list, const Input_para& input)
 {
     ModuleBase::TITLE("Potential", "pot_register");
+    // Preserve SCCS warm-start state while constructing replacements.
+    const SccsResume resume = this->get_resume();
     // Allocate replacements while old components are live to prevent address reuse during reset.
     std::vector<std::unique_ptr<PotBase>> replacements;
     replacements.reserve(components_list.size());
     for (const auto& comp: components_list)
     {
-        replacements.emplace_back(this->get_pot_type(comp, input));
+        PotBase* const replacement = this->get_pot_type(comp, input, resume);
+        replacements.emplace_back(replacement);
     }
     this->components.reserve(replacements.size());
 
@@ -461,6 +466,16 @@ const std::vector<double>* Potential::find_sol_pot() const
         if (value != nullptr) { return value; }
     }
     return nullptr;
+}
+
+std::vector<SolventGridField> Potential::sol_out_fields() const
+{
+    std::vector<SolventGridField> fields;
+    for (const PotBase* component : this->components)
+    {
+        component->add_sol_fields(fields);
+    }
+    return fields;
 }
 
 } // namespace elecstate

@@ -205,6 +205,53 @@ TEST_F(InputTest, NativeFdeHybridCapability)
     EXPECT_FALSE(ModuleIO::supports_fde_fragment_xc("B3LYP"));
 }
 
+TEST_F(InputTest, PwOnsiteRequiresDoublePrecision)
+{
+    ModuleIO::ReadInput readinput(0);
+    std::vector<std::pair<std::string, ModuleIO::Input_Item>>::iterator item
+        = find_label("precision", readinput.input_lists);
+    ASSERT_NE(item, readinput.input_lists.end());
+
+    Parameter param;
+    Input_para& inp = TestParameters::input(param);
+    inp.basis_type = "pw";
+    inp.esolver_type = "ksdft";
+    inp.device = "gpu";
+    inp.precision = "single";
+
+    inp.dft_plus_u = 1;
+    testing::internal::CaptureStdout();
+    EXPECT_EXIT(check_item(item->second, param), ::testing::ExitedWithCode(1), "");
+    EXPECT_THAT(testing::internal::GetCapturedStdout(), testing::HasSubstr("PW DFT+U requires precision = double"));
+
+    inp.dft_plus_u = 0;
+    inp.sc_mag_switch = true;
+    testing::internal::CaptureStdout();
+    EXPECT_EXIT(check_item(item->second, param), ::testing::ExitedWithCode(1), "");
+    EXPECT_THAT(testing::internal::GetCapturedStdout(), testing::HasSubstr("PW DeltaSpin requires precision = double"));
+
+    inp.esolver_type = "tddft";
+    testing::internal::CaptureStdout();
+    EXPECT_EXIT(check_item(item->second, param), ::testing::ExitedWithCode(1), "");
+    EXPECT_THAT(testing::internal::GetCapturedStdout(),
+                testing::HasSubstr("PW RT-TDDFT does not support spin constraints at any precision"));
+
+    inp.sc_mag_switch = false;
+    inp.dft_plus_u = 1;
+    testing::internal::CaptureStdout();
+    EXPECT_EXIT(check_item(item->second, param), ::testing::ExitedWithCode(1), "");
+    EXPECT_THAT(testing::internal::GetCapturedStdout(),
+                testing::HasSubstr("PW RT-TDDFT does not support DFT+U at any precision"));
+
+    inp.precision = "double";
+    inp.dft_plus_u = 1;
+    check_item(item->second, param);
+    inp.dft_plus_u = 0;
+    inp.sc_mag_switch = false;
+    inp.precision = "single";
+    check_item(item->second, param);
+}
+
 TEST_F(InputTest, InvalidExplicitDomainDoesNotReachReadOrResetHooks)
 {
     ModuleIO::ReadInput reader(0);
@@ -864,6 +911,58 @@ TEST_F(InputTest, Item_test)
         it->second.read_value(it->second, param);
         EXPECT_EQ(TestParameters::input(param).out_pot[0], 1);
         EXPECT_EQ(TestParameters::input(param).out_pot[1], 2);
+    }
+    { // out_sol
+        auto it = find_label("out_sol", readinput.input_lists);
+        it->second.str_values = {"1"};
+        it->second.read_value(it->second, param);
+        EXPECT_EQ(TestParameters::input(param).out_sol[0], 1);
+        EXPECT_EQ(TestParameters::input(param).out_sol[1], 8);
+        it->second.str_values = {"1", "5"};
+        it->second.read_value(it->second, param);
+        EXPECT_EQ(TestParameters::input(param).out_sol[1], 5);
+
+        TestParameters::input(param).imp_sol = 2;
+        check_item(it->second, param);
+        TestParameters::input(param).imp_sol = 0;
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(check_item(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("NOTICE"));
+        TestParameters::input(param).imp_sol = 1;
+        TestParameters::input(param).out_sol[0] = 2;
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(check_item(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("NOTICE"));
+        TestParameters::input(param).out_sol[0] = 1;
+        TestParameters::input(param).out_sol[1] = 0;
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(check_item(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("NOTICE"));
+        it->second.str_values = {"x"};
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(it->second.read_value(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("out_sol takes integers"));
+        it->second.str_values = {"6junk"};
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(it->second.read_value(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("out_sol takes integers"));
+        it->second.str_values = {"1", "8x"};
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(it->second.read_value(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("out_sol takes integers"));
+        it->second.str_values = {"1", "8", "3"};
+        testing::internal::CaptureStdout();
+        EXPECT_EXIT(it->second.read_value(it->second, param), ::testing::ExitedWithCode(1), "");
+        output = testing::internal::GetCapturedStdout();
+        EXPECT_THAT(output, testing::HasSubstr("out_sol takes 1 or 2 integers"));
+        TestParameters::input(param).out_sol = {0, 8};
+        TestParameters::input(param).imp_sol = 0;
     }
     { // out_dos
         auto it = find_label("out_dos", readinput.input_lists);
@@ -1527,6 +1626,33 @@ TEST_F(InputTest, Item_test)
     }
 }
 
+TEST_F(InputTest, OutEbandLegacyAlias)
+{
+    {
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto legacy = find_label("out_eband_terms", readinput.input_lists);
+        legacy->second.str_values = {"1"};
+        legacy->second.read_value(legacy->second, param);
+
+        readinput.normalize_out_eband_alias(param);
+        EXPECT_TRUE(TestParameters::input(param).out_eband);
+    }
+    {
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto primary = find_label("out_eband", readinput.input_lists);
+        auto legacy = find_label("out_eband_terms", readinput.input_lists);
+        primary->second.str_values = {"0"};
+        legacy->second.str_values = {"1"};
+        primary->second.read_value(primary->second, param);
+        legacy->second.read_value(legacy->second, param);
+
+        readinput.normalize_out_eband_alias(param);
+        EXPECT_FALSE(TestParameters::input(param).out_eband);
+    }
+}
+
 TEST_F(InputTest, HsOutputAliases)
 {
     {
@@ -1611,6 +1737,66 @@ TEST_F(InputTest, HsOutputAliases)
         TestParameters::input(param).qo_switch = true;
         readinput.normalize_hs_output_options(param);
         EXPECT_EQ(TestParameters::input(param).out_hsk[0], 1);
+    }
+}
+
+// The out_mat_h_* keywords are legacy aliases for the canonical k-space names
+// (out_mat_tk and out_mat_{vnl,vl,vh,vxc,exx}k). Verify that each alias feeds
+// the canonical value and that the canonical name wins when both are present.
+TEST_F(InputTest, HkComponentAliases)
+{
+    // alias alone populates the canonical name
+    {
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto legacy = find_label("out_mat_h_t", readinput.input_lists);
+        legacy->second.str_values = {"1", "5"};
+        legacy->second.read_value(legacy->second, param);
+        readinput.normalize_hs_output_options(param);
+        EXPECT_EQ(TestParameters::input(param).out_mat_tk[0], 1);
+        EXPECT_EQ(TestParameters::input(param).out_mat_tk[1], 5);
+    }
+    // canonical name takes precedence over the alias
+    {
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto legacy = find_label("out_mat_h_t", readinput.input_lists);
+        auto primary = find_label("out_mat_tk", readinput.input_lists);
+        legacy->second.str_values = {"1", "5"};
+        primary->second.str_values = {"1", "3"};
+        legacy->second.read_value(legacy->second, param);
+        primary->second.read_value(primary->second, param);
+        readinput.normalize_hs_output_options(param);
+        EXPECT_EQ(TestParameters::input(param).out_mat_tk[0], 1);
+        EXPECT_EQ(TestParameters::input(param).out_mat_tk[1], 3);
+    }
+    // the five renamed terms: legacy alias -> canonical k-space name
+    const std::vector<std::pair<std::string, std::string>> aliases = {
+        {"out_mat_h_vnl", "out_mat_vnlk"},
+        {"out_mat_h_vl", "out_mat_vlk"},
+        {"out_mat_h_vh", "out_mat_vhk"},
+        {"out_mat_h_vxc", "out_mat_vxck"},
+        {"out_mat_h_exx", "out_mat_exxk"},
+    };
+    for (const auto& pair : aliases)
+    {
+        SCOPED_TRACE(pair.first);
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto legacy = find_label(pair.first, readinput.input_lists);
+        auto primary = find_label(pair.second, readinput.input_lists);
+        legacy->second.str_values = {"1", "6"};
+        legacy->second.read_value(legacy->second, param);
+        readinput.normalize_hs_output_options(param);
+        const auto& canon = TestParameters::input(param);
+        const std::vector<int>* value = nullptr;
+        if (pair.second == "out_mat_vnlk") { value = &canon.out_mat_vnlk; }
+        else if (pair.second == "out_mat_vlk") { value = &canon.out_mat_vlk; }
+        else if (pair.second == "out_mat_vhk") { value = &canon.out_mat_vhk; }
+        else if (pair.second == "out_mat_vxck") { value = &canon.out_mat_vxck; }
+        else { value = &canon.out_mat_exxk; }
+        EXPECT_EQ((*value)[0], 1);
+        EXPECT_EQ((*value)[1], 6);
     }
 }
 TEST_F(InputTest, PreserveExplicitMagneticMixing)
@@ -2213,6 +2399,30 @@ TEST_F(InputTest, Item_test2)
         EXPECT_EXIT(check_item(it->second, param), ::testing::ExitedWithCode(1), "");
         output = testing::internal::GetCapturedStdout();
         EXPECT_THAT(output, testing::HasSubstr("NOTICE"));
+    }
+    { // independent smoothing and radius switches
+        const auto cut_mode_item = find_label("rpa_cut_coulomb", readinput.input_lists);
+        const auto cut_radius_item = find_label("rpa_cut_radius", readinput.input_lists);
+        const auto cut_width_item = find_label("rpa_cut_width", readinput.input_lists);
+        ASSERT_NE(cut_mode_item, readinput.input_lists.end());
+        ASSERT_NE(cut_radius_item, readinput.input_lists.end());
+        ASSERT_NE(cut_width_item, readinput.input_lists.end());
+        EXPECT_EQ(TestParameters::input(param).rpa_cut_coulomb, "hard");
+        EXPECT_EQ(TestParameters::input(param).rpa_cut_radius, "legacy");
+        TestParameters::input(param).rpa_cut_coulomb = "log_erfc";
+        TestParameters::input(param).rpa_cut_radius = "inscribed";
+        check_item(cut_mode_item->second, param);
+        check_item(cut_radius_item->second, param);
+        check_item(cut_width_item->second, param);
+        TestParameters::input(param).rpa_cut_coulomb = "invalid";
+        EXPECT_EXIT(check_item(cut_mode_item->second, param), ::testing::ExitedWithCode(1), "");
+        TestParameters::input(param).rpa_cut_radius = "invalid";
+        EXPECT_EXIT(check_item(cut_radius_item->second, param), ::testing::ExitedWithCode(1), "");
+        TestParameters::input(param).rpa_cut_width = 1.0;
+        EXPECT_EXIT(check_item(cut_width_item->second, param), ::testing::ExitedWithCode(1), "");
+        TestParameters::input(param).rpa_cut_coulomb = "hard";
+        TestParameters::input(param).rpa_cut_radius = "legacy";
+        TestParameters::input(param).rpa_cut_width = 1.091868692359;
     }
     { // berry_phase
         auto it = find_label("berry_phase", readinput.input_lists);
@@ -2957,4 +3167,177 @@ TEST_F(InputTest, PerAtomSccsCavityWidthsDisableSpatialSymmetry)
     input.sccs_solvent_mode = "electronic";
     it->second.reset_value(it->second, param);
     EXPECT_EQ(input.symmetry, "1");
+}
+
+// The optional second value of the H(k) component controls selects the text
+// precision; it must survive both direct reads and legacy alias merging so the
+// writer can forward it to save_mat.
+TEST_F(InputTest, OutMatComponentPrecision)
+{
+    {
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto it = find_label("out_mat_vnlk", readinput.input_lists);
+        ASSERT_NE(it, readinput.input_lists.end());
+        it->second.str_values = {"1", "5"};
+        it->second.read_value(it->second, param);
+        EXPECT_EQ(TestParameters::input(param).out_mat_vnlk[0], 1);
+        EXPECT_EQ(TestParameters::input(param).out_mat_vnlk[1], 5);
+    }
+    {
+        // Legacy out_mat_h_vnl carries its own precision; the alias merge must
+        // copy the whole value vector, not only the enable flag.
+        ModuleIO::ReadInput readinput(0);
+        Parameter param;
+        auto legacy = find_label("out_mat_h_vnl", readinput.input_lists);
+        ASSERT_NE(legacy, readinput.input_lists.end());
+        legacy->second.str_values = {"1", "4"};
+        legacy->second.read_value(legacy->second, param);
+        readinput.normalize_hs_output_options(param);
+        EXPECT_EQ(TestParameters::input(param).out_mat_vnlk[0], 1);
+        EXPECT_EQ(TestParameters::input(param).out_mat_vnlk[1], 4);
+    }
+}
+
+// MD writes ABACUS STRU frames only and the restart logic reads them back, so
+// CIF output (out_stru = 2) must be rejected instead of silently emitting
+// STRU content under the CIF setting.
+TEST_F(InputTest, OutStruCifRejectedForMd)
+{
+    ModuleIO::ReadInput readinput(0);
+    readinput.check_ntype_flag = false;
+    Parameter param;
+    TestParameters::input(param).calculation = "md";
+    TestParameters::input(param).out_stru = 2;
+    const std::string error = readinput.prepare_input(param);
+    EXPECT_THAT(error, testing::HasSubstr("out_stru"));
+    EXPECT_THAT(error, testing::HasSubstr("not supported for calculation = md"));
+}
+
+TEST_F(InputTest, DfptMixTypeDomainContract)
+{
+    ModuleIO::ReadInput readinput(0);
+    readinput.check_ntype_flag = false;
+    Parameter param;
+    auto it = find_label("dfpt_mix_type", readinput.input_lists);
+    ASSERT_NE(it, readinput.input_lists.end());
+    Input_para& input = TestParameters::input(param);
+
+    // omitted line: the declared default applies (Input_para default and
+    // item default_value agree)
+    EXPECT_EQ(it->second.default_value, "v_sc_broyden");
+    EXPECT_EQ(input.dfpt_mix_type, "v_sc_broyden");
+
+    // every declared choice is read verbatim
+    for (const std::string scheme : {"rho_plain", "rho_kerker", "rho_broyden", "v_sc_plain", "v_sc_broyden"})
+    {
+        it->second.str_values = {scheme};
+        it->second.read_value(it->second, param);
+        EXPECT_EQ(input.dfpt_mix_type, scheme) << scheme;
+    }
+
+    // explicit empty / unknown / multi-token values are rejected by the
+    // scalar choices domain before read_value runs, so the previous value
+    // survives (the legacy get_size()==0 fallback is intentionally gone)
+    readinput.readvalue_items.push_back(&it->second);
+    const std::string previous_scheme = input.dfpt_mix_type;
+    for (const std::vector<std::string>& invalid : {
+             std::vector<std::string>{},
+             std::vector<std::string>{""},
+             std::vector<std::string>{"broyden"},
+             std::vector<std::string>{"v_sc"},
+             std::vector<std::string>{"rho_plain", "v_sc_plain"}})
+    {
+        it->second.str_values = invalid;
+        const std::string error = readinput.prepare_input(param);
+        EXPECT_THAT(error, testing::HasSubstr("Invalid INPUT parameter 'dfpt_mix_type'"));
+        EXPECT_THAT(error, testing::HasSubstr("Expected one String from {rho_plain, rho_kerker, rho_broyden, v_sc_plain, v_sc_broyden}"));
+        EXPECT_THAT(error, testing::HasSubstr("input-main.html#dfpt-mix-type"));
+        EXPECT_EQ(input.dfpt_mix_type, previous_scheme);
+    }
+}
+
+TEST_F(InputTest, DfptKerkerA2RuleBoundaries)
+{
+    ModuleIO::ReadInput readinput(0);
+    readinput.check_ntype_flag = false;
+    Parameter param;
+    auto it = find_label("dfpt_kerker_a2", readinput.input_lists);
+    ASSERT_NE(it, readinput.input_lists.end());
+    Input_para& input = TestParameters::input(param);
+
+    EXPECT_EQ(it->second.default_value, "1.0");
+    EXPECT_DOUBLE_EQ(input.dfpt_kerker_a2, 1.0);
+
+    for (const std::pair<const std::string, double> valid : {
+             std::pair<const std::string, double>{"0.5", 0.5},
+             {"1e-2", 1.0e-2},
+             {"12", 12.0}})
+    {
+        it->second.str_values = {valid.first};
+        it->second.read_value(it->second, param);
+        EXPECT_DOUBLE_EQ(input.dfpt_kerker_a2, valid.second) << valid.first;
+    }
+
+    // a^2 = 0 turns the Kerker screen off, so the rule value>0 rejects the
+    // boundary together with negatives, nonfinite values, and empty input
+    readinput.readvalue_items.push_back(&it->second);
+    const double previous_a2 = input.dfpt_kerker_a2;
+    for (const std::vector<std::string>& invalid : {
+             std::vector<std::string>{},
+             std::vector<std::string>{"0"},
+             std::vector<std::string>{"-1"},
+             std::vector<std::string>{"nan"},
+             std::vector<std::string>{"inf"},
+             std::vector<std::string>{"0.5garbage"}})
+    {
+        it->second.str_values = invalid;
+        const std::string error = readinput.prepare_input(param);
+        EXPECT_THAT(error, testing::HasSubstr("Invalid INPUT parameter 'dfpt_kerker_a2'"));
+        EXPECT_THAT(error, testing::HasSubstr("Expected one finite Real satisfying value>0."));
+        EXPECT_THAT(error, testing::HasSubstr("input-main.html#dfpt-kerker-a2"));
+        EXPECT_DOUBLE_EQ(input.dfpt_kerker_a2, previous_a2);
+    }
+}
+
+TEST_F(InputTest, DfptBroydenNdimRuleBoundaries)
+{
+    ModuleIO::ReadInput readinput(0);
+    readinput.check_ntype_flag = false;
+    Parameter param;
+    auto it = find_label("dfpt_broyden_ndim", readinput.input_lists);
+    ASSERT_NE(it, readinput.input_lists.end());
+    Input_para& input = TestParameters::input(param);
+
+    EXPECT_EQ(it->second.default_value, "8");
+    EXPECT_EQ(input.dfpt_broyden_ndim, 8);
+
+    // ndim = 1 is the smallest legal history depth (single-step memory)
+    for (const std::pair<const std::string, int> valid : {
+             std::pair<const std::string, int>{"1", 1},
+             {"16", 16}})
+    {
+        it->second.str_values = {valid.first};
+        it->second.read_value(it->second, param);
+        EXPECT_EQ(input.dfpt_broyden_ndim, valid.second) << valid.first;
+    }
+
+    // ndim = 0 (empty history) is rejected together with negatives,
+    // non-integers, and empty input
+    readinput.readvalue_items.push_back(&it->second);
+    const int previous_ndim = input.dfpt_broyden_ndim;
+    for (const std::vector<std::string>& invalid : {
+             std::vector<std::string>{},
+             std::vector<std::string>{"0"},
+             std::vector<std::string>{"-4"},
+             std::vector<std::string>{"2.5"},
+             std::vector<std::string>{"8", "1"}})
+    {
+        it->second.str_values = invalid;
+        const std::string error = readinput.prepare_input(param);
+        EXPECT_THAT(error, testing::HasSubstr("Invalid INPUT parameter 'dfpt_broyden_ndim'"));
+        EXPECT_THAT(error, testing::HasSubstr("Expected one Integer satisfying value>=1."));
+        EXPECT_THAT(error, testing::HasSubstr("input-main.html#dfpt-broyden-ndim"));
+        EXPECT_EQ(input.dfpt_broyden_ndim, previous_ndim);
+    }
 }

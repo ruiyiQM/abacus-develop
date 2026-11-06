@@ -200,6 +200,8 @@ TEST_F(InputParaTest, ParaRead)
     EXPECT_EQ(param.inp.deepks_bandgap, 0);
     EXPECT_EQ(param.inp.deepks_out_unittest, 0);
     EXPECT_EQ(param.inp.out_pot[0], 2);
+    EXPECT_EQ(param.inp.out_sol[0], 0);
+    EXPECT_EQ(param.inp.out_sol[1], 6);
     EXPECT_EQ(param.inp.out_wfc_pw, 0);
     EXPECT_EQ(param.inp.out_dos, 0);
     EXPECT_EQ(param.inp.out_ldos[0], 1);
@@ -218,7 +220,7 @@ TEST_F(InputParaTest, ParaRead)
     EXPECT_FALSE(param.inp.out_mat_xc);
     EXPECT_EQ(param.inp.out_mat_xc2[0], 0);
     EXPECT_EQ(param.inp.out_mat_xc2[1], 8);
-    EXPECT_FALSE(param.inp.out_eband_terms);
+    EXPECT_FALSE(param.inp.out_eband);
     EXPECT_EQ(param.inp.out_app_flag, 0);
     EXPECT_EQ(param.inp.out_mat_r[0], 0);
     EXPECT_EQ(param.inp.out_mat_r[1], 8);

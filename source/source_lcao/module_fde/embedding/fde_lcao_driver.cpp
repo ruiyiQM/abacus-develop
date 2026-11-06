@@ -253,7 +253,7 @@ FrozenDensityArtifact read_density_file(const std::string& path,
                                         std::ostream& running_log)
 {
 #ifdef __MPI
-    MPI_Comm communicator = orbitals.comm();
+    MPI_Comm communicator = orbitals.para_2d().comm();
     if (communicator == MPI_COMM_NULL)
     {
         throw std::runtime_error(
@@ -310,7 +310,7 @@ void validate_artifact_set(const FrozenDensityArtifact& active,
 {
     const ScopedFdeTimer timer("validate_density_set");
 #ifdef __MPI
-    MPI_Comm communicator = orbitals.comm();
+    MPI_Comm communicator = orbitals.para_2d().comm();
     if (communicator == MPI_COMM_NULL)
     {
         throw std::runtime_error(
@@ -588,8 +588,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
         throw std::invalid_argument("FDE_CONFIG atom count does not match STRU");
     }
     const std::size_t full_dimension
-        = static_cast<std::size_t>(orbitals.get_global_row_size());
-    if (orbitals.get_global_col_size() != orbitals.get_global_row_size())
+        = static_cast<std::size_t>(orbitals.para_2d().get_global_row_size());
+    if (orbitals.para_2d().get_global_col_size() != orbitals.para_2d().get_global_row_size())
     {
         throw std::invalid_argument("FDE embedded_scf requires a square AO distribution");
     }
@@ -631,8 +631,8 @@ std::unique_ptr<FdeLcaoDriver> FdeLcaoDriver::create(
             "FDE INPUT nelec/nupdown do not match the active fragment state assignment");
     }
     const bool distributed_ao_matrices
-        = orbitals.get_row_size() != orbitals.get_global_row_size()
-          || orbitals.get_col_size() != orbitals.get_global_col_size();
+        = orbitals.para_2d().get_row_size() != orbitals.para_2d().get_global_row_size()
+          || orbitals.para_2d().get_col_size() != orbitals.para_2d().get_global_col_size();
     FdeSolverPolicy::validate(input.ks_solver,
                               distributed_ao_matrices,
                               input.kpar,
@@ -1142,10 +1142,11 @@ std::unique_ptr<FdeProjectedHamiltonian> FdeLcaoDriver::projected_hamiltonian(
     const Parallel_Orbitals& orbitals,
     const std::size_t spin_kpoint_count) const
 {
+    const Parallel_2D& distribution = orbitals.para_2d();
     const std::vector<std::size_t> shared_gamma_overlap(spin_kpoint_count, 0);
     return std::unique_ptr<FdeProjectedHamiltonian>(
         new FdeProjectedHamiltonian(full_hamiltonian,
-                                    orbitals,
+                                    distribution,
                                     full_ao_dimension_,
                                     active_orbitals_,
                                     1.0e6,
@@ -1160,9 +1161,10 @@ FdeLcaoDriver::projected_hamiltonian(
     const Parallel_Orbitals& orbitals,
     const std::size_t spin_kpoint_count) const
 {
+    const Parallel_2D& distribution = orbitals.para_2d();
     return std::unique_ptr<FdeProjectedHamiltonianComplex>(
         new FdeProjectedHamiltonianComplex(full_hamiltonian,
-                                           orbitals,
+                                           distribution,
                                            full_ao_dimension_,
                                            active_orbitals_,
                                            1.0e6,
@@ -1294,11 +1296,12 @@ int ao_rank(const Parallel_Orbitals& orbitals)
 {
 #ifdef __MPI
     int rank = 0;
-    if (orbitals.comm() == MPI_COMM_NULL)
+    const MPI_Comm communicator = orbitals.para_2d().comm();
+    if (communicator == MPI_COMM_NULL)
     {
         throw std::runtime_error("FDE artifact output requires an initialized AO communicator");
     }
-    MPI_Comm_rank(orbitals.comm(), &rank);
+    MPI_Comm_rank(communicator, &rank);
     return rank;
 #else
     (void)orbitals;
@@ -1311,7 +1314,8 @@ void validate_parallel_layout(const ModulePW::PW_Basis& basis,
 {
 #ifdef __MPI
     int comparison = MPI_UNEQUAL;
-    MPI_Comm_compare(basis.pool_world, orbitals.comm(), &comparison);
+    const MPI_Comm communicator = orbitals.para_2d().comm();
+    MPI_Comm_compare(basis.pool_world, communicator, &comparison);
     if ((comparison != MPI_IDENT && comparison != MPI_CONGRUENT)
         || ao_rank(orbitals) != basis.poolrank)
     {
@@ -1377,8 +1381,8 @@ std::vector<Scalar> gather_matrix_to_root(
     const int rank)
 {
     if ((matrix.row * matrix.col != 0 && matrix.p == nullptr)
-        || matrix.row != static_cast<std::size_t>(orbitals.get_row_size())
-        || matrix.col != static_cast<std::size_t>(orbitals.get_col_size()))
+        || matrix.row != static_cast<std::size_t>(orbitals.para_2d().get_row_size())
+        || matrix.col != static_cast<std::size_t>(orbitals.para_2d().get_col_size()))
     {
         throw std::runtime_error("FDE AO matrix does not match Parallel_Orbitals");
     }
@@ -1392,10 +1396,11 @@ std::vector<Scalar> gather_matrix_to_root(
         throw std::runtime_error("FDE AO matrix has an invalid ScaLAPACK descriptor");
     }
     Parallel_2D global;
+    const int blacs_context = orbitals.get_blacs_ctxt();
     global.set(static_cast<int>(dimension),
                static_cast<int>(dimension),
                static_cast<int>(dimension),
-               orbitals.blacs_ctxt);
+               blacs_context);
     Cpxgemr2d(static_cast<int>(dimension),
               static_cast<int>(dimension),
               matrix.p,
@@ -1437,10 +1442,11 @@ std::vector<Scalar> gather_wavefunctions_to_root(
         throw std::runtime_error("FDE wavefunction descriptor has invalid global dimensions");
     }
     Parallel_2D global;
+    const int blacs_context = orbitals.get_blacs_ctxt();
     global.set(static_cast<int>(dimension),
                global_band_count,
                std::max(static_cast<int>(dimension), global_band_count),
-               orbitals.blacs_ctxt);
+               blacs_context);
     Cpxgemr2d(static_cast<int>(dimension),
               global_band_count,
               wavefunctions.get_pointer(),
@@ -1607,7 +1613,8 @@ template <typename Writer>
 void write_root_artifacts(const Parallel_Orbitals& orbitals, const Writer& writer)
 {
 #ifdef __MPI
-    const Parallel::ParaWorld world = Parallel::ParaWorld::make_mpi("fde_artifacts", orbitals.comm());
+    const MPI_Comm communicator = orbitals.para_2d().comm();
+    const Parallel::ParaWorld world = Parallel::ParaWorld::make_mpi("fde_artifacts", communicator);
 #else
     (void)orbitals;
     const Parallel::ParaWorld world = Parallel::ParaWorld::serial("fde_artifacts");
@@ -1667,8 +1674,8 @@ void FdeLcaoDriver::write_scf_artifacts_impl(
         || charge.rho_save == nullptr
         || charge.rhopw != density_basis_
         || wavefunctions.get_nk() != kpoints.get_nks()
-        || orbitals.get_global_row_size() != static_cast<int>(full_ao_dimension_)
-        || orbitals.get_global_col_size() != static_cast<int>(full_ao_dimension_))
+        || orbitals.para_2d().get_global_row_size() != static_cast<int>(full_ao_dimension_)
+        || orbitals.para_2d().get_global_col_size() != static_cast<int>(full_ao_dimension_))
     {
         throw std::runtime_error("FDE SCF artifact output contract is incomplete");
     }

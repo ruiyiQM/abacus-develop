@@ -247,6 +247,7 @@ Socket mode always computes energy. Force and stress extraction follows cal_forc
 * `lj`: Lennard-Jones potential.
 * `dp`: Deep Potential (DP) model.
 * `nep`: Neuroevolution potential (NEP).
+* `snap`: Spectral Neighbor Analysis Potential (SNAP).
 * `ks-lr`: Kohn-Sham density functional theory followed by linear-response time-dependent density functional theory (LR-TDDFT; under development).
 * `lr`: Linear-response time-dependent density functional theory (LR-TDDFT) using precomputed Kohn-Sham orbitals (under development).
 * `dfpt`: Density functional perturbation theory (DFPT; under development).
@@ -255,7 +256,7 @@ Socket mode always computes energy. Force and stress extraction follows cal_forc
         item.default_value = "ksdft";
         read_sync_string(input.esolver_type);
         item.check_value = [](const Input_Item& item, const Parameter& para) {
-            const std::vector<std::string> esolver_types = { "ksdft", "sdft", "ofdft", "tdofdft", "tddft", "lj", "dp", "nep", "lr", "ks-lr", "dfpt" };
+            const std::vector<std::string> esolver_types = { "ksdft", "sdft", "ofdft", "tdofdft", "tddft", "lj", "dp", "nep", "snap", "lr", "ks-lr", "dfpt" };
             if (std::find(esolver_types.begin(), esolver_types.end(), para.input.esolver_type) == esolver_types.end())
             {
                 const std::string warningstr = nofound_str(esolver_types, "esolver_type");
@@ -265,11 +266,16 @@ Socket mode always computes energy. Force and stress extraction follows cal_forc
             {
                 ModuleBase::WARNING_QUIT("ReadInput", "esolver_type=tddft requires calculation=md.");
             }
-            if (para.input.esolver_type == "dp" || para.input.esolver_type == "nep")
+            if (para.input.esolver_type == "dp" || para.input.esolver_type == "nep"
+                || para.input.esolver_type == "snap")
             {
                 if (access(para.input.mdp.pot_file.c_str(), 0) == -1)
                 {
                     ModuleBase::WARNING_QUIT("ReadInput", "Can not find `pot_file` !");
+                }
+                if (para.input.esolver_type == "snap" && access(para.input.mdp.snap_param_file.c_str(), 0) == -1)
+                {
+                    ModuleBase::WARNING_QUIT("ReadInput", "Can not find `snap_param_file` !");
                 }
             }
             // LR reads the ground state wave function from a separate SCF run,
@@ -597,7 +603,7 @@ Available options are:
 * pcc_2d: self-consistent PCC correction for a slab, open along the lattice vector selected by pcc_2d_axis (default: the third) and periodic along the other two. The open vector must be perpendicular to the periodic plane (rewrite a tilted cell as the equivalent perpendicular one), and the k-point sampling along it must be Gamma only. The monopole term uses the open planar kernel that vanishes on the plane of the charge, -pi*Q*L/(3*A) with L the cell length along the open vector and A the periodic area, so the energy of a charged slab converges with the vacuum size; it is referenced to zero potential on the plane of the charge. ENVIRON uses -pi*Q/(3*L), so charged-slab energies agree with ENVIRON only for A = L^2.
 * makov-payne, m-p, mp: compute the Makov-Payne correction to the total energy and estimate a corrected vacuum level for eigenvalue alignment. This option is available only for cubic lattices (latname = sc, fcc, or bcc).
 
-pcc_0d and pcc_2d contribute to the energy, the potential and the fixed-cell forces; the correction energy is printed as E_pcc. They require CPU KS-DFT (esolver_type ksdft) with basis_type pw or lcao, calculation scf or relax, and nspin 1 or 2, without efield_flag, gate_flag, cal_stress, DFT-1/2, deepks output or dm_to_rho. With imp_sol=2, pcc_0d and pcc_2d support SCF energies and forces; imp_sol=1 is not supported.
+pcc_0d and pcc_2d contribute to the energy, the potential and the fixed-cell forces; the correction energy is printed as E_pcc. They require CPU KS-DFT (esolver_type ksdft) with basis_type pw or lcao, calculation scf or relax, and nspin 1 or 2, without efield_flag, gate_flag, cal_stress, DFT-1/2, deepks output or dm_to_rho. With imp_sol=2, pcc_0d and pcc_2d support SCF energies, forces and fixed-cell relax; imp_sol=1 is not supported.
 
 Theory: G. Makov and M. C. Payne, Phys. Rev. B 51, 4014 (1995); PCC: O. Andreussi and N. Marzari, Phys. Rev. B 90, 245101 (2014).)";
         item.default_value = "none";
@@ -1032,11 +1038,46 @@ Available options are:
         item.type = "String";
         item.description = R"(Specifies the precision when performing scf calculation.
 * single: single precision
-* double: double precision)";
+* double: double precision
+PW Kohn-Sham DFT+U and DeltaSpin onsite corrections require double precision.
+PW RT-TDDFT does not support DFT+U or spin constraints at any precision.)";
         item.default_value = "double";
         item.set_availability("basis_type==pw");
         read_sync_string(input.precision);
         item.check_value = [](const Input_Item& item, const Parameter& para) {
+            const Input_para& inp = para.inp;
+            const bool pw_onsite_solver = inp.basis_type == "pw"
+                                          && (inp.esolver_type == "ksdft" || inp.esolver_type == "tddft");
+            if (pw_onsite_solver && inp.precision == "single")
+            {
+                if (inp.esolver_type == "tddft")
+                {
+                    if (inp.dft_plus_u != 0)
+                    {
+                        ModuleBase::WARNING_QUIT(
+                            "ReadInput",
+                            "PW RT-TDDFT does not support DFT+U at any precision; set dft_plus_u=0.");
+                    }
+                    if (inp.sc_mag_switch)
+                    {
+                        ModuleBase::WARNING_QUIT(
+                            "ReadInput",
+                            "PW RT-TDDFT does not support spin constraints at any precision; set sc_mag_switch=false.");
+                    }
+                }
+                if (inp.dft_plus_u != 0)
+                {
+                    ModuleBase::WARNING_QUIT(
+                        "ReadInput",
+                        "PW DFT+U requires precision = double; single precision onsite corrections are not supported.");
+                }
+                if (inp.sc_mag_switch)
+                {
+                    ModuleBase::WARNING_QUIT(
+                        "ReadInput",
+                        "PW DeltaSpin requires precision = double; single precision onsite corrections are not supported.");
+                }
+            }
             // cpu single precision is not supported while float_fftw lib is not available
             if (para.inp.device == "cpu" && para.inp.precision == "single")
             {
@@ -1544,7 +1585,11 @@ updates structures smoothly enough for second-order extrapolation.)";
         item.annotation = "directory of files for reading";
         item.category = "Input files";
         item.type = "String";
-        item.description = "Location of files, such as the electron density (chgs1.cube), required as a starting point.";
+        item.description = "Location of files, such as the electron density (chgs1.cube), required as a starting point. "
+                           "Standalone LR first reads the complete chg.cube/chgs*.cube set. If unavailable, it reads "
+                           "the binary density file {suffix}-CHARGE-DENSITY.restart and performs inverse FFT onto the current grid. "
+                           "The stored spin count must match the requested nspin exactly. "
+                           "This reads ground-state density only; it does not resume a previous calculation.";
         item.default_value = "OUT.$suffix";
         read_sync_string(input.read_file_dir);
         item.reset_value = [](const Input_Item& item, Parameter& para) {

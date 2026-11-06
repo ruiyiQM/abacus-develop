@@ -4,6 +4,8 @@
 #include "source_lcao/module_lr/ri_benchmark/ri_benchmark.h"
 #include "source_io/module_wf/read_wfc_nao.h"
 #include "source_io/module_output/cube_io.h"
+#include "source_estate/module_charge/chg_rhog_io.h"
+#include "source_base/module_parallel/para_bridge.h"
 #include "source_base/module_external/scalapack_connector.h"
 #include <algorithm>
 
@@ -13,13 +15,13 @@ template<typename T, typename TR>
 void ModuleESolver::ESolver_LR<T, TR>::set_parallel_orbitals_band(Parallel_Orbitals& pmat, const int nbands_in)
 {
 #ifdef __MPI
-    const int leading_dimension = std::max(pmat.get_row_size(), 1);
+    const int leading_dimension = std::max(pmat.para_2d().get_row_size(), 1);
     pmat.set_desc_wfc_Eij(this->nbasis, nbands_in, leading_dimension);
     // The KS helper rejects empty band columns. LR windows may legitimately
     // have fewer blocks than the inherited KS process grid has columns.
     Parallel_2D bands;
-    const int block_size = pmat.get_block_size();
-    LR_Util::setup_2d_division(bands, block_size, this->nbasis, nbands_in, pmat.blacs_ctxt);
+    const int block_size = pmat.para_2d().get_block_size();
+    LR_Util::setup_2d_division(bands, block_size, this->nbasis, nbands_in, pmat.get_blacs_ctxt());
     pmat.nbands = nbands_in;
     pmat.nrow_bands = bands.get_row_size();
     pmat.ncol_bands = bands.get_col_size();
@@ -168,7 +170,7 @@ void ModuleESolver::ESolver_LR<T, TR>::read_ks_wfc()
 
     if (this->inp_->cal_force)
     {    // allocate psi_ks_all and eig_ks_all to read all the bands
-        this->psi_ks_all_own_.reset(new psi::Psi<T>(this->kv.get_nks(), paraMat_all_.ncol_bands, paraMat_all_.get_row_size(), this->kv.ngk, true));
+        this->psi_ks_all_own_.reset(new psi::Psi<T>(this->kv.get_nks(), paraMat_all_.ncol_bands, paraMat_all_.para_2d().get_row_size(), this->kv.ngk, true));
         this->psi_ks_all_ = this->psi_ks_all_own_.get();
         this->eig_ks_all.create(this->kv.get_nks(), this->inp_->nbands);
         this->wg_ks_all.create(this->kv.get_nks(), this->inp_->nbands);
@@ -215,7 +217,7 @@ void ModuleESolver::ESolver_LR<T, TR>::fill_z_window_(const int* desc_src)
     const int block_size = this->paraC_.get_block_size();
     LR_Util::setup_2d_division(this->paraC_z_, block_size, this->nbasis, this->nbands_z_
 #ifdef __MPI
-        , this->paraMat_.blacs_ctxt
+        , this->paraMat_.get_blacs_ctxt()
 #endif
     );
     this->paraX_z_.clear();
@@ -293,6 +295,22 @@ void ModuleESolver::ESolver_LR<T, TR>::read_ks_chg(Charge& chg_gs)
     chg_gs.set_rhopw(this->pw_rho);
     const bool kin_den = XC_Functional::get_ked_flag() || (this->inp_->out_elf[0] > 0); // mohan add 20251202
     chg_gs.allocate(this->nspin, kin_den, XC_Functional::get_ked_flag(), this->inp_->test_charge);
+    // Keep the existing cube input authoritative. Choose one density source for
+    // all spin channels and broadcast the decision before collective readers.
+    const Parallel::ParaWorld world = Parallel::make_pw_world();
+    const bool have_cubes = module_charge::has_complete_charge_cubes(this->in_dir, this->nspin, world);
+    if (!have_cubes)
+    {
+        const std::string density_file = this->in_dir + this->inp_->suffix + "-CHARGE-DENSITY.restart";
+        const bool loaded = module_charge::read_rho_from_binary(density_file, *this->pw_rho, this->nspin,
+            chg_gs.rhog, chg_gs.rho, world, this->ofs_running_);
+        if (!loaded)
+        {
+            const std::string message = "No complete charge cube set or readable density restart in " + this->in_dir;
+            ModuleBase::WARNING_QUIT("ESolver_LR::read_ks_chg", message);
+        }
+        return;
+    }
     this->ofs_running_ << " try to read charge from file : ";
     for (int is = 0; is < this->nspin; ++is)
     {

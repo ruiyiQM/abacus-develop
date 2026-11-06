@@ -84,8 +84,8 @@ void AbacusGammaBackend::validate_ao_contract(const std::size_t full_ao_dimensio
     }
     const Parallel_Orbitals* orbitals = gamma_structure_->get_paraV();
     if (orbitals != nullptr
-        && (orbitals->get_row_size() != orbitals->get_global_row_size()
-            || orbitals->get_col_size() != orbitals->get_global_col_size()))
+        && (orbitals->para_2d().get_row_size() != orbitals->para_2d().get_global_row_size()
+            || orbitals->para_2d().get_col_size() != orbitals->para_2d().get_global_col_size()))
     {
         throw std::invalid_argument(
             "FDE dense Gamma backend does not accept a distributed 2D-block AO matrix");
