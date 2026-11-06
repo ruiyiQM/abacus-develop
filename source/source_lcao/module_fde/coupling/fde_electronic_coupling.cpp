@@ -187,6 +187,45 @@ std::vector<Scalar> transition_density(const ScalarOccupiedSpinOrbitals<Scalar>&
 }
 
 template <typename Scalar>
+double positive_self_determinant(std::vector<Scalar> gram,
+                                 const std::size_t dimension,
+                                 const double tolerance)
+{
+    double determinant = 1.0;
+    for (std::size_t pivot_column = 0; pivot_column < dimension; ++pivot_column)
+    {
+        const Scalar diagonal = gram[pivot_column + pivot_column * dimension];
+        const double pivot = std::real(diagonal);
+        const double imaginary = std::imag(diagonal);
+        const double imaginary_error = std::abs(imaginary);
+        if (!std::isfinite(pivot) || !std::isfinite(imaginary_error)
+            || imaginary_error > tolerance || pivot <= tolerance)
+        {
+            throw std::runtime_error("FDE occupied self Gram is not positive definite at the singular tolerance");
+        }
+        determinant *= pivot;
+        // Positive LDL^dagger pivots test every occupied direction, not just the determinant sign.
+        for (std::size_t column = pivot_column + 1; column < dimension; ++column)
+        {
+            const Scalar upper = gram[pivot_column + column * dimension];
+            const Scalar conjugate_lower = conjugate_scalar(gram[column + pivot_column * dimension]);
+            const Scalar difference = upper - conjugate_lower;
+            const double error = std::abs(difference);
+            if (!std::isfinite(error) || error > tolerance)
+            {
+                throw std::runtime_error("FDE occupied self Gram is not Hermitian");
+            }
+            const Scalar factor = upper / pivot;
+            for (std::size_t row = pivot_column + 1; row < dimension; ++row)
+            {
+                gram[row + column * dimension] -= gram[row + pivot_column * dimension] * factor;
+            }
+        }
+    }
+    return determinant;
+}
+
+template <typename Scalar>
 double raw_self_overlap(const ScalarDiabaticDeterminantArtifact<Scalar>& artifact,
                         const std::vector<Scalar>& ao_overlap,
                         const OccupiedOverlapPolicy& overlap_policy,
@@ -201,14 +240,10 @@ double raw_self_overlap(const ScalarDiabaticDeterminantArtifact<Scalar>& artifac
         artifact.alpha, artifact.alpha, ao_overlap, dimension, overlap_policy);
     const auto beta_overlap = occupied_overlap(
         artifact.beta, artifact.beta, ao_overlap, dimension, overlap_policy);
-    const auto alpha = invert_and_determinant(alpha_overlap, alpha_count, tolerance);
-    const auto beta = invert_and_determinant(beta_overlap, beta_count, tolerance);
-    const Scalar result = alpha.determinant * beta.determinant;
-    const double norm = std::real(result);
-    const double imaginary_norm = std::imag(result);
-    const double imaginary_error = std::abs(imaginary_norm);
-    if (!std::isfinite(norm) || !std::isfinite(imaginary_error)
-        || imaginary_error > tolerance || norm <= tolerance)
+    const double alpha = positive_self_determinant(alpha_overlap, alpha_count, tolerance);
+    const double beta = positive_self_determinant(beta_overlap, beta_count, tolerance);
+    const double norm = alpha * beta;
+    if (!std::isfinite(norm) || norm <= tolerance)
     {
         throw std::runtime_error("FDE diabatic determinant has a singular, complex or negative norm");
     }

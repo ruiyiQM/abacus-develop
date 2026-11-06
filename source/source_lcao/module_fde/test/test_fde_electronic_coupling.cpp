@@ -88,7 +88,90 @@ void rotate_occupied(fde::ComplexOccupiedSpinOrbitals& orbitals,
     }
 }
 
+template <typename Scalar>
+void check_occupied_self_gram(const int schema_version,
+                              const std::vector<double>& twist,
+                              const Scalar phase)
+{
+    for (const std::size_t dimension : {2u, 4u})
+    {
+        fde::ScalarDiabaticDeterminantArtifact<Scalar> state;
+        state.schema_version = schema_version;
+        state.state_label = "self";
+        state.geometry_fingerprint = "fixed_cell";
+        state.orbital_fingerprint = "fixed_basis";
+        state.resource_fingerprint = "fixed_resources";
+        state.boundary_twist = twist;
+        state.ao_dimension = dimension;
+        const std::size_t matrix_size = dimension * dimension;
+        state.alpha.coefficients.assign(matrix_size, 0.0);
+        state.alpha.orbital_energies_ry.assign(dimension, -1.0);
+        for (std::size_t orbital = 0; orbital < dimension; ++orbital)
+        {
+            state.alpha.coefficients[orbital + orbital * dimension] = 1.0;
+            const std::string label = "fragment_" + std::to_string(orbital);
+            state.alpha.source_fragment_labels.push_back(label);
+        }
+        state.beta = state.alpha;
+        for (const double cross : {2.0, 0.25, 1.0 - 1.0e-14})
+        {
+            std::vector<Scalar> overlap(matrix_size, 0.0);
+            for (std::size_t orbital = 0; orbital < dimension; ++orbital)
+            {
+                overlap[orbital + orbital * dimension] = 1.0;
+            }
+            for (std::size_t orbital = 0; orbital < dimension; orbital += 2)
+            {
+                const Scalar cross_overlap = cross * phase;
+                overlap[orbital + (orbital + 1) * dimension] = cross_overlap;
+                const Scalar conjugate = fde::conjugate_scalar(cross_overlap);
+                overlap[orbital + 1 + orbital * dimension] = conjugate;
+            }
+            if (cross == 0.25)
+            {
+                const auto self = fde::ScalarElectronicCoupling<Scalar>::transition(
+                    state, state, overlap, 1.0e-12);
+                const Scalar norm_difference = self.normalized_overlap - 1.0;
+                const double norm_error = std::abs(norm_difference);
+                EXPECT_NEAR(norm_error, 0.0, 1.0e-12);
+                const Scalar count = fde::ScalarElectronicCoupling<Scalar>::electron_count(
+                    self.density_matrix.alpha, overlap, dimension);
+                const Scalar trace_difference = count - static_cast<double>(dimension);
+                const double trace_error = std::abs(trace_difference);
+                EXPECT_NEAR(trace_error, 0.0, 1.0e-12);
+                auto empty_beta = state;
+                empty_beta.beta = fde::ScalarOccupiedSpinOrbitals<Scalar>();
+                EXPECT_NO_THROW(fde::ScalarElectronicCoupling<Scalar>::transition(
+                    empty_beta, empty_beta, overlap, 1.0e-12));
+            }
+            else
+            {
+                // At cross=2 each block has eigenvalues 3,-1, even when its determinant product is positive.
+                EXPECT_THROW(fde::ScalarElectronicCoupling<Scalar>::transition(
+                    state, state, overlap, 1.0e-12), std::runtime_error);
+                auto empty_alpha = state;
+                empty_alpha.alpha = fde::ScalarOccupiedSpinOrbitals<Scalar>();
+                EXPECT_THROW(fde::ScalarElectronicCoupling<Scalar>::transition(
+                    empty_alpha, empty_alpha, overlap, 1.0e-12), std::runtime_error);
+            }
+        }
+    }
+}
+
 } // namespace
+
+TEST(FdeElectronicCoupling, ValidatesEveryOccupiedSelfGram)
+{
+    const std::vector<double> twist;
+    check_occupied_self_gram<double>(1, twist, 1.0);
+}
+
+TEST(FdeComplexElectronicCoupling, ValidatesEveryOccupiedSelfGram)
+{
+    const std::vector<double> twist = {0.17, 0.11, 0.0};
+    const Complex phase(0.0, 1.0);
+    check_occupied_self_gram<Complex>(2, twist, phase);
+}
 
 TEST(FdeComplexElectronicCoupling, MatchesIndependentComplexOneBodySpectrumAndLowdinCoupling)
 {
