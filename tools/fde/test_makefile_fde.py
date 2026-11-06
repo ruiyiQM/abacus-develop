@@ -39,6 +39,12 @@ class MakefileFdeSourcesTest(unittest.TestCase):
                 self.assertEqual(matches[0].resolve(), source.resolve(),
                                  f'{relative_source} resolves to the wrong source: {matches}')
 
+    def test_libxc_switch_enables_provider(self):
+        makefile = 'print-flags:\n\t@echo $(HONG)\n'
+        result = subprocess.run([self.make, '-s', '-f', 'Makefile', '-f', '-',
+                                 'LIBXC_DIR=/tmp/libxc', 'print-flags'], input=makefile,
+                                text=True, cwd=SOURCE, capture_output=True, check=True)
+        self.assertIn('-D__LIBXC', result.stdout.split())
 
 
 if __name__ == '__main__':
