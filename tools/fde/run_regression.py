@@ -285,7 +285,8 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
         raise RegressionError(
             f"build directory has no CTestTestfile.cmake: {build_directory}"
         )
-    selection = [ctest, "--test-dir", str(build_directory), "-R", "^MODULE_FDE_"]
+    selection = [ctest, "--test-dir", str(build_directory), "-R",
+                 "^MODULE_FDE_|^MODULE_BASE_tool_quit_mpi_[124]rank$"]
     inventory = subprocess.run(selection + ["--show-only=json-v1"],
                                check=False, capture_output=True, text=True)
     if inventory.returncode != 0:
@@ -295,6 +296,7 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
     except (ValueError, KeyError) as error:
         raise RegressionError("cannot read CTest inventory: " + str(error)) from error
     names = {test["name"] for test in tests}
+    fde_names = {name for name in names if name.startswith("MODULE_FDE_")}
     features = {}
     cache = build_directory / "CMakeCache.txt"
     if cache.is_file():
@@ -315,6 +317,7 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
     }
     for ranks in (1, 2, 4):
         conditional[f"MODULE_FDE_hartree_pw_{ranks}rank"] = ["ENABLE_MPI"]
+        conditional[f"MODULE_BASE_tool_quit_mpi_{ranks}rank"] = ["ENABLE_MPI"]
     for case in ("molecule_uks", "molecule_rks", "periodic_gamma_uks",
                  "periodic_pair_twist_rks",
                  "periodic_hole_gamma_uks", "periodic_hole_twist_uks"):
@@ -359,12 +362,14 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
                 records.append(record)
         except (OSError, ET.ParseError) as failure:
             error = str(failure)
+    if not fde_names and error is None:
+        error = "No FDE tests were registered"
     executed = sum(not record["incomplete"] for record in records)
     reported = [record["name"] for record in records]
-    complete = (bool(tests) and len(reported) == len(names)
+    complete = (bool(fde_names) and len(reported) == len(names)
                 and set(reported) == names and not missing and error is None)
     return {"command": command, "returncode": completed.returncode,
-            "scope": "registered_fde_tests_only", "selected": len(tests),
+            "scope": "registered_fde_and_fatal_shutdown_tests", "selected": len(tests), "fde_selected": len(fde_names),
             "coverage_complete": complete and not unavailable,
             "executed": executed, "incomplete": [r for r in records if r["incomplete"]],
             "tests": records, "build_features": features, "unavailable_tests": unavailable,

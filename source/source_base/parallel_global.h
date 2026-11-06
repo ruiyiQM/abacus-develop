@@ -78,11 +78,29 @@ void divide_mpi_groups(const int& procs,
                        int& rank_in_group,
                        const bool even = false);
 
-/**
- * @brief Release MPI communicator and resources
- *
- */
 #ifdef __MPI
+/** Fatal exits can originate on one rank while peers wait in a collective. */
+inline void abort_mpi_on_error(const int error_code)
+{
+    if (error_code == 0)
+    {
+        return;
+    }
+    int initialized = 0;
+    MPI_Initialized(&initialized);
+    if (initialized == 0)
+    {
+        return;
+    }
+    int finalized = 0;
+    MPI_Finalized(&finalized);
+    if (finalized == 0)
+    {
+        MPI_Abort(MPI_COMM_WORLD, error_code);
+    }
+}
+
+/** Release MPI communicators and resources. */
 void finalize_mpi();
 #endif
 

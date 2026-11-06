@@ -104,3 +104,21 @@ add_test(NAME MODULE_BASE_parallel_2d_test_para
         COMMAND ${BASH} blacs_connector_test.sh "$<TARGET_FILE:MODULE_BASE_blacs_connector>"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_executable(MODULE_BASE_tool_quit_mpi_probe test_tool_quit.cpp)
+target_link_libraries(MODULE_BASE_tool_quit_mpi_probe PRIVATE
+  MPI::MPI_CXX base device parameter abacus::linalg_libs)
+foreach(ranks IN ITEMS 1 2 4)
+  add_test(
+    NAME MODULE_BASE_tool_quit_mpi_${ranks}rank
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tool_quit.py
+      $<TARGET_FILE:MODULE_BASE_tool_quit_mpi_probe> ${ranks}
+      ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${ranks}
+      ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
+  )
+  set_tests_properties(MODULE_BASE_tool_quit_mpi_${ranks}rank PROPERTIES
+    LABELS "base;fde;mpi;native_runtime"
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    PROCESSORS ${ranks} TIMEOUT 90)
+endforeach()

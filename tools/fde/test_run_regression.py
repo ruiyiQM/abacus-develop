@@ -70,6 +70,27 @@ class DurableRegressionTest(unittest.TestCase):
                 if label in ("disabled", "skipped", "missing_executable"):
                     self.assertTrue(result["incomplete"], result)
 
+    def test_ctest_selects_fatal_shutdown_dependencies(self):
+        if shutil.which("ctest") is None:
+            self.skipTest("ctest executable is unavailable")
+        for has_fde in (True, False):
+            with self.subTest(has_fde=has_fde), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = ('add_test(MODULE_BASE_tool_quit_mpi_1rank "' + sys.executable + '" "-c" "pass")\n'
+                          'add_test(MODULE_BASE_unrelated "' + sys.executable + '" "-c" "raise SystemExit(1)")\n')
+                if has_fde:
+                    source += 'add_test(MODULE_FDE_probe "' + sys.executable + '" "-c" "pass")\n'
+                (root / "CTestTestfile.cmake").write_text(source)
+                result = regression.run_native_ctest(root)
+                self.assertEqual(result["passed"], has_fde, result)
+                self.assertEqual(result["selected"], 2 if has_fde else 1)
+                self.assertEqual(result["fde_selected"], 1 if has_fde else 0)
+                names = {record["name"] for record in result["tests"]}
+                self.assertIn("MODULE_BASE_tool_quit_mpi_1rank", names)
+                self.assertNotIn("MODULE_BASE_unrelated", names)
+                if not has_fde:
+                    self.assertIn("No FDE tests", result["report_error"])
+
     def test_ctest_reports_conditionally_unregistered_native_tests(self):
         if shutil.which("ctest") is None:
             self.skipTest("ctest executable is unavailable")
@@ -88,6 +109,7 @@ class DurableRegressionTest(unittest.TestCase):
             for ranks in (1, 2, 4):
                 self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_FDE_runtime_cli_{ranks}rank"])
                 self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_FDE_hartree_pw_{ranks}rank"])
+                self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_BASE_tool_quit_mpi_{ranks}rank"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_hole_twist_uks_mpi_consistency"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_pair_twist_rks_mpi_consistency"])
             self.assertFalse(result["passed"])
@@ -101,6 +123,7 @@ class DurableRegressionTest(unittest.TestCase):
             self.assertFalse(mpi_result["passed"])
             for ranks in (1, 2, 4):
                 self.assertIn(f"MODULE_FDE_hartree_pw_{ranks}rank", mpi_result["missing_tests"])
+                self.assertIn(f"MODULE_BASE_tool_quit_mpi_{ranks}rank", mpi_result["missing_tests"])
 
     def test_ctest_preserves_native_workflow_metrics_and_rejects_missing_reports(self):
         if shutil.which("ctest") is None:

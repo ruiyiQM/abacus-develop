@@ -1,6 +1,6 @@
 #include "tool_quit.h"
 #ifdef __MPI
-#include "mpi.h"
+#include "parallel_global.h"
 #endif
 
 #ifdef __NORMAL
@@ -72,32 +72,24 @@ void QUIT(int ret)
     std::cout << " See output information in : " << g_quit_out_dir << std::endl;
 #endif
 
+#ifdef __MPI
+    Parallel_Global::abort_mpi_on_error(ret);
+#endif
     exit(ret);
 }
 
 void WARNING_QUIT(const std::string& file, const std::string& description)
 {
     WARNING_QUIT(file, description, 1);
-
-#ifdef __MPI /* if it is MPI run, finalize first, then exit */
-    std::cout << "Detecting if MPI has been initialized..." << std::endl;
-    int is_initialized = 0;
-    MPI_Initialized(&is_initialized);
-    if (is_initialized)
-    {
-        std::cout << "Terminating ABACUS with multiprocessing environment." << std::endl;
-        MPI_Finalize();
-    }
-    else
-    {
-        std::cout << "MPI has not been initialized. Quit normally." << std::endl;
-    }
-    /* but seems this is the only correct way to terminate the MPI */
-#endif
 }
 
 void WARNING_QUIT(const std::string& file, const std::string& description, int ret)
 {
+#ifdef __MPI
+    // Nonroot cout is disabled; flush the cause before any rank aborts the world.
+    const std::string diagnostic = file + ": " + description;
+    std::cerr << diagnostic << std::endl;
+#endif
 #ifdef __NORMAL
 
     std::cout << " ---------------------------------------------------------" << std::endl;
@@ -158,6 +150,10 @@ void CHECK_WARNING_QUIT(const bool error_in, const std::string& file, const std:
 #else
     if (error_in)
     {
+#ifdef __MPI
+        const std::string diagnostic = file + ": " + description;
+        std::cerr << diagnostic << std::endl;
+#endif
         // All cores will print inforamtion
         std::cout.clear();
         if (!GlobalV::ofs_running.is_open())
@@ -181,7 +177,7 @@ void CHECK_WARNING_QUIT(const bool error_in, const std::string& file, const std:
         GlobalV::ofs_warning << " ERROR! " << file << ", core " << GlobalV::MY_RANK + 1 << ": " << description
                              << std::endl;
         GlobalV::ofs_warning << std::endl;
-        exit(1);
+        QUIT(1);
     }
 #endif
     return;

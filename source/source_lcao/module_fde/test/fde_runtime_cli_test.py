@@ -40,7 +40,7 @@ def write_complex_fixture(root):
         "fde_config FDE_CONFIG\n")
 
 
-def check_complex_postprocess(executable, launcher, directory):
+def check_complex_postprocess(executable, launcher, directory, input_rejections):
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools/fde"))
     from fde_workflow import read_postprocess_result
 
@@ -89,7 +89,8 @@ def check_complex_postprocess(executable, launcher, directory):
             report.update(result_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                           writer_confirmations=confirmations, result=result)
         reports.append(report)
-    print(json.dumps({"passed": True, "postprocess_v2": reports,
+    print(json.dumps({"passed": True, "input_rejections": input_rejections,
+                      "postprocess_v2": reports,
                       "binary_sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}))
 
 
@@ -98,10 +99,7 @@ def main():
     launcher = sys.argv[2:]
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        if launcher:
-            # Legacy INPUT rejection is serial; MPI controls exercise valid V2 postprocess requests.
-            check_complex_postprocess(executable, launcher, root)
-            return
+        input_rejections = []
         (root / "FDE_CONFIG").write_text(
             "FDE_CONFIG 1\nATOM_COUNT 2\n"
             "FRAGMENT A 1 1 0\nFRAGMENT B 1 1 1\n"
@@ -120,7 +118,10 @@ def main():
                         if force or stress else "CALCULATE_FORCE must be false")
             if result.returncode != 1 or expected not in result.stdout:
                 raise AssertionError(f"exit={result.returncode}; expected {expected}\n{result.stdout}")
-        check_complex_postprocess(executable, launcher, root)
+            input_rejections.append({"cal_force": force, "cal_stress": stress,
+                                     "exit_code": result.returncode, "deadline_seconds": 20,
+                                     "input_sha256": hashlib.sha256((root / "INPUT").read_bytes()).hexdigest()})
+        check_complex_postprocess(executable, launcher, root, input_rejections)
 
 
 if __name__ == "__main__":
