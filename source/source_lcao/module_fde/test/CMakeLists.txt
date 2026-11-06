@@ -463,14 +463,15 @@ foreach(suite IN ITEMS regression_runner workflow_metrics workflow_complex sessi
 endforeach()
 
 if(ENABLE_LIBXC)
-  foreach(case IN ITEMS molecule_uks molecule_rks periodic_gamma_uks)
+  foreach(case IN ITEMS molecule_uks molecule_rks periodic_gamma_uks
+      periodic_hole_gamma_uks periodic_hole_twist_uks periodic_hole_boundary_consistency)
     add_test(
       NAME MODULE_FDE_native_workflow_${case}
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py
         $<TARGET_FILE:${ABACUS_BIN_NAME}> ${CMAKE_SOURCE_DIR} --case ${case}
     )
     set_tests_properties(MODULE_FDE_native_workflow_${case} PROPERTIES TIMEOUT 180)
-    if(ENABLE_MPI)
+    if(ENABLE_MPI AND NOT case STREQUAL "periodic_hole_boundary_consistency")
       add_test(
         NAME MODULE_FDE_native_workflow_${case}_mpi_consistency
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py

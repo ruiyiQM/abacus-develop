@@ -2182,7 +2182,7 @@ def read_postprocess_result(path: Path,
                      "transition_energy_asymmetry_ry", "estimated_coupling_uncertainty_ry")
             pair = dict(zip(names, [_json_scalar(value) for value in values]))
             if complex_values:
-                matrix_index = indices[0] * count + indices[1]
+                matrix_index = indices[0] + indices[1] * count
                 if values[0] != overlap[matrix_index] or values[1] != hamiltonian[matrix_index]:
                     raise WorkflowError(f"PAIR disagrees with complex H/S matrices in {path}")
                 pair.update(dict(zip(("overlap_magnitude", "h12_magnitude_ry", "coupling_magnitude_ry"),
@@ -2194,7 +2194,8 @@ def read_postprocess_result(path: Path,
         provider = one("COUPLING_PROVIDER") if "COUPLING_PROVIDER" in records else ["legacy_unspecified"]
         if len(provider) != 1:
             raise WorkflowError(f"invalid coupling provider in {path}")
-        result = {"artifact_version": version, "coupling_provider": provider[0], "pairs": pairs,
+        result = {"artifact_version": version, "matrix_layout": "column_major",
+                  "coupling_provider": provider[0], "pairs": pairs,
                   "hamiltonian_ry": [_json_scalar(value) for value in hamiltonian],
                   "overlap": [_json_scalar(value) for value in overlap],
                   "coefficients": [_json_scalar(value) for value in coefficients],

@@ -31,8 +31,8 @@ def fragment_text(state, label):
 RESULT = ("FDE_DIABATIC_RESULT 2\nGEOMETRY geometry\nORBITALS basis\n"
           "BOUNDARY_TWIST 0.17 0.11 0\nRESOURCES context\n"
           "COUPLING_PROVIDER symmetric_linearized\nSTATES 2 reactant product\n"
-          "HAMILTONIAN_RY 4 (5,0) (-0.3,3.85) (-0.3,-3.85) (4.4,0)\n"
-          "OVERLAP 4 (1,0) (0,0.8) (0,-0.8) (1,0)\n"
+          "HAMILTONIAN_RY 4 (5,0) (-0.3,-3.85) (-0.3,3.85) (4.4,0)\n"
+          "OVERLAP 4 (1,0) (0,-0.8) (0,0.8) (1,0)\n"
           "PAIR 0 1 (0,0.8) (-0.3,3.85) (-0.5,0.25) 0 0 0 0\n"
           "ADIABATIC_ENERGIES_RY 2 3.75 5.25\n"
           "COEFFICIENTS 4 (1,0) (0,1) (1,0) (0,-1)\nMAXIMUM_RESIDUAL 1e-15\nEND\n")
@@ -120,7 +120,8 @@ class ComplexWorkflowTest(unittest.TestCase):
         result = workflow.read_postprocess_result(path, ["reactant", "product"])
         self.assertEqual(result["pairs"][0]["orthogonalized_coupling_ry"], [-0.5, 0.25])
         self.assertEqual(result["pairs"][0]["overlap_magnitude"], 0.8)
-        self.assertEqual(result["hamiltonian_ry"][1], [-0.3, 3.85])
+        self.assertEqual(result["hamiltonian_ry"][2], [-0.3, 3.85])
+        self.assertEqual(result["matrix_layout"], "column_major")
         self.assertEqual(json.loads(json.dumps(result, allow_nan=False)), result)
         workflow._validate_postprocess_context(self.spec, self.results, result)
         for key, value in (("resources", "other"), ("boundary_twist", [0, 0, 0]),

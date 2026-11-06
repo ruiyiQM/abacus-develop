@@ -12,6 +12,20 @@ import sys
 import tempfile
 
 
+CASES = ("molecule_uks", "molecule_rks", "periodic_gamma_uks",
+         "periodic_hole_gamma_uks", "periodic_hole_complex_gamma_uks",
+         "periodic_hole_twist_uks", "periodic_hole_minus_twist_uks",
+         "periodic_hole_large_cell_uks", "periodic_hole_boundary_consistency")
+
+
+def scalar(value):
+    return complex(*value) if isinstance(value, list) else value
+
+
+def json_scalar(value):
+    return [value.real, value.imag] if isinstance(value, complex) else value
+
+
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -38,9 +52,10 @@ def run_bounded(command, timeout):
 
 def prepare_case(root, repository, executable, case, launcher):
     rks = case == "molecule_rks"
+    hole = case.startswith("periodic_hole")
     periodic = case.startswith("periodic")
-    cell = 8 if periodic else 24
-    grid = 24 if periodic else 48
+    cell = 10 if case == "periodic_hole_large_cell_uks" else (8 if periodic else 24)
+    grid = 3 * cell if periodic else 48
     resources = repository / "tests/PP_ORB"
     pp = resources / "H_ONCV_PBE-1.0.upf"
     orbital = resources / "H_gga_8au_100Ry_1s.orb"
@@ -65,8 +80,9 @@ def prepare_case(root, repository, executable, case, launcher):
     seeds = {}
     for name, charged in (("left", "A"), ("right", "B")):
         assignments = {label: {"charge": 0, "spin": 0} for label in ("A", "B")}
-        assignments[charged] = {"charge": -2 if rks else -1, "spin": 0 if rks else 1}
-        state = {"label": name, "total_charge": -2 if rks else -1,
+        charge = 1 if hole else (-2 if rks else -1)
+        assignments[charged] = {"charge": charge, "spin": 0 if rks else 1}
+        state = {"label": name, "total_charge": charge,
                  "total_spin": 0 if rks else 1, "fragments": assignments}
         states.append(state)
         seeds[name] = {}
@@ -102,6 +118,11 @@ def prepare_case(root, repository, executable, case, launcher):
         "geometries": [{"label": "pair", "coordinate_angstrom": 0.0,
                         "template_directory": str(template), "initial_densities": seeds}],
     }
+    if case in ("periodic_hole_complex_gamma_uks", "periodic_hole_twist_uks",
+                "periodic_hole_minus_twist_uks"):
+        sign = -1 if case == "periodic_hole_minus_twist_uks" else 1
+        spec["controls"]["boundary_twist"] = ([0, 0, 0] if "complex_gamma" in case
+                                                else [sign * 0.17, sign * 0.11, 0])
     return spec, {str(path.name): sha256(path) for path in (pp, orbital)}
 
 
@@ -115,12 +136,13 @@ def compare_mpi_reports(reports):
         result = {}
         for key, field in (("hamiltonian", "hamiltonian_ry"), ("overlap", "overlap")):
             for i, value in enumerate(report[field]):
-                result[(key, str(i))] = abs(value) if i in (1, 2) else value
-        result[("coupling", "HS")] = report["hamiltonian_ry"][1] * report["overlap"][1]
+                number = scalar(value)
+                result[(key, str(i))] = abs(number) if i in (1, 2) else number
+        result[("coupling", "HS")] = scalar(report["hamiltonian_ry"][1]) * complex(scalar(report["overlap"][1])).conjugate()
         for i, value in enumerate(report["coupling"]["adiabatic_energies_ry"]):
             result[("energy", "root" + str(i))] = value
         pair = report["coupling"]["pairs"][0]
-        result[("coupling", "orthogonalized")] = abs(pair["orthogonalized_coupling_ry"])
+        result[("coupling", "orthogonalized")] = abs(scalar(pair["orthogonalized_coupling_ry"]))
         for state in report["states"]:
             label = state["label"]
             result[("energy", label)] = state["energy_ry"]
@@ -132,8 +154,9 @@ def compare_mpi_reports(reports):
                     dimension = len(columns[0]) if columns else 0
                     for row in range(dimension):
                         for column in range(dimension):
-                            result[("projector", f"{label}/{fragment}/{spin}/{row}/{column}")] = math.fsum(
-                                orbital[row] * orbital[column] for orbital in columns)
+                            result[("projector", f"{label}/{fragment}/{spin}/{row}/{column}")] = sum(
+                                scalar(orbital[row]) * complex(scalar(orbital[column])).conjugate()
+                                for orbital in columns)
         return result
 
     reference = values(reports[0])
@@ -150,27 +173,88 @@ def compare_mpi_reports(reports):
             assert delta <= tolerances[key[0]], (ranks, key, delta, tolerances[key[0]])
     return {"passed": True, "ranks": [1, 2, 4], "tolerances": tolerances,
             "maximum_deltas": maximum,
-            "convention": "S/H off-diagonal magnitudes and occupied C C^T projectors are sign/gauge invariant in the fixed AO basis; postprocessing uses one rank."}
+            "convention": "S/H off-diagonal magnitudes, H12*conj(S12), and occupied C C^dagger projectors are gauge invariant in the fixed AO basis; postprocessing uses one rank."}
+
+
+def compare_boundary_reports(reports):
+    """Same finite local event: Gamma implementation limit and time reversal."""
+    assert len(reports) == 5 and all(report["passed"] for report in reports)
+    gamma, complex_gamma, plus, minus, larger = reports
+    for report in reports:
+        assert report["binary_sha256"] == gamma["binary_sha256"]
+        assert report["resources_sha256"] == gamma["resources_sha256"]
+        assert report["source_files_sha256"] == gamma["source_files_sha256"]
+        assert report["state_definition"] == gamma["state_definition"]
+
+    def invariants(report):
+        pair = report["coupling"]["pairs"][0]
+        return {"energies_ry": [state["energy_ry"] for state in report["states"]],
+                "roots_ry": report["coupling"]["adiabatic_energies_ry"],
+                "overlap_magnitude": [abs(scalar(pair["overlap"]))],
+                "coupling_magnitude_ry": [abs(scalar(pair["orthogonalized_coupling_ry"]))]}
+
+    tolerances = {"energies_ry": 1e-8, "roots_ry": 1e-8,
+                  "overlap_magnitude": 1e-10, "coupling_magnitude_ry": 1e-8}
+    comparisons = {}
+    for name, first, second in (("gamma_limit", gamma, complex_gamma), ("time_reversal", plus, minus)):
+        reference = invariants(first)
+        current = invariants(second)
+        comparisons[name] = {}
+        for key, expected in reference.items():
+            delta = max(abs(a - b) for a, b in zip(expected, current[key]))
+            assert delta <= tolerances[key], (name, key, delta, tolerances[key])
+            comparisons[name][key] = delta
+        maximum_projector_error = 0.0
+        for state1, state2 in zip(first["states"], second["states"]):
+            for fragment, spins in state1["occupied"].items():
+                for spin, columns1 in spins.items():
+                    columns2 = state2["occupied"][fragment][spin]
+                    assert len(columns1) == len(columns2)
+                    dimension = len(columns1[0]) if columns1 else 0
+                    for row in range(dimension):
+                        for column in range(dimension):
+                            p1 = sum(scalar(c[row]) * complex(scalar(c[column])).conjugate() for c in columns1)
+                            p2 = sum(scalar(c[row]) * complex(scalar(c[column])).conjugate() for c in columns2)
+                            if name == "time_reversal":
+                                p1 = complex(p1).conjugate()
+                            maximum_projector_error = max(maximum_projector_error, abs(p1 - p2))
+        assert maximum_projector_error <= 1e-6, (name, maximum_projector_error)
+        comparisons[name]["projector"] = maximum_projector_error
+    reference = invariants(gamma)
+    sensitivity = {}
+    for name, report in (("twist_changes_finite_boundary", plus), ("box_changes_image_separation", larger)):
+        current = invariants(report)
+        sensitivity[name] = {key: [a - b for a, b in zip(current[key], reference[key])] for key in reference}
+    return {"passed": True, "tolerances": dict(tolerances, projector=1e-6), "comparisons": comparisons,
+            "finite_model_sensitivity": sensitivity,
+            "interpretation": "Each boundary/box has one N=3 local hole event. Deltas document finite model sensitivity; no convergence claim, coupling average, or cell normalization."}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("repository", type=Path)
-    parser.add_argument("--case", choices=("molecule_uks", "molecule_rks", "periodic_gamma_uks"), required=True)
+    parser.add_argument("--case", choices=CASES, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source-commit", help="Git SHA for a verified source archive without .git")
     parser.add_argument("--launcher", nargs=argparse.REMAINDER, default=[],
                         help="complete fragment command including the ABACUS executable")
     args = parser.parse_args()
-    if "{ranks}" in args.launcher:
+    boundary = args.case == "periodic_hole_boundary_consistency"
+    if "{ranks}" in args.launcher or boundary:
+        if boundary and args.launcher:
+            parser.error("boundary consistency uses the serial reference solver; MPI is checked separately")
         reports = []
+        cases = (["periodic_hole_gamma_uks", "periodic_hole_complex_gamma_uks",
+                  "periodic_hole_twist_uks", "periodic_hole_minus_twist_uks", "periodic_hole_large_cell_uks"]
+                 if boundary else [args.case] * 3)
+        ranks_list = [1] * len(cases) if boundary else (1, 2, 4)
         with tempfile.TemporaryDirectory(prefix="fde-native-mpi-") as directory:
-            for ranks in (1, 2, 4):
-                output = Path(directory) / f"rank{ranks}.json"
+            for case, ranks in zip(cases, ranks_list):
+                output = Path(directory) / f"{case}-rank{ranks}.json"
                 launcher = [item.replace("{ranks}", str(ranks)) for item in args.launcher]
                 command = [sys.executable, str(Path(__file__).resolve()), str(args.executable),
-                           str(args.repository), "--case", args.case, "--output", str(output)]
+                           str(args.repository), "--case", case, "--output", str(output)]
                 if args.source_commit:
                     command += ["--source-commit", args.source_commit]
                 command += ["--launcher"] + launcher
@@ -181,7 +265,7 @@ def main():
                 if completed.returncode != 0:
                     break
             try:
-                result = compare_mpi_reports(reports)
+                result = compare_boundary_reports(reports) if boundary else compare_mpi_reports(reports)
             except AssertionError as error:
                 result = {"passed": False, "error": str(error)}
             result.update({"case": args.case, "runs": reports, "scientific_acceptance": "not_evaluated"})
@@ -229,6 +313,12 @@ def main():
             path = root / "workflow.json"
             path.write_text(json.dumps(spec, indent=2) + "\n")
             report["controls"] = spec["controls"]
+            report["state_definition"] = spec["states"]
+            report["boundary_interpretation"] = (
+                "One hole per finite periodic H2/H2 supercell; A/B fragment populations constrain its location. "
+                "Replicas are the environment; no independent third host. A single common twist changes finite "
+                "boundary conditions, not the number of transferred particles. Charged-cell/images remain finite-size effects."
+                if "hole" in args.case else "legacy charged-pair developer fixture")
             command = [sys.executable, str(repository / "tools/fde/fde_workflow.py"), "run", str(path)]
             report["command"] = command
             run = run_bounded(command, 120)
@@ -236,12 +326,15 @@ def main():
             assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
             work = root / "work/pair"
             report["states"] = []
+            final_densities = {}
             for state in spec["states"]:
                 checkpoint = json.loads((work / state["label"] / "checkpoint.json").read_text())
                 assert checkpoint["converged"] and checkpoint["strict_confirmations"] >= 2
                 assert checkpoint["cycle"] >= 2
                 record = {"label": state["label"], "energy_ry": checkpoint["energy_ry"],
-                          "cycles": checkpoint["cycle"], "particles": {}, "occupied": {}}
+                          "cycles": checkpoint["cycle"], "particles": {}, "occupied": {},
+                          "maximum_off_fragment_coefficient": 0.0}
+                final_densities[state["label"]] = {}
                 for label, density_path in checkpoint["densities"].items():
                     density = read_density(Path(density_path))
                     integral = [math.fsum(density[spin]) * density["cell_volume"] / density["grid_size"]
@@ -249,13 +342,38 @@ def main():
                     for actual, expected in zip(integral, density["populations"]):
                         assert abs(actual - expected) <= 1e-8, (label, integral)
                     record["particles"][label] = integral
+                    assignment = state["fragments"][label]
+                    electrons = 2 - assignment["charge"]
+                    expected = [(electrons + assignment["spin"]) / 2,
+                                (electrons - assignment["spin"]) / 2]
+                    assert all(abs(a - b) <= 1e-8 for a, b in zip(integral, expected)), (label, integral, expected)
+                    final_densities[state["label"]][label] = density
                     fragment = read_fragment(Path(checkpoint["fragments"][label]))
                     if args.case == "molecule_rks":
                         assert density["alpha"] == density["beta"]
                         assert fragment["alpha"] == fragment["beta"]
-                    record["occupied"][label] = {spin: [orb["coefficients"] for orb in fragment[spin]]
+                    record["occupied"][label] = {spin: [[json_scalar(c) for c in orb["coefficients"]]
+                                                       for orb in fragment[spin]]
                                                   for spin in ("alpha", "beta")}
+                    off_support = [abs(c) for spin in ("alpha", "beta") for orb in fragment[spin]
+                                   for i, c in enumerate(orb["coefficients"]) if i not in fragment["active_orbitals"]]
+                    record["maximum_off_fragment_coefficient"] = max(
+                        [record["maximum_off_fragment_coefficient"]] + off_support)
+                    assert record["maximum_off_fragment_coefficient"] <= 1e-12
                 report["states"].append(record)
+            report["density_difference"] = {}
+            for label in ("A", "B"):
+                first = final_densities["left"][label]
+                second = final_densities["right"][label]
+                weight = first["cell_volume"] / first["grid_size"]
+                difference = [sum(second[spin][i] - first[spin][i] for spin in ("alpha", "beta"))
+                              for i in range(first["grid_size"])]
+                integral = math.fsum(difference) * weight
+                expected = (spec["states"][0]["fragments"][label]["charge"]
+                            - spec["states"][1]["fragments"][label]["charge"])
+                assert abs(integral - expected) <= 1e-8
+                report["density_difference"][label] = {"integral_electrons_right_minus_left": integral,
+                                                        "integral_absolute_density_difference": math.fsum(map(abs, difference)) * weight}
             result_path = work / "postprocess/fde_diabatic.fde_diabatic"
             result = read_postprocess_result(result_path, [state["label"] for state in spec["states"]])
             report["coupling"] = result
@@ -263,12 +381,15 @@ def main():
             pair = result["pairs"][0]
             assert pair["overlap_reciprocity_error"] <= 1e-8, pair
             assert pair["maximum_transition_density_trace_error"] <= 1e-8, pair
-            records = {line.split()[0]: line.split()[1:] for line in result_path.read_text().splitlines() if line.split()}
-            report["hamiltonian_ry"] = [float(x) for x in records["HAMILTONIAN_RY"][1:]]
-            report["overlap"] = [float(x) for x in records["OVERLAP"][1:]]
-            assert report["hamiltonian_ry"][1] == report["hamiltonian_ry"][2]
-            assert report["overlap"][1] == report["overlap"][2]
-            assert float(records["MAXIMUM_RESIDUAL"][0]) <= 1e-8
+            report["hamiltonian_ry"] = result["hamiltonian_ry"]
+            report["overlap"] = result["overlap"]
+            for name in ("hamiltonian_ry", "overlap"):
+                assert abs(scalar(report[name][1]) - complex(scalar(report[name][2])).conjugate()) <= 1e-10
+            assert result["maximum_residual"] <= 1e-8
+            if "twist" in args.case:
+                imaginary = max(abs(scalar(v).imag) for name in ("hamiltonian_ry", "overlap") for v in report[name])
+                report["maximum_imaginary_hs"] = imaginary
+                assert imaginary > 1e-8, "non-Gamma check must exercise complex H/S"
             report["output_bytes"] = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
             assert report["output_bytes"] < report["thresholds"]["maximum_local_bytes"]
             first_log = sorted(root.rglob("fde_abacus.log"))[0]

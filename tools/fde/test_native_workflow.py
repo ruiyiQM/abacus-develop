@@ -71,6 +71,24 @@ class NativeWorkflowComparisonTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     native.compare_mpi_reports(data)
 
+    def test_complex_phase_uses_conjugate_projectors_and_hs_product(self):
+        data = reports()
+        for record in data:
+            record["hamiltonian_ry"] = [1, [0.2, 0.1], [0.2, -0.1], 2]
+            record["overlap"] = [1, [0.1, 0.03], [0.1, -0.03], 1]
+            record["coupling"]["pairs"][0]["orthogonalized_coupling_ry"] = [0.04, 0.03]
+            record["states"][0]["occupied"]["A"]["alpha"] = [[[0.6, 0], [0, 0.8]]]
+        data[1]["states"][0]["occupied"]["A"]["alpha"] = [[[0, 0.6], [-0.8, 0]]]
+        for name in ("hamiltonian_ry", "overlap"):
+            for index in (1, 2):
+                value = native.scalar(data[1][name][index]) * (1j if index == 1 else -1j)
+                data[1][name][index] = native.json_scalar(value)
+        data[1]["coupling"]["pairs"][0]["orthogonalized_coupling_ry"] = [-0.03, 0.04]
+        self.assertTrue(native.compare_mpi_reports(data)["passed"])
+        data[1]["hamiltonian_ry"][1][0] += 0.01
+        with self.assertRaises(AssertionError):
+            native.compare_mpi_reports(data)
+
     def test_rejects_incomplete_execution_or_mixed_input_binary_and_resources(self):
         for target in ("passed", "native_processes", "binary_sha256", "resources_sha256", "input_sha256"):
             with self.subTest(target=target):
@@ -80,6 +98,18 @@ class NativeWorkflowComparisonTest(unittest.TestCase):
                     native.compare_mpi_reports(data)
         with self.assertRaises(AssertionError):
             native.compare_mpi_reports(reports()[:2])
+
+    def test_boundary_limits_require_same_states_and_conjugate_occupied_spaces(self):
+        data = [copy.deepcopy(reports()[0]) for _ in range(5)]
+        for report in data:
+            report["state_definition"] = [{"total_charge": 1, "total_spin": 1}]
+            report["coupling"]["pairs"][0]["overlap"] = 0.1
+        data[2]["states"][0]["occupied"]["A"]["alpha"] = [[[0.6, 0], [0, 0.8]]]
+        data[3]["states"][0]["occupied"]["A"]["alpha"] = [[[0.6, 0], [0, -0.8]]]
+        self.assertTrue(native.compare_boundary_reports(data)["passed"])
+        data[3]["states"][0]["occupied"]["A"]["alpha"][0][1] = [0, 0.8]
+        with self.assertRaises(AssertionError):
+            native.compare_boundary_reports(data)
 
 
 if __name__ == "__main__":
