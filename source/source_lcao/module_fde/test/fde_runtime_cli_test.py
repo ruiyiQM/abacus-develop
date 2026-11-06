@@ -63,6 +63,8 @@ def check_complex_postprocess(executable, launcher, directory):
         if failure:
             expected = f"Cannot create FDE diabatic {failure}:"
             assert completed.returncode == 1 and expected in completed.stdout, completed.stdout
+            # Nonroot cout is disabled: completion of the whole launcher checks failure propagation.
+            report["failure_deadline_seconds"] = 20
             assert "FDE diabatic postprocess completed" not in completed.stdout, completed.stdout
         else:
             assert completed.returncode == 0, completed.stdout

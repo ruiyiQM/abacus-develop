@@ -11,6 +11,7 @@
 #include "source_md/run_md.h"
 #include "source_relax/relax_driver.h"
 #ifdef __LCAO
+#include "source_base/module_parallel/para_mpi_func.h"
 #include "source_lcao/module_fde/coupling/fde_diabatic_postprocess.h"
 #include "source_lcao/module_fde/runtime/fde_session.h"
 #endif
@@ -52,11 +53,13 @@ void Driver::driver_run()
     if (input.fde_task == "diabatic_postprocess")
     {
 #ifdef __LCAO
-        int world_rank = 0;
 #ifdef __MPI
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        const Parallel::ParaWorld world = Parallel::ParaWorld::make_mpi("fde_postprocess", MPI_COMM_WORLD);
+#else
+        const Parallel::ParaWorld world = Parallel::ParaWorld::serial("fde_postprocess");
 #endif
-        if (world_rank == 0)
+        std::string failure;
+        if (world.rank() == 0)
         {
             try
             {
@@ -68,8 +71,13 @@ void Driver::driver_run()
             }
             catch (const std::exception& error)
             {
-                ModuleBase::WARNING_QUIT("Driver::diabatic_postprocess", error.what());
+                failure = error.what();
             }
+        }
+        Parallel::bcast_string(failure, world);
+        if (!failure.empty())
+        {
+            ModuleBase::WARNING_QUIT("Driver::diabatic_postprocess", failure);
         }
         return;
 #else
