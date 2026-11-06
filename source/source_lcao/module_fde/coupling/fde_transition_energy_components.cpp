@@ -55,11 +55,46 @@ Scalar one_body_energy_ry(const std::vector<Scalar>& density,
     return energy;
 }
 
+template <typename Scalar>
+Scalar local_hartree_energy_ry(const std::vector<Scalar>& density_bohr3,
+                               const std::vector<Scalar>& potential_ry,
+                               const double volume_element_bohr3)
+{
+    if (density_bohr3.size() != potential_ry.size()
+        || !std::isfinite(volume_element_bohr3) || volume_element_bohr3 <= 0.0)
+    {
+        throw std::invalid_argument("FDE Hartree grid dimensions or volume element are invalid");
+    }
+    Scalar energy = 0.0;
+    for (std::size_t point = 0; point < density_bohr3.size(); ++point)
+    {
+        const Scalar rho = density_bohr3[point];
+        const Scalar potential = potential_ry[point];
+        if (!finite_value(rho) || !finite_value(potential))
+        {
+            throw std::invalid_argument("FDE Hartree density and potential must be finite");
+        }
+        energy += rho * potential;
+    }
+    energy *= 0.5 * volume_element_bohr3;
+    if (!finite_value(energy))
+    {
+        throw std::overflow_error("FDE Hartree energy is not finite");
+    }
+    return energy;
+}
+
 template double one_body_energy_ry(const std::vector<double>&,
                                    const std::vector<double>&,
                                    std::size_t);
 template std::complex<double> one_body_energy_ry(const std::vector<std::complex<double>>&,
                                                 const std::vector<std::complex<double>>&,
                                                 std::size_t);
+template double local_hartree_energy_ry(const std::vector<double>&,
+                                        const std::vector<double>&,
+                                        double);
+template std::complex<double> local_hartree_energy_ry(const std::vector<std::complex<double>>&,
+                                                     const std::vector<std::complex<double>>&,
+                                                     double);
 
 } // namespace fde

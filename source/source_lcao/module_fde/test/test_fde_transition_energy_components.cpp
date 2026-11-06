@@ -81,3 +81,71 @@ TEST(FdeTransitionEnergyComponents, RejectsMalformedNonfiniteAndOverflowingInput
     EXPECT_THROW(fde::one_body_energy_ry(complex_invalid, complex_one, 1), std::invalid_argument);
     EXPECT_THROW(fde::one_body_energy_ry(enormous, enormous, 1), std::overflow_error);
 }
+
+TEST(FdeTransitionEnergyComponents, HartreeKeepsTheComplexBilinearEnergyAndReverseConjugacy)
+{
+    // K=[[2,-2],[-2,2]], dV=1/4: E[a]=1, E[b]=9/4, integral a Kb=-3.
+    const std::vector<double> real_density = {1.0, 3.0};
+    const std::vector<double> imaginary_density = {2.0, -1.0};
+    const std::vector<double> real_potential = {-4.0, 4.0};
+    const std::vector<double> imaginary_potential = {6.0, -6.0};
+    const std::vector<Complex> density = {Complex(1.0, 2.0), Complex(3.0, -1.0)};
+    const std::vector<Complex> potential = {Complex(-4.0, 6.0), Complex(4.0, -6.0)};
+    const std::vector<Complex> reverse_density = {Complex(1.0, -2.0), Complex(3.0, 1.0)};
+    const std::vector<Complex> reverse_potential = {Complex(-4.0, -6.0), Complex(4.0, 6.0)};
+    const double real_energy = fde::local_hartree_energy_ry(real_density, real_potential, 0.25);
+    const double imaginary_energy = fde::local_hartree_energy_ry(imaginary_density, imaginary_potential, 0.25);
+    const Complex energy = fde::local_hartree_energy_ry(density, potential, 0.25);
+    const Complex reverse = fde::local_hartree_energy_ry(reverse_density, reverse_potential, 0.25);
+    EXPECT_NEAR(real_energy, 1.0, 1.0e-12);
+    EXPECT_NEAR(imaginary_energy, 2.25, 1.0e-12);
+    const Complex expected(-1.25, -3.0);
+    const Complex expected_reverse(-1.25, 3.0);
+    expect_complex_near(energy, expected);
+    expect_complex_near(reverse, expected_reverse);
+}
+
+TEST(FdeTransitionEnergyComponents, HartreeHasTheRealGammaLimitAndAnAdditiveLocalGridPartition)
+{
+    const std::vector<double> density = {1.0, 3.0};
+    const std::vector<double> potential = {-4.0, 4.0};
+    const std::vector<Complex> gamma_density = {1.0, 3.0};
+    const std::vector<Complex> gamma_potential = {-4.0, 4.0};
+    const std::vector<double> left_density = {1.0};
+    const std::vector<double> left_potential = {-4.0};
+    const std::vector<double> right_density = {3.0};
+    const std::vector<double> right_potential = {4.0};
+    const std::vector<double> empty;
+    const double total = fde::local_hartree_energy_ry(density, potential, 0.25);
+    const double left = fde::local_hartree_energy_ry(left_density, left_potential, 0.25);
+    const double right = fde::local_hartree_energy_ry(right_density, right_potential, 0.25);
+    const double empty_rank = fde::local_hartree_energy_ry(empty, empty, 0.25);
+    const Complex gamma = fde::local_hartree_energy_ry(gamma_density, gamma_potential, 0.25);
+    EXPECT_NEAR(total, 1.0, 1.0e-12);
+    EXPECT_NEAR(left + right + empty_rank, total, 1.0e-12);
+    expect_complex_near(gamma, total);
+}
+
+TEST(FdeTransitionEnergyComponents, HartreeRejectsMalformedNonfiniteAndOverflowingInputs)
+{
+    const std::vector<double> one = {1.0};
+    const std::vector<double> empty;
+    const double infinity = std::numeric_limits<double>::infinity();
+    const std::vector<double> infinite = {infinity};
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<double> invalid = {nan};
+    const double large = std::numeric_limits<double>::max();
+    const std::vector<double> enormous = {large};
+    const std::vector<Complex> complex_one = {1.0};
+    const Complex invalid_imaginary(1.0, infinity);
+    const std::vector<Complex> complex_invalid = {invalid_imaginary};
+    EXPECT_THROW(fde::local_hartree_energy_ry(empty, one, 1.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(one, one, 0.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(one, one, -1.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(one, one, infinity), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(one, one, nan), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(one, infinite, 1.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(invalid, one, 1.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(complex_invalid, complex_one, 1.0), std::invalid_argument);
+    EXPECT_THROW(fde::local_hartree_energy_ry(enormous, enormous, 1.0), std::overflow_error);
+}
