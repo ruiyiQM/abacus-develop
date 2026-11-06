@@ -87,6 +87,7 @@ AddTest(
 AddTest(
   TARGET MODULE_FDE_diabatic_assembler
   SOURCES fde_diabatic_assembler_test.cpp
+    test_fde_diabatic_assembler.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_diabatic_assembler.cpp

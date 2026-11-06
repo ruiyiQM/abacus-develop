@@ -11,15 +11,19 @@
 namespace fde
 {
 
-class FdeCouplingProviderFactory
+template <typename Scalar>
+class ScalarFdeCouplingProviderFactory
 {
   public:
-    static std::unique_ptr<TransitionEnergyProvider> create(
+    static std::unique_ptr<ScalarTransitionEnergyProvider<Scalar>> create(
         const std::string& provider,
-        const std::vector<LinearizedStateArtifact>& states,
-        const std::vector<double>& ao_overlap,
+        const std::vector<ScalarLinearizedStateArtifact<Scalar>>& states,
+        const std::vector<Scalar>& ao_overlap,
         double singular_value_tolerance);
 };
+
+using FdeCouplingProviderFactory = ScalarFdeCouplingProviderFactory<double>;
+using ComplexFdeCouplingProviderFactory = ScalarFdeCouplingProviderFactory<std::complex<double>>;
 
 } // namespace fde
 

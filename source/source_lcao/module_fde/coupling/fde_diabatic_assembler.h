@@ -29,12 +29,13 @@ struct FdeDiabApproximationAudit
     std::size_t discarded_interfragment_overlap_pairs;
 };
 
-struct DiabaticPairAssembly
+template <typename Scalar>
+struct ScalarDiabaticPairAssembly
 {
     std::size_t first_input_state;
     std::size_t second_input_state;
-    double normalized_overlap;
-    double hamiltonian_coupling_ry;
+    Scalar normalized_overlap;
+    Scalar hamiltonian_coupling_ry;
     double overlap_reciprocity_error;
     double maximum_transition_density_trace_error;
     double transition_energy_asymmetry_ry;
@@ -42,11 +43,12 @@ struct DiabaticPairAssembly
     std::string provider;
 };
 
-struct FdeDiabaticAssemblyResult
+template <typename Scalar>
+struct ScalarFdeDiabaticAssemblyResult
 {
-    NonorthogonalStateProblem problem;
+    ScalarNonorthogonalStateProblem<Scalar> problem;
     FdeDiabApproximationAudit audit;
-    std::vector<DiabaticPairAssembly> pairs;
+    std::vector<ScalarDiabaticPairAssembly<Scalar>> pairs;
 };
 
 class FdeDiabFragmentOverlapPolicy : public OccupiedOverlapPolicy
@@ -62,18 +64,26 @@ class FdeDiabFragmentOverlapPolicy : public OccupiedOverlapPolicy
     std::vector<std::string> overlap_active_fragments_;
 };
 
-class FdeDiabaticAssembler
+template <typename Scalar>
+class ScalarFdeDiabaticAssembler
 {
   public:
-    static FdeDiabaticAssemblyResult assemble(
-        const std::vector<DiabaticDeterminantArtifact>& determinants,
+    static ScalarFdeDiabaticAssemblyResult<Scalar> assemble(
+        const std::vector<ScalarDiabaticDeterminantArtifact<Scalar>>& determinants,
         const std::vector<double>& diagonal_energies_ry,
-        const std::vector<double>& ao_overlap,
+        const std::vector<Scalar>& ao_overlap,
         const FdeDiabApproximationSpec& approximation,
-        const TransitionEnergyProvider& transition_energy_provider,
+        const ScalarTransitionEnergyProvider<Scalar>& transition_energy_provider,
         const CouplingValidationControls& validation,
         double singular_value_tolerance);
 };
+
+using DiabaticPairAssembly = ScalarDiabaticPairAssembly<double>;
+using ComplexDiabaticPairAssembly = ScalarDiabaticPairAssembly<std::complex<double>>;
+using FdeDiabaticAssemblyResult = ScalarFdeDiabaticAssemblyResult<double>;
+using ComplexFdeDiabaticAssemblyResult = ScalarFdeDiabaticAssemblyResult<std::complex<double>>;
+using FdeDiabaticAssembler = ScalarFdeDiabaticAssembler<double>;
+using ComplexFdeDiabaticAssembler = ScalarFdeDiabaticAssembler<std::complex<double>>;
 
 } // namespace fde
 

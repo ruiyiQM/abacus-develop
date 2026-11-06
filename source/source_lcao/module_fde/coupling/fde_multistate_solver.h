@@ -2,18 +2,23 @@
 #define FDE_COUPLING_MULTISTATE_SOLVER_H
 
 #include <cstddef>
+#include <complex>
 #include <string>
 #include <vector>
 
 namespace fde
 {
 
-struct NonorthogonalStateProblem
+template <typename Scalar>
+struct ScalarNonorthogonalStateProblem
 {
     std::vector<std::string> state_labels;
-    std::vector<double> hamiltonian_ry;
-    std::vector<double> overlap;
+    std::vector<Scalar> hamiltonian_ry;
+    std::vector<Scalar> overlap;
 };
+
+using NonorthogonalStateProblem = ScalarNonorthogonalStateProblem<double>;
+using ComplexNonorthogonalStateProblem = ScalarNonorthogonalStateProblem<std::complex<double>>;
 
 struct NonorthogonalSolverControls
 {
@@ -22,15 +27,19 @@ struct NonorthogonalSolverControls
     double residual_tolerance;
 };
 
-struct NonorthogonalStateSolution
+template <typename Scalar>
+struct ScalarNonorthogonalStateSolution
 {
     std::size_t diabatic_dimension;
     std::vector<double> eigenvalues_ry;
-    std::vector<double> coefficients;
+    std::vector<Scalar> coefficients;
     std::vector<double> retained_overlap_eigenvalues;
     std::size_t discarded_dimensions;
     double maximum_residual;
 };
+
+using NonorthogonalStateSolution = ScalarNonorthogonalStateSolution<double>;
+using ComplexNonorthogonalStateSolution = ScalarNonorthogonalStateSolution<std::complex<double>>;
 
 struct RootTrackingResult
 {

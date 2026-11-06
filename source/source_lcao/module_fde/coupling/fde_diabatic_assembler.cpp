@@ -37,8 +37,9 @@ std::set<std::string> checked_label_set(const std::vector<std::string>& labels,
     return result;
 }
 
+template <typename Scalar>
 std::set<std::string> available_fragments(
-    const std::vector<DiabaticDeterminantArtifact>& determinants)
+    const std::vector<ScalarDiabaticDeterminantArtifact<Scalar>>& determinants)
 {
     std::set<std::string> result;
     for (std::size_t state = 0; state < determinants.size(); ++state)
@@ -51,13 +52,14 @@ std::set<std::string> available_fragments(
     return result;
 }
 
-OccupiedSpinOrbitals select_spin_orbitals(const OccupiedSpinOrbitals& input,
+template <typename Scalar>
+ScalarOccupiedSpinOrbitals<Scalar> select_spin_orbitals(const ScalarOccupiedSpinOrbitals<Scalar>& input,
                                           const std::size_t ao_dimension,
                                           const std::set<std::string>& selected_fragments)
 {
     const std::size_t count
-        = DeterminantArtifactIO::occupied_count(input, ao_dimension);
-    OccupiedSpinOrbitals result;
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(input, ao_dimension);
+    ScalarOccupiedSpinOrbitals<Scalar> result;
     for (std::size_t orbital = 0; orbital < count; ++orbital)
     {
         if (selected_fragments.count(input.source_fragment_labels[orbital]) == 0)
@@ -77,34 +79,36 @@ OccupiedSpinOrbitals select_spin_orbitals(const OccupiedSpinOrbitals& input,
     return result;
 }
 
-DiabaticDeterminantArtifact select_determinant_fragments(
-    const DiabaticDeterminantArtifact& input,
+template <typename Scalar>
+ScalarDiabaticDeterminantArtifact<Scalar> select_determinant_fragments(
+    const ScalarDiabaticDeterminantArtifact<Scalar>& input,
     const std::set<std::string>& selected_fragments,
-    const std::vector<double>& ao_overlap)
+    const std::vector<Scalar>& ao_overlap)
 {
-    DiabaticDeterminantArtifact result = input;
+    ScalarDiabaticDeterminantArtifact<Scalar> result = input;
     result.alpha = select_spin_orbitals(input.alpha,
                                         input.ao_dimension,
                                         selected_fragments);
     result.beta = select_spin_orbitals(input.beta,
                                        input.ao_dimension,
                                        selected_fragments);
-    DeterminantArtifactIO::validate(result, ao_overlap, 1.0e-8);
+    ScalarDeterminantArtifactIO<Scalar>::validate(result, ao_overlap, 1.0e-8);
     return result;
 }
 
-void validate_electron_counts(const std::vector<DiabaticDeterminantArtifact>& determinants)
+template <typename Scalar>
+void validate_electron_counts(const std::vector<ScalarDiabaticDeterminantArtifact<Scalar>>& determinants)
 {
     const std::size_t dimension = determinants[0].ao_dimension;
     const std::size_t alpha
-        = DeterminantArtifactIO::occupied_count(determinants[0].alpha, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(determinants[0].alpha, dimension);
     const std::size_t beta
-        = DeterminantArtifactIO::occupied_count(determinants[0].beta, dimension);
+        = ScalarDeterminantArtifactIO<Scalar>::occupied_count(determinants[0].beta, dimension);
     for (std::size_t state = 1; state < determinants.size(); ++state)
     {
-        if (DeterminantArtifactIO::occupied_count(determinants[state].alpha, dimension)
+        if (ScalarDeterminantArtifactIO<Scalar>::occupied_count(determinants[state].alpha, dimension)
                 != alpha
-            || DeterminantArtifactIO::occupied_count(determinants[state].beta, dimension)
+            || ScalarDeterminantArtifactIO<Scalar>::occupied_count(determinants[state].beta, dimension)
                    != beta)
         {
             throw std::invalid_argument(
@@ -139,12 +143,13 @@ bool FdeDiabFragmentOverlapPolicy::retain(const std::string& bra_fragment,
                   != overlap_active_fragments_.end();
 }
 
-FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
-    const std::vector<DiabaticDeterminantArtifact>& determinants,
+template <typename Scalar>
+ScalarFdeDiabaticAssemblyResult<Scalar> ScalarFdeDiabaticAssembler<Scalar>::assemble(
+    const std::vector<ScalarDiabaticDeterminantArtifact<Scalar>>& determinants,
     const std::vector<double>& diagonal_energies_ry,
-    const std::vector<double>& ao_overlap,
+    const std::vector<Scalar>& ao_overlap,
     const FdeDiabApproximationSpec& approximation,
-    const TransitionEnergyProvider& transition_energy_provider,
+    const ScalarTransitionEnergyProvider<Scalar>& transition_energy_provider,
     const CouplingValidationControls& validation,
     const double singular_value_tolerance)
 {
@@ -161,7 +166,7 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
         {
             throw std::invalid_argument("FDE-diab diagonal energy is non-finite");
         }
-        DeterminantArtifactIO::validate(determinants[state], ao_overlap, 1.0e-8);
+        ScalarDeterminantArtifactIO<Scalar>::validate(determinants[state], ao_overlap, 1.0e-8);
     }
 
     std::set<std::size_t> selected_states;
@@ -197,7 +202,7 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
         }
     }
 
-    std::vector<DiabaticDeterminantArtifact> selected_determinants;
+    std::vector<ScalarDiabaticDeterminantArtifact<Scalar>> selected_determinants;
     selected_determinants.reserve(approximation.state_indices.size());
     for (std::size_t index = 0; index < approximation.state_indices.size(); ++index)
     {
@@ -208,7 +213,7 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
     }
     validate_electron_counts(selected_determinants);
 
-    FdeDiabaticAssemblyResult result;
+    ScalarFdeDiabaticAssemblyResult<Scalar> result;
     result.audit.k_states = approximation.state_indices.size();
     result.audit.l_overlap_active_fragments = approximation.overlap_active_fragments.size();
     result.audit.m_determinant_fragments = approximation.determinant_fragments.size();
@@ -271,8 +276,8 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
     {
         for (std::size_t first = 0; first < second; ++first)
         {
-            const ElectronicCouplingResult coupling
-                = ElectronicCoupling::evaluate_symmetric_with_policy(
+            const ScalarElectronicCouplingResult<Scalar> coupling
+                = ScalarElectronicCoupling<Scalar>::evaluate_symmetric_with_policy(
                     selected_determinants[first],
                     selected_determinants[second],
                     ao_overlap,
@@ -281,11 +286,11 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
                     validation,
                     singular_value_tolerance);
             result.problem.overlap[first + second * k] = coupling.normalized_overlap;
-            result.problem.overlap[second + first * k] = coupling.normalized_overlap;
+            result.problem.overlap[second + first * k] = conjugate_scalar(coupling.normalized_overlap);
             result.problem.hamiltonian_ry[first + second * k]
                 = coupling.hamiltonian_coupling_ry;
             result.problem.hamiltonian_ry[second + first * k]
-                = coupling.hamiltonian_coupling_ry;
+                = conjugate_scalar(coupling.hamiltonian_coupling_ry);
             result.pairs.push_back({approximation.state_indices[first],
                                     approximation.state_indices[second],
                                     coupling.normalized_overlap,
@@ -299,5 +304,8 @@ FdeDiabaticAssemblyResult FdeDiabaticAssembler::assemble(
     }
     return result;
 }
+
+template class ScalarFdeDiabaticAssembler<double>;
+template class ScalarFdeDiabaticAssembler<std::complex<double>>;
 
 } // namespace fde
