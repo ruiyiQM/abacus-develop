@@ -291,7 +291,8 @@ TEST(FdeLinearizedStateArtifactIO, RejectsOverflowingAoDimensionsBeforeMatrixAri
         }
         text << "AO_DIMENSION " << dimension << "\nREFERENCE_ENERGY_RY 1\n"
              << "HAMILTONIAN_ALPHA_RY 0\nHAMILTONIAN_BETA_RY 0\nEND\n";
-        std::istringstream input(text.str());
+        const std::string serialized = text.str();
+        std::istringstream input(serialized);
         if (version == 1)
         {
             EXPECT_THROW(fde::LinearizedStateArtifactIO::read(input, 1.0e-12), std::invalid_argument);
