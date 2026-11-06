@@ -149,20 +149,22 @@ if(ENABLE_LIBXC)
     TIMEOUT 120
   )
   if(ENABLE_MPI)
-    add_test(
-      NAME MODULE_FDE_output_failure_2rank
-      COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_output_failure.py
-        $<TARGET_FILE:${ABACUS_BIN_NAME}>
-        ${CMAKE_SOURCE_DIR}
-        ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
-        ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
-    )
-    set_tests_properties(MODULE_FDE_output_failure_2rank PROPERTIES
-      ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
-      PROCESSORS 2
-      TIMEOUT 120
-    )
+    foreach(ranks IN ITEMS 2 4)
+      add_test(
+        NAME MODULE_FDE_output_failure_${ranks}rank
+        COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_output_failure.py
+          $<TARGET_FILE:${ABACUS_BIN_NAME}>
+          ${CMAKE_SOURCE_DIR}
+          ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${ranks}
+          ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
+      )
+      set_tests_properties(MODULE_FDE_output_failure_${ranks}rank PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+        PROCESSORS ${ranks}
+        TIMEOUT 120
+      )
+    endforeach()
   endif()
 endif()
 
@@ -503,7 +505,7 @@ foreach(test IN LISTS fde_tests)
     set_tests_properties(${test} PROPERTIES PROCESSORS 1)
   endif()
 endforeach()
-foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2rank
+foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2rank output_failure_4rank
     session_json session_json_2rank)
   if(TEST MODULE_FDE_${test})
     set_property(TEST MODULE_FDE_${test} PROPERTY LABELS "fde;native_runtime")
