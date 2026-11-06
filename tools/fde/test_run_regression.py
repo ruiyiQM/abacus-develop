@@ -23,6 +23,7 @@ class DurableRegressionTest(unittest.TestCase):
         starts = {suite["start_directory"] for suite in manifest["python_suites"]}
         self.assertIn("tools/fde/workflow", starts)
         self.assertIn("tools/fde/euler", starts)
+        self.assertIn("tools/fde/test_makefile_fde.py", manifest["required_paths"])
 
     def test_python_suites_count_execution_and_reject_incomplete_results(self):
         cases = {

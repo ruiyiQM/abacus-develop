@@ -449,7 +449,7 @@ AddTest(
     ../runtime/fde_warm_start.cpp
 )
 
-foreach(suite IN ITEMS regression_runner workflow_metrics workflow_complex session_client workflow_helpers euler_helpers)
+foreach(suite IN ITEMS regression_runner workflow_metrics workflow_complex session_client workflow_helpers euler_helpers makefile_sources)
   if(suite STREQUAL "regression_runner")
     set(suite_directory "tools/fde")
     set(suite_pattern "test_run_regression.py")
@@ -465,6 +465,9 @@ foreach(suite IN ITEMS regression_runner workflow_metrics workflow_complex sessi
   elseif(suite STREQUAL "workflow_helpers")
     set(suite_directory "tools/fde/workflow")
     set(suite_pattern "test_*.py")
+  elseif(suite STREQUAL "makefile_sources")
+    set(suite_directory "tools/fde")
+    set(suite_pattern "test_makefile_fde.py")
   else()
     set(suite_directory "tools/fde/euler")
     set(suite_pattern "test_*.py")
@@ -540,6 +543,7 @@ foreach(test IN ITEMS runtime_cli runtime_cli_1rank runtime_cli_2rank runtime_cl
   endif()
 endforeach()
 foreach(test IN ITEMS workflow_serial scf_policy band_folding regression_runner
-    workflow_metrics workflow_complex session_client workflow_helpers euler_helpers)
+    workflow_metrics workflow_complex session_client workflow_helpers euler_helpers makefile_sources)
   set_tests_properties(MODULE_FDE_${test} PROPERTIES LABELS "fde;python")
 endforeach()
+set_property(TEST MODULE_FDE_makefile_sources APPEND PROPERTY LABELS build)

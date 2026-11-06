@@ -68,6 +68,11 @@ VPATH=./src_global:\
 ./source_hamilt/module_hcontainer:\
 ./source_lcao:\
 ./source_lcao/module_rt:\
+./source_lcao/module_fde/embedding:\
+./source_lcao/module_fde/coupling:\
+./source_lcao/module_fde/io:\
+./source_lcao/module_fde/orchestration:\
+./source_lcao/module_fde/runtime:\
 ./source_lcao/module_deepks:\
 ./source_lcao/module_dftu:\
 ./source_lcao/module_deltaspin:\
@@ -125,6 +130,7 @@ ${OBJS_ELECSTAT_LCAO}\
 ${OBJS_ESOLVER_LCAO}\
 ${OBJS_GINT}\
 ${OBJS_HAMILT_LCAO}\
+${OBJS_FDE}\
 ${OBJS_HSOLVER_LCAO}\
 ${OBJS_HCONTAINER}\
 ${OBJS_ORBITAL}\
@@ -484,6 +490,48 @@ OBJS_HAMILT_LCAO=hamilt_lcao.o\
     setup_dftu_lcao.o\
     operator_fs_utils.o\
 
+OBJS_FDE=fde_abacus_gamma_backend.o\
+    fde_abacus_gint_integrator.o\
+    fde_analytic_force.o\
+    fde_ao_projection.o\
+    fde_coupling_policy.o\
+    fde_coupling_provider_factory.o\
+    fde_diabatic_assembler.o\
+    fde_diabatic_postprocess.o\
+    fde_electronic_coupling.o\
+    fde_linearized_state.o\
+    fde_multistate_solver.o\
+    fde_grid_partition.o\
+    fde_lcao_driver.o\
+    fde_libxc_pbe_provider.o\
+    fde_one_way_scf.o\
+    fde_potential_evaluator.o\
+    fde_projected_hamiltonian.o\
+    fde_pw_grid_differential.o\
+    fde_pw_pool_collectives.o\
+    fde_semilocal_functional.o\
+    fde_spin_density.o\
+    fde_subspace_solver.o\
+    fde_xc_policy.o\
+    pot_fde.o\
+    fde_density_artifact.o\
+    fde_determinant_artifact.o\
+    fde_fragment_artifact.o\
+    fde_kpoint_band_artifact.o\
+    fde_energy_ledger.o\
+    fde_finite_difference.o\
+    fde_freeze_thaw.o\
+    fde_multi_fragment_energy.o\
+    fde_multi_fragment_freeze_thaw.o\
+    fde_pes_scan.o\
+    fde_runtime_config.o\
+    fde_session.o\
+    fde_session_contract.o\
+    fde_session_protocol.o\
+    fde_solver_policy.o\
+    fde_state.o\
+    fde_warm_start.o
+
 OBJS_HCONTAINER=base_matrix.o\
     atom_pair.o\
     hcontainer.o\
@@ -788,6 +836,7 @@ OBJS_IO=module_parameter/input_conv.o\
     module_parameter/read_inp_estruc.o\
     module_parameter/read_inp_relax.o\
     module_parameter/read_input_item_md.o\
+    module_parameter/read_input_item_fde.o\
     module_parameter/read_inp_ofdft.o\
     module_parameter/read_input_item_sdft.o\
     module_parameter/read_inp_tddft.o\
