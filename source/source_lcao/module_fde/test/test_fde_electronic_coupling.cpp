@@ -351,6 +351,56 @@ TEST(FdeComplexElectronicCoupling, RealGammaAndZeroOverlapLimitsAgree)
     EXPECT_NEAR(zero_pair.eigenvalues_ry[1], 1.5, 1.0e-12);
 }
 
+TEST(FdeElectronicCoupling, PreservesSmallCouplingAcrossLargeEnergyZeroShifts)
+{
+    const double large_shift = std::ldexp(1.0, 40);
+    const double gap = std::sqrt(39.0) / 12.0;
+    for (const double shift : {0.0, large_shift, -large_shift})
+    {
+        const double first = shift + 0.125;
+        const double second = shift - 0.125;
+        const double h12 = 0.5 * shift + 0.375;
+        const auto pair = fde::ElectronicCoupling::orthogonalize_pair(
+            first, second, 0.5, h12, 1.0e-10);
+        // det(H_res-e*S)=3*e^2/4+3*e/8-5/32; V=3/8/(1-1/4).
+        const double lower = shift - 0.25 - gap;
+        const double upper = shift - 0.25 + gap;
+        const double root_tolerance = shift == 0.0 ? 1.0e-12 : 0.000244140625;
+        EXPECT_NEAR(pair.coupling_ry, 0.5, 1.0e-12);
+        EXPECT_NEAR(pair.eigenvalues_ry[0], lower, root_tolerance);
+        EXPECT_NEAR(pair.eigenvalues_ry[1], upper, root_tolerance);
+        EXPECT_LE(pair.maximum_residual, 1.0e-12);
+        EXPECT_LE(pair.maximum_metric_error, 1.0e-12);
+    }
+}
+
+TEST(FdeComplexElectronicCoupling, PreservesSmallComplexCouplingAcrossLargeEnergyZeroShifts)
+{
+    const double large_shift = std::ldexp(1.0, 40);
+    const double gap = std::sqrt(46.0) / 12.0;
+    const Complex overlap(0.0, 0.5);
+    const double expected_real = std::sqrt(3.0) / 4.0;
+    const Complex expected_v(expected_real, 1.0 / 3.0);
+    for (const double shift : {0.0, large_shift, -large_shift})
+    {
+        const double first = shift + 0.125;
+        const double second = shift - 0.125;
+        const double imaginary = 0.5 * shift + 0.25;
+        const Complex h12(0.375, imaginary);
+        const auto pair = fde::ComplexElectronicCoupling::orthogonalize_pair(
+            first, second, overlap, h12, 1.0e-10);
+        // det(H_res-e*S)=3*e^2/4+e/4-7/32; roots=(-2 +/- sqrt(46))/12.
+        const double lower = shift - 1.0 / 6.0 - gap;
+        const double upper = shift - 1.0 / 6.0 + gap;
+        const double root_tolerance = shift == 0.0 ? 1.0e-12 : 0.000244140625;
+        expect_complex_near(pair.coupling_ry, expected_v);
+        EXPECT_NEAR(pair.eigenvalues_ry[0], lower, root_tolerance);
+        EXPECT_NEAR(pair.eigenvalues_ry[1], upper, root_tolerance);
+        EXPECT_LE(pair.maximum_residual, 1.0e-12);
+        EXPECT_LE(pair.maximum_metric_error, 1.0e-12);
+    }
+}
+
 TEST(FdeComplexElectronicCoupling, IsInvariantUnderComplexAoBasisTransformation)
 {
     auto first = determinant("D", {1.0, 0.0});

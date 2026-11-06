@@ -84,6 +84,7 @@ struct ScalarOrthogonalizedPair
     std::vector<double> eigenvalues_ry;
     std::vector<Scalar> coefficients;
     Scalar coupling_ry;
+    // Evaluate the equivalent centered problem to avoid cancellation of a large common energy zero.
     double maximum_residual;
     double maximum_metric_error;
 };

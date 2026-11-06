@@ -525,16 +525,19 @@ ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize
     const double diagonal = root_sum / (2.0 * root_product);
     // This form avoids subtracting nearly equal roots at the Gamma/zero-overlap limit.
     const double off_diagonal_scale = -1.0 / (root_product * root_sum);
+    const double energy_center = 0.5 * first_energy_ry + 0.5 * second_energy_ry;
+    const Scalar centered_coupling = hamiltonian_coupling_ry - energy_center * overlap;
     const Scalar conjugate_overlap = conjugate_scalar(overlap);
-    const Scalar conjugate_hamiltonian = conjugate_scalar(hamiltonian_coupling_ry);
+    const Scalar conjugate_hamiltonian = conjugate_scalar(centered_coupling);
     const std::vector<Scalar> inverse_root = {diagonal,
                                               off_diagonal_scale * conjugate_overlap,
                                               off_diagonal_scale * overlap,
                                               diagonal};
-    const std::vector<Scalar> hamiltonian = {first_energy_ry,
+    // Transform H-E0*S so a common energy zero cannot swamp the small off-diagonal coupling.
+    const std::vector<Scalar> hamiltonian = {first_energy_ry - energy_center,
                                              conjugate_hamiltonian,
-                                             hamiltonian_coupling_ry,
-                                             second_energy_ry};
+                                             centered_coupling,
+                                             second_energy_ry - energy_center};
     ScalarOrthogonalizedPair<Scalar> result;
     result.hamiltonian_ry.assign(4, 0.0);
     for (std::size_t column = 0; column < 2; ++column)
@@ -565,7 +568,9 @@ ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize
     const double half_difference = 0.5 * first_diagonal - 0.5 * second_diagonal;
     const double coupling_magnitude = std::abs(result.coupling_ry);
     const double gap = std::hypot(half_difference, coupling_magnitude);
-    result.eigenvalues_ry = {midpoint - gap, midpoint + gap};
+    const std::vector<double> centered_eigenvalues = {midpoint - gap, midpoint + gap};
+    result.eigenvalues_ry = {energy_center + centered_eigenvalues[0],
+                             energy_center + centered_eigenvalues[1]};
     if (!std::isfinite(result.eigenvalues_ry[0]) || !std::isfinite(result.eigenvalues_ry[1]))
     {
         throw std::runtime_error("FDE two-state eigenvalues are non-finite");
@@ -628,7 +633,7 @@ ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize
                 hc += hamiltonian[row + column * 2] * result.coefficients[column + root * 2];
                 sc += state_overlap[row + column * 2] * result.coefficients[column + root * 2];
             }
-            const Scalar residual = hc - result.eigenvalues_ry[root] * sc;
+            const Scalar residual = hc - centered_eigenvalues[root] * sc;
             const double error = std::abs(residual);
             if (!std::isfinite(error))
             {
@@ -655,6 +660,16 @@ ScalarOrthogonalizedPair<Scalar> ScalarElectronicCoupling<Scalar>::orthogonalize
                 throw std::runtime_error("FDE two-state metric normalization is non-finite");
             }
             result.maximum_metric_error = std::max(result.maximum_metric_error, error);
+        }
+    }
+    for (std::size_t state = 0; state < 2; ++state)
+    {
+        const std::size_t index = state + state * 2;
+        result.hamiltonian_ry[index] += energy_center;
+        const double magnitude = std::abs(result.hamiltonian_ry[index]);
+        if (!std::isfinite(magnitude))
+        {
+            throw std::runtime_error("FDE orthogonalized Hamiltonian is non-finite");
         }
     }
     return result;
