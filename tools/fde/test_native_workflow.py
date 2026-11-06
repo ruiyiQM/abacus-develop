@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import json
 import os
 from pathlib import Path
 import signal
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 PATH = (Path(__file__).resolve().parents[2]
@@ -33,6 +35,32 @@ def reports():
 
 
 class NativeWorkflowComparisonTest(unittest.TestCase):
+    def test_rejects_nonfinite_or_nonpositive_workflow_wall_budget(self):
+        for value in ("0", "-1", "nan", "inf"):
+            run = subprocess.run([sys.executable, str(PATH), "/unused", "/unused", "--case", "molecule_rks",
+                                  "--workflow-timeout", value], text=True, capture_output=True, timeout=10)
+            self.assertEqual(run.returncode, 2)
+            self.assertIn("finite and positive", run.stderr)
+
+    def test_mpi_children_share_the_explicit_launcher_inclusive_wall_budget(self):
+        data = iter(reports())
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            output = Path(command[command.index("--output") + 1])
+            output.write_text(json.dumps(next(data)))
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        arguments = [str(PATH), "/unused", "/unused", "--case", "molecule_rks",
+                     "--workflow-timeout", "240", "--launcher", "unused", "{ranks}"]
+        with mock.patch.object(sys, "argv", arguments), mock.patch.object(native.subprocess, "run", side_effect=run), mock.patch("builtins.print"):
+            self.assertEqual(native.main(), 0)
+        self.assertEqual(len(calls), 3)
+        for command, kwargs in calls:
+            self.assertEqual(command[command.index("--workflow-timeout") + 1], "240.0")
+            self.assertEqual(kwargs["timeout"], 260.0)
+
     def test_timeout_terminates_the_workflow_process_group(self):
         with tempfile.TemporaryDirectory() as directory:
             pid_file = Path(directory) / "child.pid"
@@ -90,7 +118,7 @@ class NativeWorkflowComparisonTest(unittest.TestCase):
             native.compare_mpi_reports(data)
 
     def test_rejects_incomplete_execution_or_mixed_input_binary_and_resources(self):
-        for target in ("passed", "native_processes", "binary_sha256", "resources_sha256", "input_sha256"):
+        for target in ("passed", "native_processes", "binary_sha256", "resources_sha256", "input_sha256", "workflow_timeout_seconds"):
             with self.subTest(target=target):
                 data = reports()
                 data[1][target] = False if target == "passed" else "mismatch"

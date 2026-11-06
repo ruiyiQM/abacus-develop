@@ -465,24 +465,33 @@ foreach(suite IN ITEMS regression_runner workflow_metrics workflow_complex sessi
 endforeach()
 
 if(ENABLE_LIBXC)
+  set(FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS 120 CACHE STRING
+      "Whole-workflow wall time for native FDE regression, including launcher overhead")
+  if(NOT FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS must be a positive integer")
+  endif()
+  math(EXPR fde_native_timeout "${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS} + 60")
+  math(EXPR fde_native_mpi_timeout "3 * (${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS} + 20)")
   foreach(case IN ITEMS molecule_uks molecule_rks periodic_gamma_uks
       periodic_hole_gamma_uks periodic_hole_twist_uks periodic_hole_boundary_consistency)
     add_test(
       NAME MODULE_FDE_native_workflow_${case}
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py
         $<TARGET_FILE:${ABACUS_BIN_NAME}> ${CMAKE_SOURCE_DIR} --case ${case}
+        --workflow-timeout ${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS}
     )
-    set_tests_properties(MODULE_FDE_native_workflow_${case} PROPERTIES TIMEOUT 180)
+    set_tests_properties(MODULE_FDE_native_workflow_${case} PROPERTIES TIMEOUT ${fde_native_timeout})
     if(ENABLE_MPI AND NOT case STREQUAL "periodic_hole_boundary_consistency")
       add_test(
         NAME MODULE_FDE_native_workflow_${case}_mpi_consistency
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fde_native_workflow.py
           $<TARGET_FILE:${ABACUS_BIN_NAME}> ${CMAKE_SOURCE_DIR} --case ${case}
+          --workflow-timeout ${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS}
           --launcher ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} {ranks}
           ${MPIEXEC_PREFLAGS} $<TARGET_FILE:${ABACUS_BIN_NAME}> ${MPIEXEC_POSTFLAGS}
       )
       set_tests_properties(MODULE_FDE_native_workflow_${case}_mpi_consistency PROPERTIES
-        TIMEOUT 420 PROCESSORS 4)
+        TIMEOUT ${fde_native_mpi_timeout} PROCESSORS 4)
     endif()
   endforeach()
 endif()

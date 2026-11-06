@@ -165,6 +165,7 @@ def compare_mpi_reports(reports):
         assert report["passed"] and report["native_processes"] == ranks, report
         for key in ("binary_sha256", "resources_sha256", "source_files_sha256", "input_sha256", "controls"):
             assert report[key] == reports[0][key], key
+        assert report.get("workflow_timeout_seconds", 120.0) == reports[0].get("workflow_timeout_seconds", 120.0)
         current = values(report)
         assert current.keys() == reference.keys()
         for key, value in current.items():
@@ -237,9 +238,13 @@ def main():
     parser.add_argument("--case", choices=CASES, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source-commit", help="Git SHA for a verified source archive without .git")
+    parser.add_argument("--workflow-timeout", type=float, default=120.0,
+                        help="whole-workflow wall time including launcher overhead; SCF/FT controls stay fixed")
     parser.add_argument("--launcher", nargs=argparse.REMAINDER, default=[],
                         help="complete fragment command including the ABACUS executable")
     args = parser.parse_args()
+    if not math.isfinite(args.workflow_timeout) or args.workflow_timeout <= 0:
+        parser.error("--workflow-timeout must be finite and positive")
     boundary = args.case == "periodic_hole_boundary_consistency"
     if "{ranks}" in args.launcher or boundary:
         if boundary and args.launcher:
@@ -254,11 +259,13 @@ def main():
                 output = Path(directory) / f"{case}-rank{ranks}.json"
                 launcher = [item.replace("{ranks}", str(ranks)) for item in args.launcher]
                 command = [sys.executable, str(Path(__file__).resolve()), str(args.executable),
-                           str(args.repository), "--case", case, "--output", str(output)]
+                           str(args.repository), "--case", case, "--output", str(output),
+                           "--workflow-timeout", str(args.workflow_timeout)]
                 if args.source_commit:
                     command += ["--source-commit", args.source_commit]
                 command += ["--launcher"] + launcher
-                completed = subprocess.run(command, text=True, capture_output=True, timeout=140)
+                completed = subprocess.run(command, text=True, capture_output=True,
+                                           timeout=args.workflow_timeout + 20)
                 if not output.is_file():
                     raise RuntimeError(completed.stdout[-2000:] + completed.stderr[-2000:])
                 reports.append(json.loads(output.read_text()))
@@ -287,11 +294,13 @@ def main():
               "version": subprocess.check_output([str(executable), "--version"], text=True, timeout=10).strip(),
               "launcher": args.launcher, "postprocess_ranks": 1, "kpar": 1,
               "omp_threads": os.environ.get("OMP_NUM_THREADS"),
+              "workflow_timeout_seconds": args.workflow_timeout,
               "test_script_sha256": sha256(Path(__file__)),
               "thresholds": {"particle_error": 1e-8, "trace_error": 1e-8,
                              "reciprocity_error": 1e-8, "maximum_local_bytes": 200 * 1024 ** 2}}
     report["entry_command"] = [sys.executable, str(Path(__file__).resolve()), str(executable),
-                               str(repository), "--case", args.case]
+                               str(repository), "--case", args.case,
+                               "--workflow-timeout", str(args.workflow_timeout)]
     if args.source_commit:
         report["entry_command"] += ["--source-commit", args.source_commit]
     if args.launcher:
@@ -321,7 +330,7 @@ def main():
                 if "hole" in args.case else "legacy charged-pair developer fixture")
             command = [sys.executable, str(repository / "tools/fde/fde_workflow.py"), "run", str(path)]
             report["command"] = command
-            run = run_bounded(command, 120)
+            run = run_bounded(command, args.workflow_timeout)
             report["returncode"] = run.returncode
             assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
             work = root / "work/pair"
