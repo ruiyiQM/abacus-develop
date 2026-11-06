@@ -306,13 +306,16 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
         "MODULE_FDE_cell_volume": ["ENABLE_LIBXC"],
         "MODULE_FDE_output_failure": ["ENABLE_LIBXC"],
         "MODULE_FDE_output_failure_2rank": ["ENABLE_LIBXC", "ENABLE_MPI"],
+        "MODULE_FDE_output_failure_4rank": ["ENABLE_LIBXC", "ENABLE_MPI"],
         "MODULE_FDE_session_json": ["ENABLE_LIBXC", "ENABLE_JSON"],
         "MODULE_FDE_session_json_2rank": ["ENABLE_LIBXC", "ENABLE_JSON", "ENABLE_MPI"],
     }
-    for case in ("molecule_uks", "molecule_rks", "periodic_gamma_uks"):
+    for case in ("molecule_uks", "molecule_rks", "periodic_gamma_uks",
+                 "periodic_hole_gamma_uks", "periodic_hole_twist_uks"):
         name = "MODULE_FDE_native_workflow_" + case
         conditional[name] = ["ENABLE_LIBXC"]
         conditional[name + "_mpi_consistency"] = ["ENABLE_LIBXC", "ENABLE_MPI"]
+    conditional["MODULE_FDE_native_workflow_periodic_hole_boundary_consistency"] = ["ENABLE_LIBXC"]
     unavailable = []
     missing = []
     for name, requirements in conditional.items():

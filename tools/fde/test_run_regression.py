@@ -83,8 +83,13 @@ class DurableRegressionTest(unittest.TestCase):
                            for entry in result["unavailable_tests"]}
             self.assertIn("ENABLE_JSON=OFF", unavailable["MODULE_FDE_session_json"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_session_json_2rank"])
+            self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_output_failure_4rank"])
+            self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_hole_twist_uks_mpi_consistency"])
             self.assertFalse(result["passed"])
             self.assertIn("MODULE_FDE_cell_volume", result["missing_tests"])
+            self.assertIn("MODULE_FDE_native_workflow_periodic_hole_gamma_uks", result["missing_tests"])
+            self.assertIn("MODULE_FDE_native_workflow_periodic_hole_twist_uks", result["missing_tests"])
+            self.assertIn("MODULE_FDE_native_workflow_periodic_hole_boundary_consistency", result["missing_tests"])
 
     def test_ctest_preserves_native_workflow_metrics_and_rejects_missing_reports(self):
         if shutil.which("ctest") is None:
