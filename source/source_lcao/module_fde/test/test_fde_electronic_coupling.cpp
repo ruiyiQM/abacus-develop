@@ -1,4 +1,5 @@
 #include "../coupling/fde_electronic_coupling.h"
+#include "../coupling/fde_transition_energy_components.h"
 
 #include <gtest/gtest.h>
 
@@ -51,16 +52,9 @@ class OneBodyEnergy : public fde::ComplexTransitionEnergyProvider
                         const fde::ComplexSpinTransitionDensityMatrix& density,
                         const std::size_t dimension) const override
     {
-        const std::size_t matrix_size = dimension * dimension;
-        EXPECT_EQ(alpha_h_.size(), matrix_size);
-        Complex result = 0.0;
+        Complex result = fde::one_body_energy_ry(density.alpha, alpha_h_, dimension);
         for (std::size_t column = 0; column < dimension; ++column)
         {
-            for (std::size_t row = 0; row < dimension; ++row)
-            {
-                result += density.alpha[row + column * dimension]
-                          * alpha_h_[column + row * dimension];
-            }
             result += 3.0 * density.beta[column + column * dimension];
         }
         return result;

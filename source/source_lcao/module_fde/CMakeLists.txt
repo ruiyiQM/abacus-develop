@@ -9,6 +9,7 @@ set(FDE_LCAO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_diabatic_postprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_electronic_coupling.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_linearized_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_transition_energy_components.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/coupling/fde_multistate_solver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_grid_partition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/embedding/fde_lcao_driver.cpp

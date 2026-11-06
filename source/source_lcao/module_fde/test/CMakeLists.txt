@@ -104,6 +104,7 @@ AddTest(
     ../coupling/fde_diabatic_postprocess.cpp
     ../coupling/fde_electronic_coupling.cpp
     ../coupling/fde_linearized_state.cpp
+    ../coupling/fde_transition_energy_components.cpp
     ../coupling/fde_multistate_solver.cpp
     ../runtime/fde_runtime_config.cpp
     ../embedding/fde_semilocal_functional.cpp
@@ -338,9 +339,16 @@ AddTest(
   TARGET MODULE_FDE_electronic_coupling
   SOURCES fde_electronic_coupling_test.cpp
     test_fde_electronic_coupling.cpp
+    ../coupling/fde_transition_energy_components.cpp
     ../embedding/fde_ao_projection.cpp
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_electronic_coupling.cpp
+)
+
+AddTest(
+  TARGET MODULE_FDE_transition_energy_components
+  SOURCES test_fde_transition_energy_components.cpp
+    ../coupling/fde_transition_energy_components.cpp
 )
 
 AddTest(
@@ -351,6 +359,7 @@ AddTest(
     ../io/fde_determinant_artifact.cpp
     ../coupling/fde_electronic_coupling.cpp
     ../coupling/fde_linearized_state.cpp
+    ../coupling/fde_transition_energy_components.cpp
     ../coupling/fde_multistate_solver.cpp
 )
 

@@ -1,4 +1,5 @@
 #include "source_lcao/module_fde/coupling/fde_linearized_state.h"
+#include "source_lcao/module_fde/coupling/fde_transition_energy_components.h"
 
 #include <algorithm>
 #include <cmath>
@@ -94,27 +95,6 @@ std::vector<Scalar> read_matrix(std::istream& input,
     return result;
 }
 
-template <typename Scalar>
-Scalar contraction(const std::vector<Scalar>& density,
-                   const std::vector<Scalar>& hamiltonian,
-                   const std::size_t dimension)
-{
-    if (density.size() != dimension * dimension
-        || hamiltonian.size() != dimension * dimension)
-    {
-        throw std::invalid_argument("FDE transition-energy contraction dimensions are inconsistent");
-    }
-    Scalar result = 0.0;
-    for (std::size_t column = 0; column < dimension; ++column)
-    {
-        for (std::size_t row = 0; row < dimension; ++row)
-        {
-            result += density[row + column * dimension]
-                      * hamiltonian[column + row * dimension];
-        }
-    }
-    return result;
-}
 
 } // namespace
 
@@ -329,8 +309,8 @@ Scalar ScalarLinearizedTransitionEnergy<Scalar>::evaluate_ry(
             = transition_density.beta[index] - self.density_matrix.beta[index];
     }
     return state->reference_energy_ry
-           + contraction(delta_alpha, state->hamiltonian_alpha_ry, ao_dimension)
-           + contraction(delta_beta, state->hamiltonian_beta_ry, ao_dimension);
+           + one_body_energy_ry(delta_alpha, state->hamiltonian_alpha_ry, ao_dimension)
+           + one_body_energy_ry(delta_beta, state->hamiltonian_beta_ry, ao_dimension);
 }
 
 template class ScalarLinearizedStateArtifactIO<double>;

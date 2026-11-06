@@ -500,6 +500,7 @@ OBJS_FDE=fde_abacus_gamma_backend.o\
     fde_diabatic_postprocess.o\
     fde_electronic_coupling.o\
     fde_linearized_state.o\
+    fde_transition_energy_components.o\
     fde_multistate_solver.o\
     fde_grid_partition.o\
     fde_lcao_driver.o\
