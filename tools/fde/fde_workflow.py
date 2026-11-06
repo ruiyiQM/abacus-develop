@@ -32,6 +32,33 @@ class WorkflowError(RuntimeError):
     pass
 
 
+def _artifact_scalar(token: str, complex_values: bool):
+    if complex_values and token.startswith("(") and token.endswith(")"):
+        parts = token[1:-1].split(",")
+        if len(parts) != 2:
+            raise ValueError("complex artifact value requires real and imaginary components")
+        value = complex(float(parts[0]), float(parts[1]))
+    else:
+        value = float(token)
+        if complex_values:
+            value = complex(value, 0.0)
+    if not math.isfinite(abs(value)):
+        raise ValueError("non-finite artifact value")
+    return value
+
+
+def _scalar_text(value) -> str:
+    if not math.isfinite(abs(value)):
+        raise WorkflowError("cannot write a non-finite FDE artifact value")
+    if isinstance(value, complex):
+        return f"({value.real:.17g},{value.imag:.17g})"
+    return format(value, ".17g")
+
+
+def _json_scalar(value):
+    return [value.real, value.imag] if isinstance(value, complex) else value
+
+
 def canonical_kedf_name(value: object) -> str:
     name = _token(value, "kedf").lower()
     aliases = {
@@ -256,7 +283,13 @@ def validate_spec(spec: Mapping[str, object]) -> None:
     if spin_mode not in ("rks", "uks"):
         raise WorkflowError("spin_mode must be rks or uks")
     if int(controls.get("kpar", 1)) != 1:
-        raise WorkflowError("the Gamma-point FDE workflow currently requires kpar 1")
+        raise WorkflowError("the FDE workflow currently requires kpar 1")
+    if "boundary_twist" in controls:
+        twist = controls["boundary_twist"]
+        if (not isinstance(twist, list) or len(twist) != 3
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) or not -0.5 <= value < 0.5 for value in twist)):
+            raise WorkflowError("boundary_twist requires three finite reciprocal-cell fractions in [-0.5, 0.5)")
     retained_cycles = controls.get("retain_completed_cycles", 0)
     if (isinstance(retained_cycles, bool)
             or not isinstance(retained_cycles, int)
@@ -1003,52 +1036,97 @@ def apply_outer_mixing(
 
 
 def read_fragment(path: Path) -> Dict[str, object]:
-    lines = [line.split() for line in path.read_text(encoding="utf-8").splitlines() if line.split()]
-    if not lines or lines[0] != ["FDE_FRAGMENT_SCF_ARTIFACT", "1"]:
-        raise WorkflowError(f"unsupported fragment artifact {path}")
-    result: Dict[str, object] = {"alpha": [], "beta": []}
-    spin = None
-    scalar_names = {
-        "SUBSYSTEM_TOTAL_ENERGY_RY", "ION_ION_ENERGY_RY",
-        "HARTREE_CROSS_ENERGY_RY", "NONADDITIVE_KINETIC_ENERGY_RY",
-        "NONADDITIVE_XC_ENERGY_RY",
-    }
-    for fields in lines[1:]:
-        key = fields[0]
-        if key in ("ALPHA", "BETA"):
-            spin = key.lower()
-            result[f"{spin}_count"] = int(fields[1])
-        elif key == "ORBITAL":
-            if spin is None:
-                raise WorkflowError("ORBITAL record precedes its spin header")
-            result[spin].append({"fragment": fields[1],
-                                 "energy": float(fields[2]),
-                                 "coefficients": [float(value) for value in fields[3:]]})
-        elif key in ("STATE", "FRAGMENT", "GEOMETRY", "ORBITAL_BASIS", "DENSITY_PATH"):
-            result[key.lower()] = fields[1]
-        elif key in ("CYCLE", "AO_DIMENSION"):
-            result[key.lower()] = int(fields[1])
-        elif key == "SCF_CONVERGED":
-            flag = int(fields[1])
-            if flag not in (0, 1):
-                raise WorkflowError(f"invalid SCF convergence flag in {path}")
-            result["scf_converged"] = flag == 1
-        elif key == "ACTIVE_ORBITALS":
-            result["active_orbitals"] = [int(value) for value in fields[2:]]
-        elif key in ("AO_OVERLAP", "HAMILTONIAN_ALPHA_RY", "HAMILTONIAN_BETA_RY"):
-            values = [float(value) for value in fields[2:]]
-            if int(fields[1]) != len(values):
-                raise WorkflowError(f"{key} length is inconsistent")
-            result[key.lower()] = values
-        elif key in scalar_names:
-            result[key.lower()] = float(fields[1])
-    dimension = int(result.get("ao_dimension", 0))
-    if result.get("scf_converged") is not True:
-        raise WorkflowError(f"FDE fragment is not a converged SCF result: {path}")
-    if dimension <= 0 or any(len(orbital["coefficients"]) != dimension
-                             for name in ("alpha", "beta") for orbital in result[name]):
-        raise WorkflowError(f"invalid occupied-orbital dimensions in {path}")
-    return result
+    try:
+        lines = [line.split() for line in path.read_text(encoding="utf-8").splitlines() if line.split()]
+        if not lines or lines[0] not in (["FDE_FRAGMENT_SCF_ARTIFACT", "1"],
+                                         ["FDE_FRAGMENT_SCF_ARTIFACT", "2"]):
+            raise WorkflowError(f"unsupported fragment artifact {path}")
+        version = int(lines[0][1])
+        footer = ["END_FDE_FRAGMENT_SCF_ARTIFACT"]
+        valid_footers = (footer,) if version == 2 else (footer, ["END"])
+        if lines[-1] not in valid_footers:
+            raise WorkflowError(f"incomplete fragment artifact {path}")
+        complex_values = version == 2
+        result: Dict[str, object] = {"alpha": [], "beta": [], "artifact_version": version}
+        spin = None
+        seen = set()
+        scalar_names = {"SUBSYSTEM_TOTAL_ENERGY_RY", "ION_ION_ENERGY_RY", "HARTREE_CROSS_ENERGY_RY",
+                        "NONADDITIVE_KINETIC_ENERGY_RY", "NONADDITIVE_XC_ENERGY_RY"}
+        matrices = {"AO_OVERLAP", "HAMILTONIAN_ALPHA_RY", "HAMILTONIAN_BETA_RY"}
+        for fields in lines[1:-1]:
+            key = fields[0]
+            if key != "ORBITAL":
+                if key in seen:
+                    raise WorkflowError(f"duplicate {key} in {path}")
+                seen.add(key)
+            if key in ("ALPHA", "BETA"):
+                spin = key.lower()
+                result[f"{spin}_count"] = int(fields[1])
+            elif key == "ORBITAL":
+                if spin is None:
+                    raise WorkflowError("ORBITAL record precedes its spin header")
+                energy = _artifact_scalar(fields[2], False)
+                result[spin].append({"fragment": fields[1], "energy": energy,
+                                     "coefficients": [_artifact_scalar(value, complex_values)
+                                                      for value in fields[3:]]})
+            elif key in ("STATE", "FRAGMENT", "GEOMETRY", "ORBITAL_BASIS", "DENSITY_PATH", "RESOURCES"):
+                if len(fields) != 2:
+                    raise WorkflowError(f"invalid {key} in {path}")
+                result[key.lower()] = fields[1]
+            elif key in ("CYCLE", "AO_DIMENSION"):
+                result[key.lower()] = int(fields[1])
+            elif key == "BOUNDARY_TWIST":
+                result["boundary_twist"] = [_artifact_scalar(value, False) for value in fields[1:]]
+            elif key == "SCF_CONVERGED":
+                flag = int(fields[1])
+                if flag not in (0, 1):
+                    raise WorkflowError(f"invalid SCF convergence flag in {path}")
+                result["scf_converged"] = flag == 1
+            elif key == "ACTIVE_ORBITALS":
+                result["active_orbitals"] = [int(value) for value in fields[2:]]
+                if int(fields[1]) != len(result["active_orbitals"]):
+                    raise WorkflowError(f"ACTIVE_ORBITALS length is inconsistent in {path}")
+            elif key in matrices:
+                values = [_artifact_scalar(value, complex_values) for value in fields[2:]]
+                if int(fields[1]) != len(values):
+                    raise WorkflowError(f"{key} length is inconsistent in {path}")
+                result[key.lower()] = values
+            elif key in scalar_names:
+                result[key.lower()] = _artifact_scalar(fields[1], False)
+            else:
+                raise WorkflowError(f"unknown fragment artifact record {key} in {path}")
+        dimension = int(result.get("ao_dimension", 0))
+        if result.get("scf_converged") is not True:
+            raise WorkflowError(f"FDE fragment is not a converged SCF result: {path}")
+        required = {"state", "fragment", "geometry", "orbital_basis", "density_path", "cycle", "active_orbitals"}
+        if not required.issubset(result) or any(name.lower() not in result for name in scalar_names):
+            raise WorkflowError(f"fragment artifact is missing metadata or energies: {path}")
+        if (dimension <= 0 or any(len(result[name.lower()]) != dimension * dimension for name in matrices)
+                or any(result.get(f"{spin}_count") != len(result[spin])
+                       or len(result[spin]) > dimension for spin in ("alpha", "beta"))
+                or any(len(orbital["coefficients"]) != dimension
+                       or orbital["fragment"] != result["fragment"]
+                       for spin in ("alpha", "beta") for orbital in result[spin])):
+            raise WorkflowError(f"invalid occupied-orbital or matrix dimensions in {path}")
+        active = result["active_orbitals"]
+        if not active or active != sorted(set(active)) or active[0] < 0 or active[-1] >= dimension:
+            raise WorkflowError(f"invalid active AO ownership list in {path}")
+        if complex_values:
+            twist = result.get("boundary_twist", [])
+            if len(twist) != 3 or any(not -0.5 <= value < 0.5 for value in twist) or not result.get("resources"):
+                raise WorkflowError(f"invalid finite-boundary/resource identity in {path}")
+        elif "boundary_twist" in result or "resources" in result:
+            raise WorkflowError(f"real V1 fragment cannot carry complex boundary metadata: {path}")
+        return result
+    except (OSError, ValueError, IndexError, KeyError, TypeError) as error:
+        raise WorkflowError(f"invalid fragment artifact {path}: {error}") from error
+
+
+def _matching_fragment_context(reference: Mapping[str, object], fragment: Mapping[str, object]) -> None:
+    for key in ("artifact_version", "geometry", "orbital_basis", "ao_dimension", "ao_overlap",
+                "boundary_twist", "resources"):
+        if reference.get(key) != fragment.get(key):
+            raise WorkflowError(f"final fragment SCF artifacts have incompatible {key}")
 
 
 def canonical_two_fragment_energy(artifacts: Sequence[Mapping[str, object]],
@@ -1178,6 +1256,8 @@ def write_runtime_config(path: Path,
             lines.append(f"FROZEN_DENSITY {label} "
                          f"{_absolute_token(densities[label], 'frozen density path')}")
     controls = dict(spec.get("controls", {}))
+    if "boundary_twist" in controls:
+        lines.append("BOUNDARY_TWIST " + " ".join(_scalar_text(value) for value in controls["boundary_twist"]))
     update_order = controls.get("update_order", [fragment["label"] for fragment in fragments])
     lines.extend((f"OUTPUT_PREFIX {output_prefix}",
                   f"FRAGMENT_XC {canonical_fragment_xc_name(controls.get('fragment_xc', 'pbe'))}",
@@ -1213,45 +1293,49 @@ def compose_state(state_label: str,
                   energy_ry: float,
                   output_directory: Path) -> Dict[str, str]:
     fragments = [read_fragment(path) for path in fragment_paths]
+    if not fragments:
+        raise WorkflowError("final state requires fragment artifacts")
     reference = fragments[0]
     dimension = int(reference["ao_dimension"])
-    for fragment in fragments[1:]:
-        if (fragment["state"] != state_label
-                or fragment["geometry"] != reference["geometry"]
-                or fragment["orbital_basis"] != reference["orbital_basis"]
-                or fragment["ao_dimension"] != dimension
-                or fragment["ao_overlap"] != reference["ao_overlap"]):
-            raise WorkflowError("final fragment SCF artifacts are incompatible")
+    for fragment in fragments:
+        if fragment["state"] != state_label:
+            raise WorkflowError("final fragment SCF artifacts belong to another state")
+        _matching_fragment_context(reference, fragment)
+    version = int(reference["artifact_version"])
     determinant_path = output_directory / f"{state_label}.fde_determinant"
-    determinant_lines = ["FDE_DIABATIC_DETERMINANT 1",
-                         f"STATE {state_label}",
-                         f"GEOMETRY {reference['geometry']}",
-                         f"ORBITALS {reference['orbital_basis']}",
-                         f"AO_DIMENSION {dimension}"]
+    determinant_lines = [f"FDE_DIABATIC_DETERMINANT {version}", f"STATE {state_label}",
+                         f"GEOMETRY {reference['geometry']}", f"ORBITALS {reference['orbital_basis']}"]
+    boundary_lines = []
+    if version == 2:
+        boundary_lines = ["BOUNDARY_TWIST " + " ".join(_scalar_text(value) for value in reference["boundary_twist"]),
+                          f"RESOURCES {reference['resources']}"]
+        determinant_lines.extend(boundary_lines)
+    determinant_lines.append(f"AO_DIMENSION {dimension}")
     for spin in ("alpha", "beta"):
         orbitals = [orbital for fragment in fragments for orbital in fragment[spin]]
         determinant_lines.append(f"{spin.upper()} {len(orbitals)}")
         for orbital in orbitals:
             determinant_lines.append("ORBITAL " + str(orbital["fragment"]) + " "
-                                     + format(float(orbital["energy"]), ".17g") + " "
-                                     + " ".join(format(value, ".17g")
-                                                for value in orbital["coefficients"]))
+                                     + _scalar_text(orbital["energy"]) + " "
+                                     + " ".join(_scalar_text(value) for value in orbital["coefficients"]))
     determinant_lines.append("END")
     _atomic_text(determinant_path, "\n".join(determinant_lines) + "\n")
-
     matrix_size = dimension * dimension
-    average_alpha = [sum(float(fragment["hamiltonian_alpha_ry"][index]) for fragment in fragments)
+    average_alpha = [sum(fragment["hamiltonian_alpha_ry"][index] for fragment in fragments)
                      / len(fragments) for index in range(matrix_size)]
-    average_beta = [sum(float(fragment["hamiltonian_beta_ry"][index]) for fragment in fragments)
+    average_beta = [sum(fragment["hamiltonian_beta_ry"][index] for fragment in fragments)
                     / len(fragments) for index in range(matrix_size)]
     linear_path = output_directory / f"{state_label}.fde_linearized_state"
-    linear_lines = ["FDE_LINEARIZED_STATE 1", f"STATE {state_label}",
-                    f"GEOMETRY {reference['geometry']}", f"AO_DIMENSION {dimension}",
-                    f"REFERENCE_ENERGY_RY {energy_ry:.17g}",
-                    "HAMILTONIAN_ALPHA_RY " + str(matrix_size) + " "
-                    + " ".join(format(value, ".17g") for value in average_alpha),
-                    "HAMILTONIAN_BETA_RY " + str(matrix_size) + " "
-                    + " ".join(format(value, ".17g") for value in average_beta), "END"]
+    linear_lines = [f"FDE_LINEARIZED_STATE {version}", f"STATE {state_label}",
+                    f"GEOMETRY {reference['geometry']}"]
+    if version == 2:
+        linear_lines.append(f"ORBITALS {reference['orbital_basis']}")
+        linear_lines.extend(boundary_lines)
+    linear_lines.extend([f"AO_DIMENSION {dimension}", f"REFERENCE_ENERGY_RY {energy_ry:.17g}",
+                         "HAMILTONIAN_ALPHA_RY " + str(matrix_size) + " "
+                         + " ".join(_scalar_text(value) for value in average_alpha),
+                         "HAMILTONIAN_BETA_RY " + str(matrix_size) + " "
+                         + " ".join(_scalar_text(value) for value in average_beta), "END"])
     _atomic_text(linear_path, "\n".join(linear_lines) + "\n")
     return {"determinant": str(determinant_path.resolve()),
             "linearized_state": str(linear_path.resolve())}
@@ -1591,7 +1675,8 @@ def run_fragment_scf(
         mixing = fragment_mixing_parameters(
             controls, active_label, schedule.get("stage"), retry)
         input_parameters: Dict[str, object] = {
-            "calculation": "scf", "basis_type": "lcao", "gamma_only": 1,
+            "calculation": "scf", "basis_type": "lcao",
+            "gamma_only": 0 if "boundary_twist" in controls else 1,
             "nspin": spin_parameters["nspin"],
             "noncolin": 0, "lspinorb": 0, "symmetry": 0,
             "dft_functional": canonical_fragment_xc_name(
@@ -1608,6 +1693,10 @@ def run_fragment_scf(
             "scf_thr": float(schedule["density_tolerance"]),
         }
         input_parameters.update(mixing)
+        if "boundary_twist" in controls:
+            twist = " ".join(_scalar_text(value) for value in controls["boundary_twist"])
+            (job_directory / "KPT").write_text(f"K_POINTS\n1\nDirect\n{twist} 1\n", encoding="utf-8")
+            input_parameters["smearing_method"] = "fixed"
         patch_input(job_directory / "INPUT", input_parameters)
         log_path = job_directory / "fde_abacus.log"
         environment = dict(os.environ)
@@ -1629,9 +1718,9 @@ def run_fragment_scf(
             }
             launch_metrics.update(read_abacus_scf_metrics(job_directory, None))
         else:
-            signature = json.dumps(input_parameters,
-                                   sort_keys=True,
-                                   separators=(",", ":"))
+            signature = json.dumps({"input": input_parameters,
+                                    "boundary_twist": controls.get("boundary_twist")},
+                                   sort_keys=True, separators=(",", ":"))
             request_id = f"cycle-{cycle:03d}-{active_label}-retry-{retry:02d}"
             launch_metrics = session_pool.execute(
                 active_label,
@@ -1716,12 +1805,20 @@ def run_fragment_scf(
         "session_reused": any(bool(item.get("session_reused", False))
                               for item in attempts),
     }
+    fragment_data = read_fragment(fragment_path) if inner_converged else None
+    if fragment_data is not None:
+        expected_version = 2 if "boundary_twist" in controls else 1
+        if (fragment_data["artifact_version"] != expected_version
+                or fragment_data["state"] != state["label"]
+                or fragment_data["fragment"] != active_label
+                or (expected_version == 2 and fragment_data["boundary_twist"] != controls["boundary_twist"])):
+            raise WorkflowError(f"fragment SCF output does not match its requested state/boundary: {fragment_path}")
     return {
         "label": active_label,
         "density_path": density_path.resolve(),
         "density_data": density_data,
         "fragment_path": fragment_path.resolve() if inner_converged else None,
-        "fragment": read_fragment(fragment_path) if inner_converged else None,
+        "fragment": fragment_data,
         "metrics": metrics,
     }
 
@@ -2028,8 +2125,12 @@ def read_postprocess_result(path: Path,
     try:
         lines = [line.split() for line in path.read_text(encoding="utf-8").splitlines()
                  if line.split()]
-        if not lines or lines[0] != ["FDE_DIABATIC_RESULT", "1"] or lines[-1] != ["END"]:
+        if (not lines or lines[0] not in (["FDE_DIABATIC_RESULT", "1"],
+                                         ["FDE_DIABATIC_RESULT", "2"])
+                or lines[-1] != ["END"]):
             raise WorkflowError(f"incomplete FDE postprocess result: {path}")
+        version = int(lines[0][1])
+        complex_values = version == 2
         records: Dict[str, List[List[str]]] = {}
         for fields in lines:
             records.setdefault(fields[0], []).append(fields[1:])
@@ -2040,29 +2141,27 @@ def read_postprocess_result(path: Path,
                 raise WorkflowError(f"missing or duplicate {key} in {path}")
             return values[0]
 
-        if one("FDE_DIABATIC_RESULT") != ["1"] or one("END"):
+        if one("FDE_DIABATIC_RESULT") != [str(version)] or one("END"):
             raise WorkflowError(f"invalid FDE postprocess delimiters: {path}")
         states = one("STATES")
         count = len(state_labels)
         if int(states[0]) != count or states[1:] != list(state_labels):
             raise WorkflowError(f"FDE postprocess states do not match the workflow: {path}")
 
-        def numbers(key: str, expected: int | None) -> List[float]:
+        def numbers(key: str, expected: int | None, typed: bool = True) -> list:
             fields = one(key)
             size = int(fields[0])
-            values = [float(value) for value in fields[1:]]
+            values = [_artifact_scalar(value, complex_values and typed) for value in fields[1:]]
             if size != len(values) or (expected is not None and size != expected):
                 raise WorkflowError(f"invalid {key} size in {path}")
-            if not all(math.isfinite(value) for value in values):
-                raise WorkflowError(f"non-finite {key} in {path}")
             return values
 
-        numbers("HAMILTONIAN_RY", count * count)
-        numbers("OVERLAP", count * count)
-        roots = numbers("ADIABATIC_ENERGIES_RY", None)
-        if not 1 <= len(roots) <= count:
+        hamiltonian = numbers("HAMILTONIAN_RY", count * count)
+        overlap = numbers("OVERLAP", count * count)
+        roots = numbers("ADIABATIC_ENERGIES_RY", None, False)
+        if not 1 <= len(roots) <= count or (complex_values and (count != 2 or len(roots) != 2)):
             raise WorkflowError(f"invalid retained root count in {path}")
-        numbers("COEFFICIENTS", count * len(roots))
+        coefficients = numbers("COEFFICIENTS", count * len(roots))
         residual = one("MAXIMUM_RESIDUAL")
         if len(residual) != 1 or not math.isfinite(float(residual[0])) or float(residual[0]) < 0.0:
             raise WorkflowError(f"invalid maximum residual in {path}")
@@ -2070,19 +2169,24 @@ def read_postprocess_result(path: Path,
                           for second in range(first + 1, count)}
         pairs = []
         for fields in records.get("PAIR", []):
-            if len(fields) not in (5, 9):
+            if len(fields) not in (5, 9) or (complex_values and len(fields) != 9):
                 raise WorkflowError("FDE PAIR record must contain 5 legacy or 9 audited fields")
             indices = (int(fields[0]), int(fields[1]))
             if indices not in expected_pairs:
                 raise WorkflowError(f"unexpected or duplicate state pair in {path}")
             expected_pairs.remove(indices)
-            values = [float(value) for value in fields[2:]]
-            if not all(math.isfinite(value) for value in values):
-                raise WorkflowError(f"non-finite PAIR in {path}")
+            values = [_artifact_scalar(value, complex_values and index < 3)
+                      for index, value in enumerate(fields[2:])]
             names = ("overlap", "h12_ry", "orthogonalized_coupling_ry",
                      "overlap_reciprocity_error", "maximum_transition_density_trace_error",
                      "transition_energy_asymmetry_ry", "estimated_coupling_uncertainty_ry")
-            pair = dict(zip(names, values))
+            pair = dict(zip(names, [_json_scalar(value) for value in values]))
+            if complex_values:
+                matrix_index = indices[0] * count + indices[1]
+                if values[0] != overlap[matrix_index] or values[1] != hamiltonian[matrix_index]:
+                    raise WorkflowError(f"PAIR disagrees with complex H/S matrices in {path}")
+                pair.update(dict(zip(("overlap_magnitude", "h12_magnitude_ry", "coupling_magnitude_ry"),
+                                     [abs(value) for value in values[:3]])))
             pair.update({"first_state_index": indices[0], "second_state_index": indices[1]})
             pairs.append(pair)
         if expected_pairs:
@@ -2090,8 +2194,28 @@ def read_postprocess_result(path: Path,
         provider = one("COUPLING_PROVIDER") if "COUPLING_PROVIDER" in records else ["legacy_unspecified"]
         if len(provider) != 1:
             raise WorkflowError(f"invalid coupling provider in {path}")
-        return {"coupling_provider": provider[0], "pairs": pairs,
-                "adiabatic_energies_ry": roots}
+        result = {"artifact_version": version, "coupling_provider": provider[0], "pairs": pairs,
+                  "hamiltonian_ry": [_json_scalar(value) for value in hamiltonian],
+                  "overlap": [_json_scalar(value) for value in overlap],
+                  "coefficients": [_json_scalar(value) for value in coefficients],
+                  "maximum_residual": float(residual[0]), "adiabatic_energies_ry": roots}
+        if complex_values:
+            for key in ("GEOMETRY", "ORBITALS", "RESOURCES"):
+                fields = one(key)
+                if len(fields) != 1:
+                    raise WorkflowError(f"invalid complex result identity {key} in {path}")
+                result[key.lower()] = fields[0]
+            twist = [_artifact_scalar(value, False) for value in one("BOUNDARY_TWIST")]
+            if len(twist) != 3 or any(not -0.5 <= value < 0.5 for value in twist):
+                raise WorkflowError(f"invalid complex result boundary in {path}")
+            result["boundary_twist"] = twist
+            for matrix in (hamiltonian, overlap):
+                for first in range(count):
+                    for second in range(count):
+                        if abs(matrix[first * count + second]
+                               - matrix[second * count + first].conjugate()) > 1e-10:
+                            raise WorkflowError(f"non-Hermitian complex result matrix in {path}")
+        return result
     except (OSError, ValueError, IndexError) as error:
         raise WorkflowError(f"invalid FDE postprocess result {path}: {error}") from error
 
@@ -2107,15 +2231,35 @@ def write_postprocess_inputs(spec: Mapping[str, object],
             raise WorkflowError(
                 "diabatic postprocessing requires converged artifacts for every fragment")
     first_fragment = read_fragment(Path(next(iter(results[0]["fragments"].values()))))
+    controls = dict(spec.get("controls", {}))
+    version = 2 if "boundary_twist" in controls else 1
+    if (first_fragment["artifact_version"] != version
+            or (version == 2 and first_fragment["boundary_twist"] != controls["boundary_twist"])):
+        raise WorkflowError("final fragment boundary does not match the workflow")
+    for result in results:
+        for label, path in result["fragments"].items():
+            fragment = read_fragment(Path(path))
+            if fragment["state"] != result["state"] or fragment["fragment"] != label:
+                raise WorkflowError("final fragment state/role does not match the workflow")
+            _matching_fragment_context(first_fragment, fragment)
     overlap = list(first_fragment["ao_overlap"])
     dimension = int(first_fragment["ao_dimension"])
     overlap_path = output_directory / "ao_overlap.fde_matrix"
-    overlap_path.write_text("FDE_AO_MATRIX 1\n" + f"DIMENSION {dimension}\nVALUES {len(overlap)} "
-                            + " ".join(format(value, ".17g") for value in overlap)
+    boundary_lines = []
+    if version == 2:
+        boundary_lines = ["BOUNDARY_TWIST " + " ".join(_scalar_text(value) for value in controls["boundary_twist"]),
+                          f"RESOURCES {first_fragment['resources']}"]
+    matrix_header = [f"FDE_AO_MATRIX {version}"]
+    if version == 2:
+        matrix_header.extend([f"GEOMETRY {first_fragment['geometry']}",
+                              f"ORBITALS {first_fragment['orbital_basis']}"] + boundary_lines)
+    overlap_path.write_text("\n".join(matrix_header) + f"\nDIMENSION {dimension}\nVALUES {len(overlap)} "
+                            + " ".join(_scalar_text(value) for value in overlap)
                             + "\nEND\n", encoding="utf-8")
     fragments = list(spec["fragments"])
-    controls = dict(spec.get("controls", {}))
     lines = ["FDE_CONFIG 1", f"ATOM_COUNT {sum(len(f['atom_indices']) for f in fragments)}"]
+    if boundary_lines:
+        lines.append(boundary_lines[0])
     for fragment in fragments:
         lines.append(f"FRAGMENT {fragment['label']} {fragment['neutral_valence_electrons']} "
                      f"{len(fragment['atom_indices'])} "
@@ -2162,6 +2306,25 @@ def write_postprocess_inputs(spec: Mapping[str, object],
     path = output_directory / "FDE_POSTPROCESS_CONFIG"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _validate_postprocess_context(spec: Mapping[str, object],
+                                  results: Sequence[Mapping[str, object]],
+                                  output: Mapping[str, object]) -> None:
+    controls = spec.get("controls", {})
+    version = 2 if "boundary_twist" in controls else 1
+    if output["artifact_version"] != version:
+        raise WorkflowError("postprocess result scalar type does not match the workflow")
+    if version == 2:
+        fragment = read_fragment(Path(next(iter(results[0]["fragments"].values()))))
+        for key, reference in (("boundary_twist", controls["boundary_twist"]),
+                               ("geometry", fragment["geometry"]),
+                               ("orbitals", fragment["orbital_basis"]),
+                               ("resources", fragment["resources"])):
+            if output.get(key) != reference:
+                raise WorkflowError(f"postprocess result has incompatible {key}")
+    if output["maximum_residual"] > float(controls.get("residual_tolerance", 1e-8)):
+        raise WorkflowError("postprocess result exceeds the configured residual tolerance")
 
 
 def run_workflow(spec_path: Path) -> None:
@@ -2226,10 +2389,12 @@ def _run_workflow(spec: Mapping[str, object], root: Path) -> None:
             if not all(path.is_file() for path in pending):
                 raise WorkflowError(f"FDE postprocess did not produce both result files; see {log_path}")
             postprocess_result = read_postprocess_result(pending[0], state_labels)
+            _validate_postprocess_context(spec, results, postprocess_result)
             pending[0].replace(result_path)
             pending[1].replace(postprocess_directory / "fde_diabatic.fde_diabatic.tsv")
         elif result_path.is_file():
             postprocess_result = read_postprocess_result(result_path, state_labels)
+            _validate_postprocess_context(spec, results, postprocess_result)
         row: Dict[str, object] = {
             "geometry": geometry["label"],
             "coordinate_angstrom": geometry.get("coordinate_angstrom"),
@@ -2245,6 +2410,7 @@ def _run_workflow(spec: Mapping[str, object], root: Path) -> None:
     except (ValueError, TypeError) as error:
         raise WorkflowError(f"PES contains a non-finite or unsupported JSON value: {error}") from error
     _atomic_text(root / "fde_pes.json", pes_json + "\n")
+    complex_values = "boundary_twist" in spec.get("controls", {})
     table_lines = ["geometry\tcoordinate_angstrom\t" + "\t".join(
         f"{label}_energy_ry" for label in state_labels)
         + "\toverlap\th12_ry\torthogonalized_coupling_ry"
@@ -2252,12 +2418,15 @@ def _run_workflow(spec: Mapping[str, object], root: Path) -> None:
         + "\tmaximum_transition_density_trace_error"
         + "\ttransition_energy_asymmetry_ry"
         + "\testimated_coupling_uncertainty_ry"]
+    if complex_values:
+        table_lines[0] += "\toverlap_magnitude\th12_magnitude_ry\tcoupling_magnitude_ry"
     for row in pes_rows:
         pair = row.get("pairs", [{}])[0] if row.get("pairs") else {}
         coordinate = row.get("coordinate_angstrom")
         fields = [str(row["geometry"]), "" if coordinate is None else format(float(coordinate), ".17g")]
         fields.extend(format(float(row["states"][label]), ".17g") for label in state_labels)
-        fields.extend("" if key not in pair else format(float(pair[key]), ".17g")
+        fields.extend("" if key not in pair else _scalar_text(
+                          complex(*pair[key]) if complex_values else pair[key])
                       for key in ("overlap", "h12_ry", "orthogonalized_coupling_ry"))
         fields.append(str(row.get("coupling_provider", "")))
         fields.extend(
@@ -2266,6 +2435,9 @@ def _run_workflow(spec: Mapping[str, object], root: Path) -> None:
                         "maximum_transition_density_trace_error",
                         "transition_energy_asymmetry_ry",
                         "estimated_coupling_uncertainty_ry"))
+        if complex_values:
+            fields.extend("" if key not in pair else format(pair[key], ".17g")
+                          for key in ("overlap_magnitude", "h12_magnitude_ry", "coupling_magnitude_ry"))
         table_lines.append("\t".join(fields))
     (root / "fde_pes.tsv").write_text("\n".join(table_lines) + "\n", encoding="utf-8")
     write_workflow_performance(root)

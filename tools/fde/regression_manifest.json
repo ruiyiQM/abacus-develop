@@ -37,6 +37,7 @@
     "tools/fde/run_regression.py",
     "tools/fde/test_run_regression.py",
     "tools/fde/test_native_workflow.py",
+    "tools/fde/test_fde_workflow_complex.py",
     "tools/fde/compare_scientific_runs.py",
     "tools/fde/compare_band_folding.py",
     "tools/fde/euler/submit_fde_mpi_scaling.sh",
