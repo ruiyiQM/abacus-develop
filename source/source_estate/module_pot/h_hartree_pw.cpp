@@ -18,6 +18,15 @@ ModuleBase::matrix H_Hartree_pw::v_hartree(const UnitCell &cell,
                                            const int &nspin,
                                            const double *const *const rho)
 {
+    return v_hartree(cell, rho_basis, nspin, rho, hartree_energy);
+}
+
+ModuleBase::matrix H_Hartree_pw::v_hartree(const UnitCell& cell,
+                                         ModulePW::PW_Basis* rho_basis,
+                                         const int& nspin,
+                                         const double* const* const rho,
+                                         double& energy_ry)
+{
     ModuleBase::TITLE("H_Hartree_pw", "v_hartree");
     ModuleBase::timer::start("H_Hartree_pw", "v_hartree");
 
@@ -63,7 +72,7 @@ ModuleBase::matrix H_Hartree_pw::v_hartree(const UnitCell &cell,
     Parallel_Reduce::reduce_pool(ehart);
     ehart *= 0.5 * cell.omega;
     // std::cout << " ehart=" << ehart << std::endl;
-    H_Hartree_pw::hartree_energy = ehart;
+    energy_ry = ehart;
 
     //==========================================
     // transform hartree potential to real space

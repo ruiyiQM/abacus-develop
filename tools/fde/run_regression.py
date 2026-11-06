@@ -313,6 +313,8 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
         "MODULE_FDE_session_json": ["ENABLE_LIBXC", "ENABLE_JSON"],
         "MODULE_FDE_session_json_2rank": ["ENABLE_LIBXC", "ENABLE_JSON", "ENABLE_MPI"],
     }
+    for ranks in (1, 2, 4):
+        conditional[f"MODULE_FDE_hartree_pw_{ranks}rank"] = ["ENABLE_MPI"]
     for case in ("molecule_uks", "molecule_rks", "periodic_gamma_uks",
                  "periodic_pair_twist_rks",
                  "periodic_hole_gamma_uks", "periodic_hole_twist_uks"):

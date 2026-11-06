@@ -241,6 +241,28 @@ set_tests_properties(MODULE_FDE_band_folding PROPERTIES
 )
 
 if(ENABLE_MPI)
+  add_executable(MODULE_FDE_hartree_pw_mpi
+    test_h_hartree_pw.cpp
+    ../coupling/fde_transition_energy_components.cpp
+    ../../../source_estate/module_pot/h_hartree_pw.cpp
+    ../../../source_hamilt/module_hcontainer/test/tmp_mocks.cpp
+  )
+  target_link_libraries(MODULE_FDE_hartree_pw_mpi PRIVATE
+    MPI::MPI_CXX GTest::gtest_main GTest::gmock_main
+    planewave device base parameter abacus::linalg_libs
+  )
+  install(TARGETS MODULE_FDE_hartree_pw_mpi DESTINATION ${CMAKE_BINARY_DIR}/tests)
+  foreach(ranks IN ITEMS 1 2 4)
+    add_test(
+      NAME MODULE_FDE_hartree_pw_${ranks}rank
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${ranks}
+        ${MPIEXEC_PREFLAGS} $<TARGET_FILE:MODULE_FDE_hartree_pw_mpi> ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(MODULE_FDE_hartree_pw_${ranks}rank PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+      PROCESSORS ${ranks} TIMEOUT 60
+    )
+  endforeach()
   add_executable(MODULE_FDE_pw_pool_collectives_mpi
     fde_pw_pool_collectives_mpi_test.cpp
     ../embedding/fde_grid_partition.cpp

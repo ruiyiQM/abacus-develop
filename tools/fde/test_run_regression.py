@@ -87,6 +87,7 @@ class DurableRegressionTest(unittest.TestCase):
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_output_failure_4rank"])
             for ranks in (1, 2, 4):
                 self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_FDE_runtime_cli_{ranks}rank"])
+                self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_FDE_hartree_pw_{ranks}rank"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_hole_twist_uks_mpi_consistency"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_pair_twist_rks_mpi_consistency"])
             self.assertFalse(result["passed"])
@@ -95,6 +96,11 @@ class DurableRegressionTest(unittest.TestCase):
             self.assertIn("MODULE_FDE_native_workflow_periodic_hole_twist_uks", result["missing_tests"])
             self.assertIn("MODULE_FDE_native_workflow_periodic_pair_twist_rks", result["missing_tests"])
             self.assertIn("MODULE_FDE_native_workflow_periodic_hole_boundary_consistency", result["missing_tests"])
+            (root / "CMakeCache.txt").write_text("ENABLE_MPI:BOOL=ON\n")
+            mpi_result = regression.run_native_ctest(root)
+            self.assertFalse(mpi_result["passed"])
+            for ranks in (1, 2, 4):
+                self.assertIn(f"MODULE_FDE_hartree_pw_{ranks}rank", mpi_result["missing_tests"])
 
     def test_ctest_preserves_native_workflow_metrics_and_rejects_missing_reports(self):
         if shutil.which("ctest") is None:

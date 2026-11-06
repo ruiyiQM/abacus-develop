@@ -24,6 +24,13 @@ class H_Hartree_pw
                                         const int &nspin,
                                         const double *const *const rho);
 
+    /** Explicit energy output; leaves the legacy static energy cache unchanged. */
+    static ModuleBase::matrix v_hartree(const UnitCell& cell,
+                                       ModulePW::PW_Basis* rho_basis,
+                                       const int& nspin,
+                                       const double* const* const rho,
+                                       double& energy_ry);
+
     static int get_Z(std::string str);
 
     static void cast_C2R(std::complex<double> *src, double *dst, int dim);
