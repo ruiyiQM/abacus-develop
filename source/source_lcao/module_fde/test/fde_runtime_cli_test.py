@@ -3,6 +3,7 @@
 from pathlib import Path
 import hashlib
 import json
+import signal
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,8 @@ def check_complex_postprocess(executable, launcher, directory, input_rejections)
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools/fde"))
     from fde_workflow import read_postprocess_result
 
+    # srun reports 128 + SIGKILL when MPI_Abort terminates waiting ranks.
+    failure_exit_codes = (1, 128 + signal.SIGKILL) if launcher else (1,)
     reports = []
     for failure in (None, "result", "table"):
         root = directory / (failure or "success")
@@ -62,9 +65,10 @@ def check_complex_postprocess(executable, launcher, directory, input_rejections)
                                                 "D.linear", "A.linear")}}
         if failure:
             expected = f"Cannot create FDE diabatic {failure}:"
-            assert completed.returncode == 1 and expected in completed.stdout, completed.stdout
+            assert completed.returncode in failure_exit_codes and expected in completed.stdout, completed.stdout
             # Nonroot cout is disabled: completion of the whole launcher checks failure propagation.
             report["failure_deadline_seconds"] = 20
+            report["allowed_launcher_exit_codes"] = list(failure_exit_codes)
             assert "FDE diabatic postprocess completed" not in completed.stdout, completed.stdout
         else:
             assert completed.returncode == 0, completed.stdout
@@ -97,6 +101,7 @@ def check_complex_postprocess(executable, launcher, directory, input_rejections)
 def main():
     executable = Path(sys.argv[1]).resolve()
     launcher = sys.argv[2:]
+    failure_exit_codes = (1, 128 + signal.SIGKILL) if launcher else (1,)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         input_rejections = []
@@ -116,10 +121,11 @@ def main():
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             expected = ("native FDE forces and stress are not supported"
                         if force or stress else "CALCULATE_FORCE must be false")
-            if result.returncode != 1 or expected not in result.stdout:
+            if result.returncode not in failure_exit_codes or expected not in result.stdout:
                 raise AssertionError(f"exit={result.returncode}; expected {expected}\n{result.stdout}")
             input_rejections.append({"cal_force": force, "cal_stress": stress,
                                      "exit_code": result.returncode, "deadline_seconds": 20,
+                                     "allowed_launcher_exit_codes": list(failure_exit_codes),
                                      "input_sha256": hashlib.sha256((root / "INPUT").read_bytes()).hexdigest()})
         check_complex_postprocess(executable, launcher, root, input_rejections)
 

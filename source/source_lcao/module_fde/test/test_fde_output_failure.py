@@ -3,6 +3,7 @@
 from pathlib import Path
 import json
 import math
+import signal
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,8 @@ def main():
     executable = Path(sys.argv[1]).resolve()
     resources = Path(sys.argv[2]).resolve() / "tests/PP_ORB"
     launcher = sys.argv[3:]
+    # srun reports 128 + SIGKILL when MPI_Abort terminates waiting ranks.
+    failure_exit_codes = (1, 128 + signal.SIGKILL) if launcher else (1,)
     solver = "scalapack_gvx" if launcher else "lapack"
     with tempfile.TemporaryDirectory(prefix="fde-output-failure-") as directory:
         for gamma, failure in ((1, "density"), (0, "density"),
@@ -125,7 +128,7 @@ def main():
                 warning = (output / "warning.log").read_text(encoding="utf-8")
                 assert "File I/O failure" in warning and str(path.relative_to(root)) in warning, warning
             else:
-                assert result.returncode == 1, result.stdout
+                assert result.returncode in failure_exit_codes, result.stdout
                 assert "FDE_SESSION_ERROR failure " in result.stdout, result.stdout
                 assert diagnostic in result.stdout, result.stdout
                 assert "FDE_SESSION_DONE failure " not in result.stdout, result.stdout

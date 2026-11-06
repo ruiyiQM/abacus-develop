@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -24,15 +25,20 @@ def main():
             started = time.monotonic()
             result = subprocess.run(command, cwd=directory, text=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
-            expected = 0 if mode == "guards" else 1
-            assert result.returncode == expected, (mode, result.returncode, result.stdout)
+            # srun reports 128 + SIGKILL when MPI_Abort terminates waiting ranks.
+            expected = (0,) if mode == "guards" else (1, 128 + signal.SIGKILL)
+            assert result.returncode in expected, (mode, result.returncode, result.stdout)
             if mode == "guards":
                 assert result.stdout.count("ABACUS_MPI_GUARDS_OK") == ranks, result.stdout
             else:
                 failing_rank = ranks - 1 if mode == "warning_last" else 0
                 marker = f"ABACUS_FATAL_PROBE rank={failing_rank} mode={mode}"
                 assert marker in result.stdout, result.stdout
+                if mode != "quit_root":
+                    cause = "rank-local checked failure" if mode == "check_root" else "rank-local failure"
+                    assert "fatal probe: " + cause in result.stdout, result.stdout
             records.append({"mode": mode, "exit_code": result.returncode,
+                            "allowed_launcher_exit_codes": list(expected),
                             "elapsed_seconds": time.monotonic() - started,
                             "deadline_seconds": 15, "command": command})
     print(json.dumps({"passed": True, "ranks": ranks, "records": records,
