@@ -518,7 +518,7 @@ foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2ran
     session_json session_json_2rank)
   if(TEST MODULE_FDE_${test})
     set_property(TEST MODULE_FDE_${test} PROPERTY LABELS "fde;native_runtime")
-    if(test MATCHES "_2rank$")
+    if(test MATCHES "_[24]rank$")
       set_property(TEST MODULE_FDE_${test} APPEND PROPERTY LABELS mpi)
     endif()
   endif()
