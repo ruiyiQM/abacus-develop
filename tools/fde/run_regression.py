@@ -303,6 +303,9 @@ def run_native_ctest(build_directory: Path) -> Dict[str, object]:
                 if line.startswith(key + ":BOOL="):
                     features[key] = line.split("=", 1)[1]
     conditional = {
+        "MODULE_FDE_runtime_cli_1rank": ["ENABLE_MPI"],
+        "MODULE_FDE_runtime_cli_2rank": ["ENABLE_MPI"],
+        "MODULE_FDE_runtime_cli_4rank": ["ENABLE_MPI"],
         "MODULE_FDE_cell_volume": ["ENABLE_LIBXC"],
         "MODULE_FDE_output_failure": ["ENABLE_LIBXC"],
         "MODULE_FDE_output_failure_2rank": ["ENABLE_LIBXC", "ENABLE_MPI"],

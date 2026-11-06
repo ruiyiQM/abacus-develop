@@ -84,6 +84,8 @@ class DurableRegressionTest(unittest.TestCase):
             self.assertIn("ENABLE_JSON=OFF", unavailable["MODULE_FDE_session_json"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_session_json_2rank"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_output_failure_4rank"])
+            for ranks in (1, 2, 4):
+                self.assertIn("ENABLE_MPI=OFF", unavailable[f"MODULE_FDE_runtime_cli_{ranks}rank"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_hole_twist_uks_mpi_consistency"])
             self.assertIn("ENABLE_MPI=OFF", unavailable["MODULE_FDE_native_workflow_periodic_pair_twist_rks_mpi_consistency"])
             self.assertFalse(result["passed"])

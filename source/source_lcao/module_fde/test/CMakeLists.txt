@@ -122,8 +122,22 @@ add_test(
 )
 set_tests_properties(MODULE_FDE_runtime_cli PROPERTIES
   ENVIRONMENT "OMP_NUM_THREADS=1"
-  TIMEOUT 30
+  TIMEOUT 120
 )
+if(ENABLE_MPI)
+  foreach(ranks IN ITEMS 1 2 4)
+    add_test(
+      NAME MODULE_FDE_runtime_cli_${ranks}rank
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fde_runtime_cli_test.py
+        $<TARGET_FILE:${ABACUS_BIN_NAME}>
+        ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${ranks}
+        ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(MODULE_FDE_runtime_cli_${ranks}rank PROPERTIES
+      TIMEOUT 150 PROCESSORS ${ranks})
+  endforeach()
+endif()
 
 if(ENABLE_LIBXC)
   add_test(
@@ -515,11 +529,12 @@ foreach(test IN LISTS fde_tests)
     set_tests_properties(${test} PROPERTIES PROCESSORS 1)
   endif()
 endforeach()
-foreach(test IN ITEMS runtime_cli cell_volume output_failure output_failure_2rank output_failure_4rank
+foreach(test IN ITEMS runtime_cli runtime_cli_1rank runtime_cli_2rank runtime_cli_4rank
+    cell_volume output_failure output_failure_2rank output_failure_4rank
     session_json session_json_2rank)
   if(TEST MODULE_FDE_${test})
     set_property(TEST MODULE_FDE_${test} PROPERTY LABELS "fde;native_runtime")
-    if(test MATCHES "_[24]rank$")
+    if(test MATCHES "_[124]rank$")
       set_property(TEST MODULE_FDE_${test} APPEND PROPERTY LABELS mpi)
     endif()
   endif()

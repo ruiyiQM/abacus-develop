@@ -33,6 +33,7 @@
     "source/source_lcao/module_fde/DEVELOPMENT_STATUS.md",
     "source/source_lcao/module_fde/README.md",
     "source/source_lcao/module_fde/test/CMakeLists.txt",
+    "source/source_lcao/module_fde/test/fde_runtime_cli_test.py",
     "source/source_lcao/module_fde/test/test_fde_native_workflow.py",
     "tools/fde/run_regression.py",
     "tools/fde/test_run_regression.py",
