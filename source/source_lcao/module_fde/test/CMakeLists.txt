@@ -473,6 +473,7 @@ if(ENABLE_LIBXC)
   math(EXPR fde_native_timeout "${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS} + 60")
   math(EXPR fde_native_mpi_timeout "3 * (${FDE_NATIVE_WORKFLOW_TIMEOUT_SECONDS} + 20)")
   foreach(case IN ITEMS molecule_uks molecule_rks periodic_gamma_uks
+      periodic_pair_twist_rks
       periodic_hole_gamma_uks periodic_hole_twist_uks periodic_hole_boundary_consistency)
     add_test(
       NAME MODULE_FDE_native_workflow_${case}

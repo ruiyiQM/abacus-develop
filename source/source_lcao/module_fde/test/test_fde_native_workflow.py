@@ -13,6 +13,7 @@ import tempfile
 
 
 CASES = ("molecule_uks", "molecule_rks", "periodic_gamma_uks",
+         "periodic_pair_twist_rks",
          "periodic_hole_gamma_uks", "periodic_hole_complex_gamma_uks",
          "periodic_hole_twist_uks", "periodic_hole_minus_twist_uks",
          "periodic_hole_large_cell_uks", "periodic_hole_boundary_consistency")
@@ -51,7 +52,7 @@ def run_bounded(command, timeout):
 
 
 def prepare_case(root, repository, executable, case, launcher):
-    rks = case == "molecule_rks"
+    rks = case.endswith("_rks")
     hole = case.startswith("periodic_hole")
     periodic = case.startswith("periodic")
     cell = 10 if case == "periodic_hole_large_cell_uks" else (8 if periodic else 24)
@@ -119,7 +120,7 @@ def prepare_case(root, repository, executable, case, launcher):
                         "template_directory": str(template), "initial_densities": seeds}],
     }
     if case in ("periodic_hole_complex_gamma_uks", "periodic_hole_twist_uks",
-                "periodic_hole_minus_twist_uks"):
+                "periodic_hole_minus_twist_uks", "periodic_pair_twist_rks"):
         sign = -1 if case == "periodic_hole_minus_twist_uks" else 1
         spec["controls"]["boundary_twist"] = ([0, 0, 0] if "complex_gamma" in case
                                                 else [sign * 0.17, sign * 0.11, 0])
@@ -328,6 +329,10 @@ def main():
                 "Replicas are the environment; no independent third host. A single common twist changes finite "
                 "boundary conditions, not the number of transferred particles. Charged-cell/images remain finite-size effects."
                 if "hole" in args.case else "legacy charged-pair developer fixture")
+            if spec["controls"]["spin_mode"] == "rks":
+                report["boundary_interpretation"] = (
+                    "Closed-shell pair redistribution between H2 fragments, N=6, (Nalpha,Nbeta)=(3,3). "
+                    "This RKS developer regression does not represent a single-electron or single-hole transfer.")
             command = [sys.executable, str(repository / "tools/fde/fde_workflow.py"), "run", str(path)]
             report["command"] = command
             run = run_bounded(command, args.workflow_timeout)
@@ -358,7 +363,7 @@ def main():
                     assert all(abs(a - b) <= 1e-8 for a, b in zip(integral, expected)), (label, integral, expected)
                     final_densities[state["label"]][label] = density
                     fragment = read_fragment(Path(checkpoint["fragments"][label]))
-                    if args.case == "molecule_rks":
+                    if spec["controls"]["spin_mode"] == "rks":
                         assert density["alpha"] == density["beta"]
                         assert fragment["alpha"] == fragment["beta"]
                     record["occupied"][label] = {spin: [[json_scalar(c) for c in orb["coefficients"]]
@@ -386,6 +391,9 @@ def main():
             result_path = work / "postprocess/fde_diabatic.fde_diabatic"
             result = read_postprocess_result(result_path, [state["label"] for state in spec["states"]])
             report["coupling"] = result
+            if "boundary_twist" in spec["controls"]:
+                assert result["artifact_version"] == 2
+                assert result["boundary_twist"] == spec["controls"]["boundary_twist"]
             assert len(result["pairs"]) == 1 and len(result["adiabatic_energies_ry"]) == 2
             pair = result["pairs"][0]
             assert pair["overlap_reciprocity_error"] <= 1e-8, pair

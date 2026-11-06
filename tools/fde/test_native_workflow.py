@@ -35,6 +35,20 @@ def reports():
 
 
 class NativeWorkflowComparisonTest(unittest.TestCase):
+    def test_non_gamma_rks_fixture_transfers_a_closed_shell_pair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spec, resources = native.prepare_case(
+                Path(directory), PATH.parents[4], Path("/unused"),
+                "periodic_pair_twist_rks", [])
+            self.assertEqual(spec["controls"]["spin_mode"], "rks")
+            self.assertEqual(spec["controls"]["boundary_twist"], [0.17, 0.11, 0])
+            self.assertEqual(len(resources), 2)
+            for state in spec["states"]:
+                self.assertEqual(state["total_charge"], -2)
+                self.assertEqual(state["total_spin"], 0)
+                self.assertEqual(sorted(fragment["charge"] for fragment in state["fragments"].values()), [-2, 0])
+                self.assertTrue(all(fragment["spin"] == 0 for fragment in state["fragments"].values()))
+
     def test_rejects_nonfinite_or_nonpositive_workflow_wall_budget(self):
         for value in ("0", "-1", "nan", "inf"):
             run = subprocess.run([sys.executable, str(PATH), "/unused", "/unused", "--case", "molecule_rks",
