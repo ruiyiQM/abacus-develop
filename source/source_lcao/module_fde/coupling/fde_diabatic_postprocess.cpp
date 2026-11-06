@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace fde
 {
@@ -128,6 +129,82 @@ std::vector<std::string> all_fragment_labels(const FdeRuntimeConfig& config)
     return labels;
 }
 
+template <typename Scalar>
+std::vector<double> validate_state_inputs(
+    const FdeRuntimeConfig& config,
+    const std::vector<ScalarDiabaticDeterminantArtifact<Scalar>>& determinants,
+    const std::vector<ScalarLinearizedStateArtifact<Scalar>>& linearized_states)
+{
+    FdeRuntimeConfigIO::validate(config);
+    const bool complex_scalar = !std::is_same<Scalar, double>::value;
+    const bool finite_boundary = !config.boundary_twist.empty();
+    if (complex_scalar != finite_boundary)
+    {
+        throw std::invalid_argument("FDE postprocess scalar artifacts do not match the declared boundary contract");
+    }
+    if (determinants.size() != config.states.size()
+        || linearized_states.size() != config.states.size())
+    {
+        throw std::invalid_argument("FDE postprocess requires determinant and linearized data for every state");
+    }
+    std::vector<double> energies;
+    for (std::size_t index = 0; index < config.states.size(); ++index)
+    {
+        const RuntimeStateDefinition& requested = config.states[index];
+        const auto& determinant = determinants[index];
+        const std::string& label = requested.state.label;
+        if (determinant.state_label != label || linearized_states[index].state_label != label)
+        {
+            throw std::invalid_argument("FDE postprocess artifact ordering does not match state definitions");
+        }
+        if (determinant.boundary_twist != config.boundary_twist
+            || linearized_states[index].boundary_twist != config.boundary_twist)
+        {
+            throw std::invalid_argument("FDE postprocess artifact boundary differs from the runtime state");
+        }
+        const double energy = diagonal_energy(config, label);
+        const double difference = linearized_states[index].reference_energy_ry - energy;
+        const double error = std::abs(difference);
+        if (error > config.energy_tolerance_ry)
+        {
+            throw std::invalid_argument("FDE linearized reference and diagonal energy disagree");
+        }
+        std::size_t expected_alpha = 0;
+        std::size_t expected_beta = 0;
+        for (const auto& assignment : requested.state.fragments)
+        {
+            const std::size_t fragment_index
+                = FdeRuntimeConfigIO::fragment_index(config, assignment.fragment_label);
+            const FragmentDefinition& fragment = config.fragments[fragment_index];
+            const SpinPopulation population = StateDefinition::spin_population(fragment, assignment);
+            const auto& alpha_labels = determinant.alpha.source_fragment_labels;
+            const auto& beta_labels = determinant.beta.source_fragment_labels;
+            const std::size_t alpha = std::count(alpha_labels.begin(), alpha_labels.end(), fragment.label);
+            const std::size_t beta = std::count(beta_labels.begin(), beta_labels.end(), fragment.label);
+            if (alpha != static_cast<std::size_t>(population.alpha)
+                || beta != static_cast<std::size_t>(population.beta))
+            {
+                throw std::invalid_argument("FDE determinant spin populations disagree with state "
+                                            + label + " fragment " + fragment.label);
+            }
+            expected_alpha += static_cast<std::size_t>(population.alpha);
+            expected_beta += static_cast<std::size_t>(population.beta);
+        }
+        const std::size_t alpha_count = ScalarDeterminantArtifactIO<Scalar>::occupied_count(
+            determinant.alpha, determinant.ao_dimension);
+        const std::size_t beta_count = ScalarDeterminantArtifactIO<Scalar>::occupied_count(
+            determinant.beta, determinant.ao_dimension);
+        if (alpha_count != expected_alpha || beta_count != expected_beta
+            || determinant.alpha.source_fragment_labels.size() != alpha_count
+            || determinant.beta.source_fragment_labels.size() != beta_count)
+        {
+            throw std::invalid_argument("FDE determinant explicit-electron sector disagrees with state " + label);
+        }
+        energies.push_back(energy);
+    }
+    return energies;
+}
+
 void write_result(const std::string& prefix,
                   const DiabaticPostprocessResult& result)
 {
@@ -238,29 +315,8 @@ DiabaticPostprocessResult DiabaticPostprocessor::evaluate(
     const std::vector<LinearizedStateArtifact>& linearized_states,
     const std::vector<double>& ao_overlap)
 {
-    FdeRuntimeConfigIO::validate(config);
-    if (determinants.size() != config.states.size()
-        || linearized_states.size() != config.states.size())
-    {
-        throw std::invalid_argument("FDE postprocess requires determinant and linearized data for every state");
-    }
-    std::vector<double> diagonal_energies;
-    for (std::size_t index = 0; index < config.states.size(); ++index)
-    {
-        const std::string& label = config.states[index].state.label;
-        if (determinants[index].state_label != label
-            || linearized_states[index].state_label != label)
-        {
-            throw std::invalid_argument("FDE postprocess artifact ordering does not match state definitions");
-        }
-        const double energy = diagonal_energy(config, label);
-        if (std::fabs(linearized_states[index].reference_energy_ry - energy)
-            > config.energy_tolerance_ry)
-        {
-            throw std::invalid_argument("FDE linearized reference and diagonal energy disagree");
-        }
-        diagonal_energies.push_back(energy);
-    }
+    const std::vector<double> diagonal_energies
+        = validate_state_inputs(config, determinants, linearized_states);
 
     FdeDiabApproximationSpec approximation;
     const std::vector<std::string> selected_states

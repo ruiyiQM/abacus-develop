@@ -24,10 +24,10 @@ fde::RuntimeStateDefinition runtime_state(const std::string& label,
 {
     fde::RuntimeStateDefinition result;
     result.state.label = label;
-    result.total_charge = -1;
+    result.total_charge = 0;
     result.total_spin_projection = 0;
     result.state.fragments.push_back({"F", f_charge, f_spin});
-    result.state.fragments.push_back({"CH3Cl", -1 - f_charge, -f_spin});
+    result.state.fragments.push_back({"CH3Cl", -f_charge, -f_spin});
     return result;
 }
 
@@ -35,9 +35,10 @@ fde::FdeRuntimeConfig config()
 {
     fde::FdeRuntimeConfig result;
     result.atom_count = 2;
-    result.fragments.push_back({"F", {0}, 7});
-    result.fragments.push_back({"CH3Cl", {1}, 14});
-    result.states.push_back(runtime_state("reactant", -1, 0));
+    // Two-electron algebra fixture; the historical labels are not a physical F/CH3Cl model.
+    result.fragments.push_back({"F", {0}, 1});
+    result.fragments.push_back({"CH3Cl", {1}, 1});
+    result.states.push_back(runtime_state("reactant", 0, 1));
     result.states.push_back(runtime_state("product", 0, 1));
     result.diagonal_energies.push_back({"reactant", -10.0});
     result.diagonal_energies.push_back({"product", -9.0});
@@ -108,6 +109,46 @@ TEST(FdeDiabaticPostprocess, ProducesCouplingAndNonorthogonalRoots)
     ASSERT_EQ(result.adiabatic_solution.eigenvalues_ry.size(), 2);
     EXPECT_LT(result.adiabatic_solution.eigenvalues_ry[0],
               result.adiabatic_solution.eigenvalues_ry[1]);
+}
+
+TEST(FdeDiabaticPostprocess, RejectsDeterminantsFromAnotherExplicitElectronSector)
+{
+    auto requested = config();
+    requested.fragments[0].neutral_valence_electrons += 2;
+    const std::vector<fde::DiabaticDeterminantArtifact> determinants = {
+        determinant("reactant", {1.0, 0.0}), determinant("product", {0.8, 0.6})};
+    const std::vector<fde::LinearizedStateArtifact> states = {
+        linearized("reactant", -10.0, 0.7), linearized("product", -9.0, 0.3)};
+    const std::vector<double> overlap = {1.0, 0.0, 0.0, 1.0};
+    EXPECT_THROW(fde::DiabaticPostprocessor::evaluate(requested, determinants, states, overlap),
+                 std::invalid_argument);
+}
+
+TEST(FdeDiabaticPostprocess, RejectsAnotherFragmentSpinAssignmentAtTheSameTotalPopulation)
+{
+    auto requested = config();
+    requested.states[0].state.fragments[0].spin_projection = -1;
+    requested.states[0].state.fragments[1].spin_projection = 1;
+    const std::vector<fde::DiabaticDeterminantArtifact> determinants = {
+        determinant("reactant", {1.0, 0.0}), determinant("product", {0.8, 0.6})};
+    const std::vector<fde::LinearizedStateArtifact> states = {
+        linearized("reactant", -10.0, 0.7), linearized("product", -9.0, 0.3)};
+    const std::vector<double> overlap = {1.0, 0.0, 0.0, 1.0};
+    EXPECT_THROW(fde::DiabaticPostprocessor::evaluate(requested, determinants, states, overlap),
+                 std::invalid_argument);
+}
+
+TEST(FdeDiabaticPostprocess, CannotUseGammaArtifactsForADeclaredFiniteTwist)
+{
+    auto requested = config();
+    requested.boundary_twist = {0.17, 0.11, 0.0};
+    const std::vector<fde::DiabaticDeterminantArtifact> determinants = {
+        determinant("reactant", {1.0, 0.0}), determinant("product", {0.8, 0.6})};
+    const std::vector<fde::LinearizedStateArtifact> states = {
+        linearized("reactant", -10.0, 0.7), linearized("product", -9.0, 0.3)};
+    const std::vector<double> overlap = {1.0, 0.0, 0.0, 1.0};
+    EXPECT_THROW(fde::DiabaticPostprocessor::evaluate(requested, determinants, states, overlap),
+                 std::invalid_argument);
 }
 
 #if defined(__unix__) || defined(__APPLE__)
