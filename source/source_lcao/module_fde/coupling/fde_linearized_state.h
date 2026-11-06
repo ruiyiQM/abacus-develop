@@ -39,7 +39,7 @@ class ScalarLinearizedStateArtifactIO
                                         double symmetry_tolerance);
 };
 
-/** First-order state-specific DFT energy model for a transition density. */
+/** Anchored affine approximation; native Eref/averaged H are not a proven FDE functional/gradient pair. */
 template <typename Scalar>
 class ScalarLinearizedTransitionEnergy : public ScalarTransitionEnergyProvider<Scalar>
 {

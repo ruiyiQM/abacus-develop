@@ -1333,6 +1333,7 @@ def compose_state(state_label: str,
     determinant_lines.append("END")
     _atomic_text(determinant_path, "\n".join(determinant_lines) + "\n")
     matrix_size = dimension * dimension
+    # This prescribed affine coefficient is not a proven common FDE functional gradient.
     average_alpha = [sum(fragment["hamiltonian_alpha_ry"][index] for fragment in fragments)
                      / len(fragments) for index in range(matrix_size)]
     average_beta = [sum(fragment["hamiltonian_beta_ry"][index] for fragment in fragments)
